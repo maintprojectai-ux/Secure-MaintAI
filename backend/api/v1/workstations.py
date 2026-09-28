@@ -43,9 +43,7 @@ async def list_workstations(
     search: Annotated[str | None, Query(description="Search by hostname or IP")] = None,
     department: Annotated[str | None, Query(description="Filter by department")] = None,
     lab: Annotated[str | None, Query(description="Filter by lab")] = None,
-    status: Annotated[
-        WorkstationStatus | None, Query(description="Filter by status")
-    ] = None,
+    status: Annotated[WorkstationStatus | None, Query(description="Filter by status")] = None,
 ) -> WorkstationPaginatedResponse:
     """
     List enrolled workstations with pagination and filtering.
@@ -55,9 +53,7 @@ async def list_workstations(
     count_query = select(func.count(Workstation.id))
 
     if search:
-        search_filter = (Workstation.hostname.ilike(f"%{search}%")) | (
-            Workstation.ip_address.ilike(f"%{search}%")
-        )
+        search_filter = (Workstation.hostname.ilike(f"%{search}%")) | (Workstation.ip_address.ilike(f"%{search}%"))
         query = query.where(search_filter)
         count_query = count_query.where(search_filter)
 
@@ -79,9 +75,7 @@ async def list_workstations(
 
     # Paginate
     offset = (page - 1) * page_size
-    query = (
-        query.order_by(Workstation.created_at.desc()).offset(offset).limit(page_size)
-    )
+    query = query.order_by(Workstation.created_at.desc()).offset(offset).limit(page_size)
     result = await session.execute(query)
     workstations = result.scalars().all()
 
@@ -111,9 +105,7 @@ async def get_workstation_by_id(
     """
     Get detailed information for a specific workstation.
     """
-    result = await session.execute(
-        select(Workstation).where(Workstation.id == workstation_id)
-    )
+    result = await session.execute(select(Workstation).where(Workstation.id == workstation_id))
     workstation = result.scalar_one_or_none()
 
     if workstation is None:
@@ -144,9 +136,7 @@ async def update_workstation(
     """
     audit = AuditService(session)
 
-    result = await session.execute(
-        select(Workstation).where(Workstation.id == workstation_id)
-    )
+    result = await session.execute(select(Workstation).where(Workstation.id == workstation_id))
     workstation = result.scalar_one_or_none()
 
     if workstation is None:

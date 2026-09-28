@@ -70,9 +70,7 @@ async def get_alert(
     _: Annotated[UserAccount, Depends(get_current_active_user)],
 ) -> AlertResponse:
     """Retrieve an alert by unique ID."""
-    result = await session.execute(
-        select(Alert).where(Alert.id == alert_id)
-    )
+    result = await session.execute(select(Alert).where(Alert.id == alert_id))
     alert = result.scalar_one_or_none()
     if alert is None:
         raise HTTPException(
@@ -128,9 +126,7 @@ async def acknowledge_alert(
     current_user: Annotated[UserAccount, Depends(get_current_active_user)],
 ) -> AlertResponse:
     """Mark an alert as acknowledged by a SOC operator."""
-    result = await session.execute(
-        select(Alert).where(Alert.id == alert_id)
-    )
+    result = await session.execute(select(Alert).where(Alert.id == alert_id))
     alert = result.scalar_one_or_none()
     if alert is None:
         raise HTTPException(
@@ -163,9 +159,7 @@ async def resolve_alert(
     current_user: Annotated[UserAccount, Depends(get_current_active_user)],
 ) -> AlertResponse:
     """Mark an alert as resolved."""
-    result = await session.execute(
-        select(Alert).where(Alert.id == alert_id)
-    )
+    result = await session.execute(select(Alert).where(Alert.id == alert_id))
     alert = result.scalar_one_or_none()
     if alert is None:
         raise HTTPException(

@@ -4,7 +4,7 @@ Secure-MaintAI — SOAR Automated Playbook Execution Engine.
 Per engineering rules:
 - Rule 21: قرارات آلية، محددة، قابلة للتدقيق، ومتحكم بها.
   Playbooks are deterministic, versioned, auditable, permission-controlled,
-  independently testable, and idempotent.   
+  independently testable, and idempotent.
 - Rule 19: الاحتواء الجراحي دون إعادة تشغيل نظام التشغيل المضيف. سجلات تدقيق شاملة.
   Surgical containment without rebooting the host OS. Full audit trails
   recording operator identity, reason, confidence, evidence, and rollback support.
@@ -26,7 +26,7 @@ from backend.models.incident import Incident
 from backend.models.user import UserAccount
 from backend.models.workstation import Workstation
 from backend.services.audit import AuditService
-from security.policy_engine import PolicyDecisionType, PolicyEvaluationResult
+from security.policy_engine import PolicyEvaluationResult
 
 logger = get_logger("soar_service")
 
@@ -98,16 +98,14 @@ class SOARService:
         inc = Incident(
             incident_number=inc_num,
             severity=eval_res.correlated_incident.severity,
-            category=(
-                "SECURITY_THREAT"
-                if eval_res.correlated_incident.is_threat
-                else "TECHNICAL_FAILURE"
-            ),
+            category=("SECURITY_THREAT" if eval_res.correlated_incident.is_threat else "TECHNICAL_FAILURE"),
             workstation_id=eval_res.workstation_id,
             status="OPEN",
             title=f"Alert: {eval_res.correlated_incident.incident_category}",
             description=eval_res.reason,
-            response_action=f"PLAYBOOK_01_ALERT_ONLY (Suppression: {suppression_reason})" if suppression_reason else "PLAYBOOK_01_ALERT_ONLY",
+            response_action=f"PLAYBOOK_01_ALERT_ONLY (Suppression: {suppression_reason})"
+            if suppression_reason
+            else "PLAYBOOK_01_ALERT_ONLY",
         )
         self._session.add(inc)
         await self._session.flush()
@@ -218,9 +216,7 @@ class SOARService:
         without rebooting or terminating the host OS (Rule 19).
         """
         # Update workstation status to ISOLATED
-        ws_res = await self._session.execute(
-            select(Workstation).where(Workstation.id == eval_res.workstation_id)
-        )
+        ws_res = await self._session.execute(select(Workstation).where(Workstation.id == eval_res.workstation_id))
         ws = ws_res.scalar_one_or_none()
         if ws is not None:
             ws.status = "ISOLATED"
@@ -324,9 +320,7 @@ class SOARService:
         user_id_str = eval_res.user_context.user_id
         try:
             user_uuid = UUID(user_id_str)
-            res = await self._session.execute(
-                select(UserAccount).where(UserAccount.id == user_uuid)
-            )
+            res = await self._session.execute(select(UserAccount).where(UserAccount.id == user_uuid))
             usr = res.scalar_one_or_none()
             if usr is not None:
                 usr.status = "locked"
@@ -379,9 +373,7 @@ class SOARService:
         """
         Rollback surgical isolation: restores workstation status to ONLINE and logs audit trail.
         """
-        res = await self._session.execute(
-            select(Workstation).where(Workstation.id == workstation_id)
-        )
+        res = await self._session.execute(select(Workstation).where(Workstation.id == workstation_id))
         ws = res.scalar_one_or_none()
         if ws is None:
             return False

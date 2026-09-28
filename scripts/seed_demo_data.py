@@ -192,9 +192,7 @@ async def seed_demo_data() -> None:
         print("\n--- Seeding Departments ---")
         depts_by_code: dict[str, Department] = {}
         for ddata in DEMO_DEPARTMENTS:
-            d_res = await session.execute(
-                select(Department).where(Department.code == ddata["code"])
-            )
+            d_res = await session.execute(select(Department).where(Department.code == ddata["code"]))
             dept = d_res.scalar_one_or_none()
             if not dept:
                 dept = Department(
@@ -242,8 +240,7 @@ async def seed_demo_data() -> None:
 
             user_res = await session.execute(
                 select(UserAccount).where(
-                    (UserAccount.username == udata["username"])
-                    | (UserAccount.email == udata["email"])
+                    (UserAccount.username == udata["username"]) | (UserAccount.email == udata["email"])
                 )
             )
             existing_user = user_res.scalar_one_or_none()
@@ -278,9 +275,7 @@ async def seed_demo_data() -> None:
         print("\n--- Seeding Demo Workstations ---")
         now = datetime.now(timezone.utc)
         for wdata in DEMO_WORKSTATIONS:
-            ws_res = await session.execute(
-                select(Workstation).where(Workstation.hostname == wdata["hostname"])
-            )
+            ws_res = await session.execute(select(Workstation).where(Workstation.hostname == wdata["hostname"]))
             existing_ws = ws_res.scalar_one_or_none()
 
             if existing_ws:

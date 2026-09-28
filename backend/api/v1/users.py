@@ -44,11 +44,7 @@ async def get_my_profile(
     Retrieve details and effective permissions for the currently authenticated user.
     """
     role_name = current_user.role.name if current_user.role else "STUDENT"
-    permissions = (
-        current_user.role.permissions
-        if current_user.role and current_user.role.permissions
-        else {}
-    )
+    permissions = current_user.role.permissions if current_user.role and current_user.role.permissions else {}
 
     return UserProfileResponse(
         id=current_user.id,
@@ -72,9 +68,7 @@ async def list_users(
     session: Annotated[AsyncSession, Depends(get_async_session)],
     page: Annotated[int, Query(ge=1, description="Page number")] = 1,
     page_size: Annotated[int, Query(ge=1, le=100, description="Items per page")] = 20,
-    search: Annotated[
-        str | None, Query(description="Search by username or email")
-    ] = None,
+    search: Annotated[str | None, Query(description="Search by username or email")] = None,
     role: Annotated[RoleEnum | None, Query(description="Filter by role")] = None,
 ) -> UserPaginatedResponse:
     """
@@ -85,24 +79,18 @@ async def list_users(
     count_query = select(func.count(UserAccount.id))
 
     if search:
-        search_filter = (UserAccount.username.ilike(f"%{search}%")) | (
-            UserAccount.email.ilike(f"%{search}%")
-        )
+        search_filter = (UserAccount.username.ilike(f"%{search}%")) | (UserAccount.email.ilike(f"%{search}%"))
         query = query.where(search_filter)
         count_query = count_query.where(search_filter)
 
     if role:
-        role_result = await session.execute(
-            select(UserRole.id).where(UserRole.name == role.value)
-        )
+        role_result = await session.execute(select(UserRole.id).where(UserRole.name == role.value))
         role_id = role_result.scalar_one_or_none()
         if role_id:
             query = query.where(UserAccount.role_id == role_id)
             count_query = count_query.where(UserAccount.role_id == role_id)
         else:
-            return UserPaginatedResponse(
-                items=[], total=0, page=page, page_size=page_size, total_pages=0
-            )
+            return UserPaginatedResponse(items=[], total=0, page=page, page_size=page_size, total_pages=0)
 
     # Total count
     total_result = await session.execute(count_query)
@@ -110,9 +98,7 @@ async def list_users(
 
     # Paginated results
     offset = (page - 1) * page_size
-    query = (
-        query.order_by(UserAccount.created_at.desc()).offset(offset).limit(page_size)
-    )
+    query = query.order_by(UserAccount.created_at.desc()).offset(offset).limit(page_size)
     result = await session.execute(query)
     users = result.scalars().all()
 
@@ -161,9 +147,7 @@ async def create_user_admin(
     audit = AuditService(session)
 
     # Check username uniqueness
-    existing_username = await session.execute(
-        select(UserAccount).where(UserAccount.username == user_data.username)
-    )
+    existing_username = await session.execute(select(UserAccount).where(UserAccount.username == user_data.username))
     if existing_username.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -171,9 +155,7 @@ async def create_user_admin(
         )
 
     # Check email uniqueness
-    existing_email = await session.execute(
-        select(UserAccount).where(UserAccount.email == user_data.email)
-    )
+    existing_email = await session.execute(select(UserAccount).where(UserAccount.email == user_data.email))
     if existing_email.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -181,9 +163,7 @@ async def create_user_admin(
         )
 
     # Resolve specified role
-    role_result = await session.execute(
-        select(UserRole).where(UserRole.name == user_data.role.value)
-    )
+    role_result = await session.execute(select(UserRole).where(UserRole.name == user_data.role.value))
     role = role_result.scalar_one_or_none()
     if role is None:
         raise HTTPException(
@@ -252,9 +232,7 @@ async def get_user_by_id(
         )
 
     result = await session.execute(
-        select(UserAccount)
-        .options(selectinload(UserAccount.role))
-        .where(UserAccount.id == user_id)
+        select(UserAccount).options(selectinload(UserAccount.role)).where(UserAccount.id == user_id)
     )
     target_user = result.scalar_one_or_none()
 
@@ -295,9 +273,7 @@ async def update_user(
     audit = AuditService(session)
 
     result = await session.execute(
-        select(UserAccount)
-        .options(selectinload(UserAccount.role))
-        .where(UserAccount.id == user_id)
+        select(UserAccount).options(selectinload(UserAccount.role)).where(UserAccount.id == user_id)
     )
     target_user = result.scalar_one_or_none()
 
@@ -312,9 +288,7 @@ async def update_user(
     if update_data.email and update_data.email != target_user.email:
         # Check email uniqueness
         existing_email = await session.execute(
-            select(UserAccount).where(
-                UserAccount.email == update_data.email, UserAccount.id != user_id
-            )
+            select(UserAccount).where(UserAccount.email == update_data.email, UserAccount.id != user_id)
         )
         if existing_email.scalar_one_or_none():
             raise HTTPException(
@@ -325,9 +299,7 @@ async def update_user(
         target_user.email = update_data.email
 
     if update_data.role:
-        role_result = await session.execute(
-            select(UserRole).where(UserRole.name == update_data.role.value)
-        )
+        role_result = await session.execute(select(UserRole).where(UserRole.name == update_data.role.value))
         new_role = role_result.scalar_one_or_none()
         if new_role is None:
             raise HTTPException(

@@ -100,7 +100,4 @@ class TestSettings:
             auth_jwt_secret_key="test-jwt-secret-key-minimum",
             database_url="postgresql+asyncpg://custom:pass@custom-host:5432/custom-db",
         )
-        assert (
-            settings.database_dsn
-            == "postgresql+asyncpg://custom:pass@custom-host:5432/custom-db"
-        )
+        assert settings.database_dsn == "postgresql+asyncpg://custom:pass@custom-host:5432/custom-db"

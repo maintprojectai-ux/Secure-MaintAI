@@ -115,6 +115,8 @@ ml/data/processed/
 !ml/model02b_apt_outputs/model_02b_windows_apt_random_forest.joblib
 !ml/model02b_apt_outputs/evaluation_metrics.csv
 !ml/model02b_apt_outputs/window_dataset.csv
+!ml/model02b_apt_outputs/random_forest_confusion_matrix.csv
+!ml/model02a_rcaeval_outputs/random_forest_confusion_matrix.csv
 # ---------- Docker ----------
 docker-compose.override.yml
 

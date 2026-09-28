@@ -45,9 +45,7 @@ class Alert(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=True,
         comment="User who acknowledged the alert",
     )
-    severity: Mapped[str] = mapped_column(
-        String(16), nullable=False, comment="LOW, MEDIUM, HIGH, CRITICAL"
-    )
+    severity: Mapped[str] = mapped_column(String(16), nullable=False, comment="LOW, MEDIUM, HIGH, CRITICAL")
     status: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
@@ -56,17 +54,11 @@ class Alert(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     title: Mapped[str] = mapped_column(String(256), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
-    acknowledged_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    resolved_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
-    workstation: Mapped["Workstation | None"] = relationship(
-        "Workstation", lazy="selectin"
-    )
+    workstation: Mapped["Workstation | None"] = relationship("Workstation", lazy="selectin")
     acknowledged_by_user: Mapped["UserAccount | None"] = relationship(
         "UserAccount", foreign_keys=[acknowledged_by], lazy="selectin"
     )

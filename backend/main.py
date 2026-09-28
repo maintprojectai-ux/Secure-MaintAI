@@ -41,6 +41,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Initialize ML runtime pipeline
     try:
         from backend.services import ml_pipeline_service
+
         ml_pipeline_service.initialise()
     except Exception as exc:
         logger.warning("ml_initialization_failed", error=str(exc))
@@ -89,9 +90,7 @@ def create_app() -> FastAPI:
         )
 
     @app.exception_handler(Exception)
-    async def general_exception_handler(
-        request: Request, exc: Exception
-    ) -> JSONResponse:
+    async def general_exception_handler(request: Request, exc: Exception) -> JSONResponse:
         # Never expose internal details per engineering rules Section 7
         logger.error(
             "unhandled_exception",

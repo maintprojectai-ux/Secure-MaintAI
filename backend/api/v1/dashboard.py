@@ -92,7 +92,7 @@ async def get_dashboard_kpis(
     # 1. Query workstations by status
     ws_query = select(Workstation.status, func.count(Workstation.id)).group_by(Workstation.status)
     ws_result = await session.execute(ws_query)
-    ws_counts: dict[str, int] = dict(ws_result.all())
+    ws_counts: dict[str, int] = {str(row[0]): int(row[1]) for row in ws_result.all()}
 
     total_ws = sum(ws_counts.values())
     online_ws = ws_counts.get("ONLINE", 0)
@@ -170,24 +170,26 @@ async def get_validation_metrics(
         with open(m02a_csv, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
-                m02a_models.append({
-                    "model": row["model"],
-                    "accuracy": round(float(row["accuracy"]), 4),
-                    "balanced_accuracy": round(float(row["balanced_accuracy"]), 4),
-                    "precision_macro": round(float(row["precision_macro"]), 4),
-                    "recall_macro": round(float(row["recall_macro"]), 4),
-                    "f1_macro": round(float(row["f1_macro"]), 4),
-                })
+                m02a_models.append(
+                    {
+                        "model": row["model"],
+                        "accuracy": round(float(row["accuracy"]), 4),
+                        "balanced_accuracy": round(float(row["balanced_accuracy"]), 4),
+                        "precision_macro": round(float(row["precision_macro"]), 4),
+                        "recall_macro": round(float(row["recall_macro"]), 4),
+                        "f1_macro": round(float(row["f1_macro"]), 4),
+                    }
+                )
 
     m02a_cm_csv = ML_DIR / "model02a_rcaeval_outputs" / "random_forest_confusion_matrix.csv"
     m02a_cm: list[list[int]] = []
     if m02a_cm_csv.exists():
         with open(m02a_cm_csv, "r", encoding="utf-8") as f:
-            reader = csv.reader(f)
-            next(reader, None)  # Skip header
-            for row in reader:
-                if len(row) > 1:
-                    m02a_cm.append([int(x) for x in row[1:]])
+            cm_reader = csv.reader(f)
+            next(cm_reader, None)  # Skip header
+            for cm_row in cm_reader:
+                if len(cm_row) > 1:
+                    m02a_cm.append([int(x) for x in cm_row[1:]])
 
     m02a_metrics = Model02Metrics(
         model_name="Model 02-A — Technical Failure Diagnosis",
@@ -204,26 +206,28 @@ async def get_validation_metrics(
         with open(m02b_csv, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
-                m02b_models.append({
-                    "model": row["model"],
-                    "accuracy": round(float(row["accuracy"]), 4),
-                    "balanced_accuracy": round(float(row["balanced_accuracy"]), 4),
-                    "precision": round(float(row["precision"]), 4),
-                    "recall": round(float(row["recall"]), 4),
-                    "f1": round(float(row["f1"]), 4),
-                    "roc_auc": round(float(row["roc_auc"]), 4),
-                    "average_precision": round(float(row["average_precision"]), 4),
-                })
+                m02b_models.append(
+                    {
+                        "model": row["model"],
+                        "accuracy": round(float(row["accuracy"]), 4),
+                        "balanced_accuracy": round(float(row["balanced_accuracy"]), 4),
+                        "precision": round(float(row["precision"]), 4),
+                        "recall": round(float(row["recall"]), 4),
+                        "f1": round(float(row["f1"]), 4),
+                        "roc_auc": round(float(row["roc_auc"]), 4),
+                        "average_precision": round(float(row["average_precision"]), 4),
+                    }
+                )
 
     m02b_cm_csv = ML_DIR / "model02b_apt_outputs" / "random_forest_confusion_matrix.csv"
     m02b_cm: list[list[int]] = []
     if m02b_cm_csv.exists():
         with open(m02b_cm_csv, "r", encoding="utf-8") as f:
-            reader = csv.reader(f)
-            next(reader, None)  # Skip header
-            for row in reader:
-                if len(row) > 1:
-                    m02b_cm.append([int(x) for x in row[1:]])
+            cm_reader = csv.reader(f)
+            next(cm_reader, None)  # Skip header
+            for cm_row in cm_reader:
+                if len(cm_row) > 1:
+                    m02b_cm.append([int(x) for x in cm_row[1:]])
 
     m02b_metrics = Model02Metrics(
         model_name="Model 02-B — Cyber Threat Diagnosis",

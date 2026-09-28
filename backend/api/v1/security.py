@@ -10,7 +10,7 @@ Endpoints:
 - POST /api/v1/security/correlate/{workstation_id} (Trigger multi-source correlation)
 """
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -71,9 +71,7 @@ async def ingest_security_event(
     If severity is HIGH or CRITICAL, automatically generates a correlated Alert.
     """
     if item.workstation_id is not None:
-        ws_res = await session.execute(
-            select(Workstation.hostname).where(Workstation.id == item.workstation_id)
-        )
+        ws_res = await session.execute(select(Workstation.hostname).where(Workstation.id == item.workstation_id))
         if not ws_res.scalar_one_or_none():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -215,9 +213,7 @@ async def get_security_event_by_id(
     _: Annotated[UserAccount, Depends(get_current_active_user)],
 ) -> SecurityEventResponse:
     """Retrieve a single security event by ID. Requires authentication."""
-    result = await session.execute(
-        select(SecurityEvent).where(SecurityEvent.id == event_id)
-    )
+    result = await session.execute(select(SecurityEvent).where(SecurityEvent.id == event_id))
     event = result.scalar_one_or_none()
     if event is None:
         raise HTTPException(
@@ -243,9 +239,7 @@ async def correlate_workstation_activity(
     Returns unified diagnostic incident reasoning (e.g. Cryptojacking vs Benign High Compute).
     """
     # 1. Verify workstation
-    ws_res = await session.execute(
-        select(Workstation.hostname).where(Workstation.id == workstation_id)
-    )
+    ws_res = await session.execute(select(Workstation.hostname).where(Workstation.id == workstation_id))
     hostname = ws_res.scalar_one_or_none()
     if hostname is None:
         raise HTTPException(
@@ -279,11 +273,17 @@ async def correlate_workstation_activity(
         workstation_name=hostname,
     )
 
+    severity_val = (
+        incident.severity
+        if isinstance(incident.severity, SecurityEventSeverity)
+        else SecurityEventSeverity(str(incident.severity).upper())
+    )
+
     return CorrelatedIncidentResponse(
         workstation_id=incident.workstation_id,
         is_threat=incident.is_threat,
         incident_category=incident.incident_category,
-        severity=incident.severity,
+        severity=severity_val,
         confidence=incident.confidence,
         title=incident.title,
         summary=incident.summary,

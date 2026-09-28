@@ -103,9 +103,7 @@ class TestMLTelemetryScreening:
             net_out=1500.0,
             processes=95,
         )
-        result = ml_pipeline_service.evaluate_telemetry_snapshot(
-            telemetry, workstation_name="machine-1-1"
-        )
+        result = ml_pipeline_service.evaluate_telemetry_snapshot(telemetry, workstation_name="machine-1-1")
 
         assert result.is_anomaly is False
         assert result.anomaly_type == AnomalyType.NORMAL
@@ -124,9 +122,7 @@ class TestMLTelemetryScreening:
             net_out=80000000.0,
             processes=1200,
         )
-        result = ml_pipeline_service.evaluate_telemetry_snapshot(
-            telemetry, workstation_name="machine-1-1"
-        )
+        result = ml_pipeline_service.evaluate_telemetry_snapshot(telemetry, workstation_name="machine-1-1")
 
         assert result.is_anomaly is True
         assert result.anomaly_type in (
@@ -160,9 +156,7 @@ class TestMLTelemetryScreening:
             net_out=75757.0,
             processes=295,
         )
-        result = ml_pipeline_service.evaluate_telemetry_snapshot(
-            telemetry, workstation_name="DESKTOP-3LBP28J"
-        )
+        result = ml_pipeline_service.evaluate_telemetry_snapshot(telemetry, workstation_name="DESKTOP-3LBP28J")
 
         assert result.is_anomaly is False
         assert result.anomaly_type == AnomalyType.NORMAL

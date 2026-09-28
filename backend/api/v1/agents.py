@@ -48,9 +48,7 @@ async def register_agent(
     audit = AuditService(session)
 
     # Check if workstation already exists by hostname
-    result = await session.execute(
-        select(Workstation).where(Workstation.hostname == payload.hostname)
-    )
+    result = await session.execute(select(Workstation).where(Workstation.hostname == payload.hostname))
     workstation = result.scalar_one_or_none()
 
     new_agent_id = uuid.uuid4()
@@ -133,9 +131,7 @@ async def agent_heartbeat(
     Receive heartbeat ping from registered agent.
     Updates the workstation's status and last_seen_at timestamp.
     """
-    result = await session.execute(
-        select(Workstation).where(Workstation.agent_id == payload.agent_id)
-    )
+    result = await session.execute(select(Workstation).where(Workstation.agent_id == payload.agent_id))
     workstation = result.scalar_one_or_none()
 
     if workstation is None:
@@ -171,6 +167,7 @@ async def check_agent_liveness(
     transitions their state to OFFLINE, and generates an AGENT_HEALTH alert.
     """
     from datetime import timedelta
+
     from backend.models.alert import Alert
 
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=threshold_seconds)

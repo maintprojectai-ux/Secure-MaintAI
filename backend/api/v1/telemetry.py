@@ -44,19 +44,13 @@ router = APIRouter()
 async def list_recent_anomalies(
     session: Annotated[AsyncSession, Depends(get_async_session)],
     _: Annotated[UserAccount, Depends(get_current_active_user)],
-    limit: Annotated[
-        int, Query(ge=1, le=200, description="Max anomalies to return")
-    ] = 50,
+    limit: Annotated[int, Query(ge=1, le=200, description="Max anomalies to return")] = 50,
 ) -> list[AnomalyResponse]:
     """
     Retrieve recently detected anomalies across all monitored workstations.
     Ordered newest-first. Requires authenticated user.
     """
-    query = (
-        select(AnomalyDetection)
-        .order_by(desc(AnomalyDetection.created_at))
-        .limit(limit)
-    )
+    query = select(AnomalyDetection).order_by(desc(AnomalyDetection.created_at)).limit(limit)
     result = await session.execute(query)
     anomalies = result.scalars().all()
     return [AnomalyResponse.model_validate(a) for a in anomalies]
@@ -93,9 +87,7 @@ async def ingest_single_telemetry(
     Validates metric bounds, evaluates ML anomaly screening, and persists records.
     """
     # Verify workstation exists
-    ws_result = await session.execute(
-        select(Workstation.hostname).where(Workstation.id == item.workstation_id)
-    )
+    ws_result = await session.execute(select(Workstation.hostname).where(Workstation.id == item.workstation_id))
     hostname = ws_result.scalar_one_or_none()
     if hostname is None:
         raise HTTPException(
@@ -158,9 +150,7 @@ async def ingest_telemetry_batch(
 
     # Cache hostnames for workstations in this batch
     ws_ids = {item.workstation_id for item in payload.items}
-    ws_result = await session.execute(
-        select(Workstation.id, Workstation.hostname).where(Workstation.id.in_(ws_ids))
-    )
+    ws_result = await session.execute(select(Workstation.id, Workstation.hostname).where(Workstation.id.in_(ws_ids)))
     hostname_map = {row[0]: row[1] for row in ws_result.all()}
 
     records = []
@@ -215,9 +205,7 @@ async def get_workstation_telemetry(
     workstation_id: str,
     session: Annotated[AsyncSession, Depends(get_async_session)],
     _: Annotated[UserAccount, Depends(get_current_active_user)],
-    limit: Annotated[
-        int, Query(ge=1, le=500, description="Max metrics to return")
-    ] = 50,
+    limit: Annotated[int, Query(ge=1, le=500, description="Max metrics to return")] = 50,
 ) -> list[TelemetryResponse]:
     """
     Retrieve time-series telemetry metrics for a specific workstation.
@@ -227,9 +215,7 @@ async def get_workstation_telemetry(
     try:
         target_uuid = UUID(str(workstation_id))
     except (ValueError, TypeError):
-        ws_res = await session.execute(
-            select(Workstation.id).where(Workstation.hostname == str(workstation_id))
-        )
+        ws_res = await session.execute(select(Workstation.id).where(Workstation.hostname == str(workstation_id)))
         target_uuid = ws_res.scalar_one_or_none()
 
     if target_uuid is None:

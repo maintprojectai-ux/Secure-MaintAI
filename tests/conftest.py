@@ -32,6 +32,7 @@ os.environ["AUTH_JWT_SECRET_KEY"] = "test-jwt-secret-key-for-testing-only"
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 
 import uuid
+
 from backend.core.config import Settings, get_settings
 from backend.core.database import get_async_session
 from backend.core.security import create_access_token

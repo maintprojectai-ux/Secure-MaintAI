@@ -7,8 +7,8 @@ Supports development, test, and production environments.
 
 from enum import Enum
 from functools import lru_cache
-
 from pathlib import Path
+
 from pydantic import Field, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -91,11 +91,7 @@ class Settings(BaseSettings):
             elif url.startswith("postgresql://"):
                 url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
             return url
-        db_name = (
-            self.test_database_name
-            if self.app_env == AppEnvironment.TEST
-            else self.database_name
-        )
+        db_name = self.test_database_name if self.app_env == AppEnvironment.TEST else self.database_name
         return (
             f"postgresql+asyncpg://{self.database_user}:{self.database_password}"
             f"@{self.database_host}:{self.database_port}/{db_name}"
@@ -110,11 +106,7 @@ class Settings(BaseSettings):
             if url.startswith("postgres://"):
                 url = url.replace("postgres://", "postgresql://", 1)
             return url
-        db_name = (
-            self.test_database_name
-            if self.app_env == AppEnvironment.TEST
-            else self.database_name
-        )
+        db_name = self.test_database_name if self.app_env == AppEnvironment.TEST else self.database_name
         return (
             f"postgresql://{self.database_user}:{self.database_password}"
             f"@{self.database_host}:{self.database_port}/{db_name}"

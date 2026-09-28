@@ -72,7 +72,4 @@ class TelemetryMetric(Base, UUIDPrimaryKeyMixin):
     )
 
     def __repr__(self) -> str:
-        return (
-            f"<TelemetryMetric(workstation={self.workstation_id}, "
-            f"ts={self.timestamp}, cpu={self.cpu_usage}%)>"
-        )
+        return f"<TelemetryMetric(workstation={self.workstation_id}, ts={self.timestamp}, cpu={self.cpu_usage}%)>"

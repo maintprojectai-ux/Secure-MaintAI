@@ -9,7 +9,7 @@ Audit entries are never updated or deleted.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Index, JSON, String, Uuid, func
+from sqlalchemy import JSON, DateTime, Index, String, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.models.base import Base, UUIDPrimaryKeyMixin
@@ -41,12 +41,8 @@ class AuditLog(Base, UUIDPrimaryKeyMixin):
         nullable=False,
     )
     source_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
-    result: Mapped[str] = mapped_column(
-        String(32), nullable=False, comment="success, failure, denied"
-    )
-    correlation_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid, nullable=True
-    )
+    result: Mapped[str] = mapped_column(String(32), nullable=False, comment="success, failure, denied")
+    correlation_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     metadata_: Mapped[dict | None] = mapped_column(
         "metadata", JSON, nullable=True, comment="Additional non-sensitive context"
     )
@@ -59,7 +55,4 @@ class AuditLog(Base, UUIDPrimaryKeyMixin):
     )
 
     def __repr__(self) -> str:
-        return (
-            f"<AuditLog(actor='{self.actor}', action='{self.action}', "
-            f"result='{self.result}')>"
-        )
+        return f"<AuditLog(actor='{self.actor}', action='{self.action}', result='{self.result}')>"

@@ -12,7 +12,6 @@ Tests:
 """
 
 import uuid
-from datetime import datetime, timezone
 
 import pytest
 

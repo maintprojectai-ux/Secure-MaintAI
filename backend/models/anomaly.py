@@ -7,7 +7,17 @@ Per implementation plan Section 5: anomaly_detection table.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Index, JSON, String, Text, Uuid, func
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    Uuid,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.models.base import Base, UUIDPrimaryKeyMixin
@@ -75,7 +85,4 @@ class AnomalyDetection(Base, UUIDPrimaryKeyMixin):
     )
 
     def __repr__(self) -> str:
-        return (
-            f"<AnomalyDetection(type={self.anomaly_type}, "
-            f"score={self.score}, confidence={self.confidence})>"
-        )
+        return f"<AnomalyDetection(type={self.anomaly_type}, score={self.score}, confidence={self.confidence})>"

@@ -86,9 +86,7 @@ def upgrade() -> None:
         "workstation",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
         sa.Column("hostname", sa.String(255), unique=True, nullable=False),
-        sa.Column(
-            "agent_id", postgresql.UUID(as_uuid=True), unique=True, nullable=True
-        ),
+        sa.Column("agent_id", postgresql.UUID(as_uuid=True), unique=True, nullable=True),
         sa.Column("ip_address", sa.String(45), nullable=False),
         sa.Column("operating_system", sa.String(128), nullable=False),
         sa.Column("department", sa.String(128), nullable=True),
@@ -221,12 +219,8 @@ def upgrade() -> None:
     op.create_index("ix_security_event_timestamp", "security_event", ["timestamp"])
     op.create_index("ix_security_event_severity", "security_event", ["severity"])
     op.create_index("ix_security_event_type", "security_event", ["event_type"])
-    op.create_index(
-        "ix_security_event_workstation", "security_event", ["workstation_id"]
-    )
-    op.create_index(
-        "ix_security_event_correlation", "security_event", ["correlation_id"]
-    )
+    op.create_index("ix_security_event_workstation", "security_event", ["workstation_id"])
+    op.create_index("ix_security_event_correlation", "security_event", ["correlation_id"])
 
     # --- alert ---
     op.create_table(
