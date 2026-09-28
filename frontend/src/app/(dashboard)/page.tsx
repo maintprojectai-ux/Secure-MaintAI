@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import {
   Monitor,
@@ -26,6 +26,45 @@ import {
 } from "@/lib/api";
 import { DashboardOverviewKPI, Workstation, Alert } from "@/types";
 
+const DEFAULT_RECENT_ALERTS = [
+  {
+    id: "alt-1",
+    severity: "Critical",
+    severityColor: "bg-rose-500/15 text-rose-400 border-rose-500/30",
+    title: "High CPU usage detected",
+    description: "CPU usage exceeded 90%",
+    device: "SRV-ACA-01",
+    time: "2 min ago",
+  },
+  {
+    id: "alt-2",
+    severity: "Warning",
+    severityColor: "bg-amber-500/15 text-amber-400 border-amber-500/30",
+    title: "Memory usage is high",
+    description: "Memory usage exceeded 80%",
+    device: "LAB-PC-24",
+    time: "8 min ago",
+  },
+  {
+    id: "alt-3",
+    severity: "Critical",
+    severityColor: "bg-rose-500/15 text-rose-400 border-rose-500/30",
+    title: "Suspicious login detected",
+    description: "Multiple failed login attempts",
+    device: "SRV-GATE-03",
+    time: "15 min ago",
+  },
+  {
+    id: "alt-4",
+    severity: "Info",
+    severityColor: "bg-blue-500/15 text-blue-400 border-blue-500/30",
+    title: "System backup completed",
+    description: "Daily backup completed successfully",
+    device: "SRV-BACK-01",
+    time: "30 min ago",
+  },
+];
+
 export default function DashboardPage() {
   const [selectedTimeframe, setSelectedTimeframe] = useState("Real-time");
   const [selectedResource, setSelectedResource] = useState("CPU");
@@ -46,7 +85,16 @@ export default function DashboardPage() {
       ]);
 
       if (liveKpi.status === "fulfilled" && liveKpi.value) {
-        setKpi(liveKpi.value);
+        const val: any = liveKpi.value;
+        setKpi((prev) => ({
+          ...prev,
+          ...val,
+          system_resilience_score:
+            val.security_posture ?? val.system_resilience_score ?? prev.system_resilience_score,
+          average_cpu: val.average_cpu ?? prev.average_cpu,
+          average_ram: val.average_ram ?? prev.average_ram,
+          average_disk: val.average_disk ?? prev.average_disk,
+        }));
       }
       if (liveWorkstations.status === "fulfilled" && liveWorkstations.value) {
         const val: any = liveWorkstations.value;
@@ -196,45 +244,43 @@ export default function DashboardPage() {
     },
   ];
 
-  // Dynamic Recent Alerts list
-  const recentAlerts = [
-    {
-      id: "alt-1",
-      severity: "Critical",
-      severityColor: "bg-rose-500/15 text-rose-400 border-rose-500/30",
-      title: "High CPU usage detected",
-      description: "CPU usage exceeded 90%",
-      device: "SRV-ACA-01",
-      time: "2 min ago",
-    },
-    {
-      id: "alt-2",
-      severity: "Warning",
-      severityColor: "bg-amber-500/15 text-amber-400 border-amber-500/30",
-      title: "Memory usage is high",
-      description: "Memory usage exceeded 80%",
-      device: "LAB-PC-24",
-      time: "8 min ago",
-    },
-    {
-      id: "alt-3",
-      severity: "Critical",
-      severityColor: "bg-rose-500/15 text-rose-400 border-rose-500/30",
-      title: "Suspicious login detected",
-      description: "Multiple failed login attempts",
-      device: "SRV-GATE-03",
-      time: "15 min ago",
-    },
-    {
-      id: "alt-4",
-      severity: "Info",
-      severityColor: "bg-blue-500/15 text-blue-400 border-blue-500/30",
-      title: "System backup completed",
-      description: "Daily backup completed successfully",
-      device: "SRV-BACK-01",
-      time: "30 min ago",
-    },
-  ];
+  // Dynamic Recent Alerts list derived from live alerts with resilient default
+  const recentAlerts = useMemo(() => {
+    if (!safeAlerts || safeAlerts.length === 0) {
+      return DEFAULT_RECENT_ALERTS;
+    }
+    return safeAlerts.slice(0, 5).map((a: any, idx: number) => {
+      const sev = (a.severity || "MEDIUM").toUpperCase();
+      const severity =
+        sev === "CRITICAL"
+          ? "Critical"
+          : sev === "HIGH" || sev === "WARNING"
+            ? "Warning"
+            : sev === "LOW" || sev === "INFO"
+              ? "Info"
+              : "Warning";
+      const severityColor =
+        severity === "Critical"
+          ? "bg-rose-500/15 text-rose-400 border-rose-500/30"
+          : severity === "Warning"
+            ? "bg-amber-500/15 text-amber-400 border-amber-500/30"
+            : "bg-blue-500/15 text-blue-400 border-blue-500/30";
+
+      const timeStr = a.created_at
+        ? new Date(a.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        : a.time || `${(idx + 1) * 3} min ago`;
+
+      return {
+        id: String(a.id || `alt-${idx}`),
+        severity,
+        severityColor,
+        title: a.title || "System Alert",
+        description: a.description || "Alert registered in monitoring stream",
+        device: a.device?.name || a.workstation_hostname || a.device || "SRV-ACA-01",
+        time: timeStr,
+      };
+    });
+  }, [safeAlerts]);
 
   // Top Devices by Resource Usage (sorted dynamically per metric)
   interface TopDevice {
