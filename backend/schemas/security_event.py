@@ -52,9 +52,7 @@ class SecurityEventCreate(BaseModel):
     user_id: UUID | None = None
     event_type: SecurityEventType
     severity: SecurityEventSeverity
-    confidence: float = Field(
-        ..., ge=0.0, le=1.0, description="Confidence in this event's validity."
-    )
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence in this event's validity.")
     description: str = Field(..., max_length=2048)
     evidence: list[str] = Field(default_factory=list)
     raw_event_reference: str | None = Field(

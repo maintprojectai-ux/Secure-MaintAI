@@ -60,14 +60,10 @@ async def test_normal_telemetry_persists_metric_without_anomaly(
 
     # Verify DB: 1 metric, 0 anomalies
     async with TestAsyncSession() as session:
-        metrics_res = await session.execute(
-            select(TelemetryMetric).where(TelemetryMetric.workstation_id == ws_id)
-        )
+        metrics_res = await session.execute(select(TelemetryMetric).where(TelemetryMetric.workstation_id == ws_id))
         assert len(metrics_res.scalars().all()) == 1
 
-        anomalies_res = await session.execute(
-            select(AnomalyDetection).where(AnomalyDetection.workstation_id == ws_id)
-        )
+        anomalies_res = await session.execute(select(AnomalyDetection).where(AnomalyDetection.workstation_id == ws_id))
         assert len(anomalies_res.scalars().all()) == 0
 
 
@@ -107,9 +103,7 @@ async def test_anomalous_telemetry_creates_persisted_anomaly_record(
 
     # Verify DB: 1 metric, 1 persisted anomaly
     async with TestAsyncSession() as session:
-        anomalies_res = await session.execute(
-            select(AnomalyDetection).where(AnomalyDetection.workstation_id == ws_id)
-        )
+        anomalies_res = await session.execute(select(AnomalyDetection).where(AnomalyDetection.workstation_id == ws_id))
         anomalies = anomalies_res.scalars().all()
         assert len(anomalies) == 1
 
@@ -178,14 +172,10 @@ async def test_batch_telemetry_creates_anomalies_for_spiked_items(
 
     # Verify DB: 2 metrics, 1 anomaly from the spiked item
     async with TestAsyncSession() as session:
-        metrics_res = await session.execute(
-            select(TelemetryMetric).where(TelemetryMetric.workstation_id == ws_id)
-        )
+        metrics_res = await session.execute(select(TelemetryMetric).where(TelemetryMetric.workstation_id == ws_id))
         assert len(metrics_res.scalars().all()) == 2
 
-        anomalies_res = await session.execute(
-            select(AnomalyDetection).where(AnomalyDetection.workstation_id == ws_id)
-        )
+        anomalies_res = await session.execute(select(AnomalyDetection).where(AnomalyDetection.workstation_id == ws_id))
         anomalies = anomalies_res.scalars().all()
         assert len(anomalies) == 1
         assert anomalies[0].score >= 0.50

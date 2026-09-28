@@ -12,15 +12,12 @@ Tests:
 """
 
 import uuid
-from datetime import datetime, timezone
 
 import pytest
-from sqlalchemy import select
 
 from backend.models.alert import Alert
 from backend.models.audit import AuditLog
 from backend.models.incident import Incident
-from backend.models.user import UserAccount
 from backend.models.workstation import Workstation
 from backend.schemas.idp import (
     AuthorizedWorkload,
@@ -57,9 +54,7 @@ async def test_execute_playbook_alert_only() -> None:
         user_context=IdPIdentityContext(
             user_id="u-1", username="user1", email="u1@kku.edu.sa", role="STUDENT", department="CS"
         ),
-        workstation_context=IdPWorkstationContext(
-            workstation_id=ws_id, hostname="test-node-01", department="CS"
-        ),
+        workstation_context=IdPWorkstationContext(workstation_id=ws_id, hostname="test-node-01", department="CS"),
         correlated_incident=CorrelatedIncident(
             workstation_id=ws_id,
             incident_category="SUSPICIOUS_SCRIPT",
@@ -116,9 +111,7 @@ async def test_execute_playbook_surgical_isolation_and_rollback() -> None:
         user_context=IdPIdentityContext(
             user_id="u-2", username="user2", email="u2@kku.edu.sa", role="STUDENT", department="CS"
         ),
-        workstation_context=IdPWorkstationContext(
-            workstation_id=ws_id, hostname="isolate-target-01", department="CS"
-        ),
+        workstation_context=IdPWorkstationContext(workstation_id=ws_id, hostname="isolate-target-01", department="CS"),
         correlated_incident=CorrelatedIncident(
             workstation_id=ws_id,
             incident_category="CRYPTOJACKING",

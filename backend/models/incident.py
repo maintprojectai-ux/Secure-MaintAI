@@ -36,9 +36,7 @@ class Incident(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=True,
         comment="First or main alert associated with the incident",
     )
-    severity: Mapped[str] = mapped_column(
-        String(16), nullable=False, comment="LOW, MEDIUM, HIGH, CRITICAL"
-    )
+    severity: Mapped[str] = mapped_column(String(16), nullable=False, comment="LOW, MEDIUM, HIGH, CRITICAL")
     category: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
@@ -69,15 +67,9 @@ class Incident(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     title: Mapped[str] = mapped_column(String(256), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     response_action: Mapped[str | None] = mapped_column(Text, nullable=True)
-    closed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    resolution_summary: Mapped[str | None] = mapped_column(
-        Text, nullable=True, comment="Resolution notes"
-    )
-    resolved_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolution_summary: Mapped[str | None] = mapped_column(Text, nullable=True, comment="Resolution notes")
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     alert: Mapped["Alert | None"] = relationship("Alert", lazy="selectin")
@@ -104,7 +96,4 @@ class Incident(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
 
     def __repr__(self) -> str:
-        return (
-            f"<Incident(number='{self.incident_number}', "
-            f"severity={self.severity}, status={self.status})>"
-        )
+        return f"<Incident(number='{self.incident_number}', severity={self.severity}, status={self.status})>"

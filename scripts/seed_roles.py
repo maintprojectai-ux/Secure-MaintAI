@@ -70,9 +70,7 @@ async def seed_roles() -> None:
     """Create the canonical roles if they don't already exist."""
     async with async_session_factory() as session:
         for role_data in ROLES:
-            result = await session.execute(
-                select(UserRole).where(UserRole.name == role_data["name"])
-            )
+            result = await session.execute(select(UserRole).where(UserRole.name == role_data["name"]))
             existing = result.scalar_one_or_none()
 
             if existing:

@@ -6,7 +6,6 @@ Per engineering rules Section 22: use migrations, foreign keys, indexes, timesta
 """
 
 from collections.abc import AsyncGenerator
-
 from typing import Any
 
 from sqlalchemy.ext.asyncio import (

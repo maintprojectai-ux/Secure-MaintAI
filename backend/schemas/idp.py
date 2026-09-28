@@ -9,7 +9,6 @@ Per engineering rules Section 18:
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -41,6 +40,9 @@ class AuthorizedWorkload(BaseModel):
     )
     is_active: bool = True
     priority: str = Field(default="NORMAL", description="NORMAL, HIGH, CRITICAL")
+    expected_cpu_percent: float | None = Field(default=None, description="Expected CPU threshold for reservation.")
+    expected_ram_mb: float | None = Field(default=None, description="Expected memory allocation in MB.")
+    approved_by: str | None = Field(default=None, description="Authority approving the workload.")
 
 
 class IdPIdentityContext(BaseModel):

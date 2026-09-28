@@ -56,6 +56,4 @@ api_v1_router.include_router(incidents_router, prefix="/incidents", tags=["incid
 api_v1_router.include_router(policy_router, prefix="/policy", tags=["policy"])
 
 # Workstation inventory and device management endpoints
-api_v1_router.include_router(
-    workstations_router, prefix="/workstations", tags=["workstations"]
-)
+api_v1_router.include_router(workstations_router, prefix="/workstations", tags=["workstations"])

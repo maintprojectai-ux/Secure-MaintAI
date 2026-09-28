@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, Uuid
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -29,9 +29,7 @@ class UserRole(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     permission_level: Mapped[int] = mapped_column(Integer, server_default="1", default=1)
 
     # Relationships
-    users: Mapped[list["UserAccount"]] = relationship(
-        "UserAccount", back_populates="role", lazy="selectin"
-    )
+    users: Mapped[list["UserAccount"]] = relationship("UserAccount", back_populates="role", lazy="selectin")
 
     @property
     def role_name(self) -> str:
@@ -53,9 +51,7 @@ class UserAccount(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     university_id: Mapped[str | None] = mapped_column(
         String(30), unique=True, nullable=True, comment="University ID or staff/student number"
     )
-    full_name: Mapped[str | None] = mapped_column(
-        String(150), nullable=True, comment="User full name"
-    )
+    full_name: Mapped[str | None] = mapped_column(String(150), nullable=True, comment="User full name")
     username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     email: Mapped[str] = mapped_column(String(256), unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(256), nullable=False)
@@ -75,18 +71,12 @@ class UserAccount(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         default="active",
         comment="Account status: active, inactive, locked, suspended",
     )
-    last_login_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     failed_login_attempts: Mapped[int] = mapped_column(default=0)
 
     # Relationships
-    role: Mapped["UserRole"] = relationship(
-        "UserRole", back_populates="users", lazy="selectin"
-    )
-    department: Mapped["Department | None"] = relationship(
-        "Department", lazy="selectin"
-    )
+    role: Mapped["UserRole"] = relationship("UserRole", back_populates="users", lazy="selectin")
+    department: Mapped["Department | None"] = relationship("Department", lazy="selectin")
 
     def __repr__(self) -> str:
         return f"<UserAccount(username='{self.username}')>"

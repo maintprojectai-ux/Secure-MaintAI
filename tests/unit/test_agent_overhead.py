@@ -9,7 +9,7 @@ Verifies that the agent process footprint conforms to:
 import json
 import subprocess
 import sys
-import pytest
+
 from agent.collectors.process import collect_agent_self_overhead
 
 

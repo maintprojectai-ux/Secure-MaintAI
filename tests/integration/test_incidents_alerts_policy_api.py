@@ -14,11 +14,8 @@ from datetime import datetime, timezone
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import select
 
-from backend.models.alert import Alert
 from backend.models.anomaly import AnomalyDetection
-from backend.models.incident import Incident
 from backend.models.security_event import SecurityEvent
 from backend.models.workstation import Workstation
 from tests.conftest import TestAsyncSession

@@ -38,9 +38,7 @@ class AnomalyCreate(BaseModel):
     timestamp: datetime
     anomaly_type: AnomalyType
     score: float = Field(..., ge=0.0, le=1.0, description="Anomaly score (0-1).")
-    confidence: float = Field(
-        ..., ge=0.0, le=1.0, description="Model confidence (0-1)."
-    )
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Model confidence (0-1).")
     model_name: str = Field(..., max_length=128)
     model_version: str = Field(..., max_length=32)
     features_snapshot: dict | None = Field(

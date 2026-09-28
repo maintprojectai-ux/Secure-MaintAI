@@ -13,7 +13,7 @@ from enum import Enum
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,17 +21,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.core.database import get_async_session
 from backend.core.dependencies import get_current_active_user
 from backend.data.scenario_registry import get_scenario_profile
-from backend.models.alert import Alert
 from backend.models.anomaly import AnomalyDetection
-from backend.models.incident import Incident
 from backend.models.security_event import SecurityEvent
 from backend.models.telemetry import TelemetryMetric
 from backend.models.user import UserAccount
 from backend.models.workstation import Workstation
-from backend.schemas.idp import AuthorizedWorkload, IdPIdentityContext, WorkloadType
 from backend.schemas.telemetry import (
-    CpuMetrics,
-    NetworkMetrics,
     TelemetryCreate,
 )
 from backend.services import ml_pipeline_service
@@ -252,11 +247,21 @@ async def trigger_demo_scenario(
     # -------------------------------------------------------------
     # 5. CORRELATE & EVALUATE POLICY (Step 7)
     # -------------------------------------------------------------
-    anom_query = select(AnomalyDetection).where(AnomalyDetection.workstation_id == ws.id).order_by(desc(AnomalyDetection.timestamp)).limit(5)
+    anom_query = (
+        select(AnomalyDetection)
+        .where(AnomalyDetection.workstation_id == ws.id)
+        .order_by(desc(AnomalyDetection.timestamp))
+        .limit(5)
+    )
     anom_res = await session.execute(anom_query)
     recent_anomalies = anom_res.scalars().all()
 
-    sec_query = select(SecurityEvent).where(SecurityEvent.workstation_id == ws.id).order_by(desc(SecurityEvent.timestamp)).limit(5)
+    sec_query = (
+        select(SecurityEvent)
+        .where(SecurityEvent.workstation_id == ws.id)
+        .order_by(desc(SecurityEvent.timestamp))
+        .limit(5)
+    )
     sec_res = await session.execute(sec_query)
     recent_sec = sec_res.scalars().all()
 
@@ -378,4 +383,3 @@ async def trigger_demo_scenario(
             },
         },
     )
-

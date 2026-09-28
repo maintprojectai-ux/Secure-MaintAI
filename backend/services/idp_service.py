@@ -9,7 +9,6 @@ Per engineering rules Section 18:
 """
 
 from datetime import datetime, timezone
-from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
@@ -23,7 +22,6 @@ from backend.schemas.idp import (
     AuthorizedWorkload,
     IdPIdentityContext,
     IdPWorkstationContext,
-    WorkloadType,
 )
 
 logger = get_logger("idp_service")
@@ -174,9 +172,7 @@ class IdPService:
 
         if session is not None:
             try:
-                res = await session.execute(
-                    select(Workstation).where(Workstation.id == workstation_id)
-                )
+                res = await session.execute(select(Workstation).where(Workstation.id == workstation_id))
                 ws = res.scalar_one_or_none()
                 if ws is not None:
                     hostname = ws.hostname

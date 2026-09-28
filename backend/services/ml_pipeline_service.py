@@ -323,7 +323,7 @@ def _diagnose_technical_fault(item: TelemetryCreate) -> tuple[str, float, dict[s
     pred = _model_02a_pipeline.predict(df)[0]
     probs = _model_02a_pipeline.predict_proba(df)[0]
     conf = float(np.max(probs))
-    class_probs = {cls_name: float(p) for cls_name, p in zip(_model_02a_pipeline.classes_, probs)}
+    class_probs = {cls_name: float(p) for cls_name, p in zip(_model_02a_pipeline.classes_, probs, strict=False)}
 
     return str(pred), conf, class_probs
 
@@ -491,12 +491,7 @@ def evaluate_telemetry_snapshot(
     disk_bytes = float(item.disk.read_bytes_per_sec + item.disk.write_bytes_per_sec)
     proc_cnt = float(item.process_count)
 
-    is_hardware_stressed = (
-        cpu_val >= 85.0
-        or mem_val >= 90.0
-        or disk_bytes >= 5.0e7
-        or proc_cnt >= 800.0
-    )
+    is_hardware_stressed = cpu_val >= 85.0 or mem_val >= 90.0 or disk_bytes >= 5.0e7 or proc_cnt >= 800.0
 
     if fault_conf >= 0.60 or is_hardware_stressed:
         anomaly_type = AnomalyType.TECHNICAL_ANOMALY
@@ -526,8 +521,10 @@ def evaluate_telemetry_snapshot(
         model_version=model_ver,
         features_snapshot=snapshot,
         evidence=[
-            f"Stage 1 screening flagged statistical variation ({raw_score:.4f} >= {threshold:.4f}), "
-            f"but Stage 2 diagnostic confidence was low ({fault_conf:.2%}) with normal hardware metrics — classified as benign operational variance."
+            (
+                f"Stage 1 screening flagged statistical variation ({raw_score:.4f} >= {threshold:.4f}), "
+                f"but Stage 2 diagnostic confidence was low ({fault_conf:.2%}) with normal hardware metrics — classified as benign operational variance."
+            )
         ],
         predicted_fault=None,
         fault_confidence=None,

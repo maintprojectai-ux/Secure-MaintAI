@@ -64,14 +64,10 @@ async def test_ingest_security_event_persists_record_and_generates_alert(
 
     # Verify database: SecurityEvent and Alert persisted
     async with TestAsyncSession() as session:
-        event_res = await session.execute(
-            select(SecurityEvent).where(SecurityEvent.id == event_id)
-        )
+        event_res = await session.execute(select(SecurityEvent).where(SecurityEvent.id == event_id))
         assert event_res.scalar_one_or_none() is not None
 
-        alert_res = await session.execute(
-            select(Alert).where(Alert.source_id == event_id)
-        )
+        alert_res = await session.execute(select(Alert).where(Alert.source_id == event_id))
         alert = alert_res.scalar_one_or_none()
         assert alert is not None
         assert alert.severity == "CRITICAL"

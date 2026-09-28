@@ -53,12 +53,10 @@ async def get_current_user(
     try:
         user_id = UUID(str(user_id_raw))
     except (ValueError, TypeError, AttributeError):
-        raise credentials_exception
+        raise credentials_exception from None
 
     result = await session.execute(
-        select(UserAccount)
-        .options(selectinload(UserAccount.role))
-        .where(UserAccount.id == user_id)
+        select(UserAccount).options(selectinload(UserAccount.role)).where(UserAccount.id == user_id)
     )
     user = result.scalar_one_or_none()
 
@@ -168,17 +166,9 @@ def require_permission(*required_permissions: str) -> Callable:
         if current_user.role and current_user.role.name == RoleEnum.ADMIN.value:
             return current_user
 
-        user_permissions = (
-            current_user.role.permissions
-            if current_user.role and current_user.role.permissions
-            else {}
-        )
+        user_permissions = current_user.role.permissions if current_user.role and current_user.role.permissions else {}
 
-        missing = [
-            perm
-            for perm in required_permissions
-            if not user_permissions.get(perm, False)
-        ]
+        missing = [perm for perm in required_permissions if not user_permissions.get(perm, False)]
 
         if missing:
             raise HTTPException(

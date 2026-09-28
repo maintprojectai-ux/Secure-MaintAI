@@ -20,9 +20,7 @@ logger = get_logger("http")
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
     """Middleware that logs HTTP requests with correlation IDs."""
 
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         correlation_id = request.headers.get("X-Correlation-ID", str(uuid.uuid4()))
         start_time = time.perf_counter()
 
@@ -31,11 +29,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         duration_ms = (time.perf_counter() - start_time) * 1000
 
         # Do not log health checks at DEBUG level to reduce noise
-        log_level = (
-            "debug"
-            if request.url.path in ("/api/v1/health", "/api/v1/ready")
-            else "info"
-        )
+        log_level = "debug" if request.url.path in ("/api/v1/health", "/api/v1/ready") else "info"
 
         getattr(logger, log_level)(
             "http_request",

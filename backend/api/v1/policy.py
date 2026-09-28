@@ -7,7 +7,6 @@ Per engineering rules:
 - Rule 20: Role-sensitive enforcement across Student, Researcher, and IT Operator profiles.
 """
 
-from datetime import datetime, timezone
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -21,14 +20,11 @@ from backend.core.dependencies import get_current_active_user, require_roles
 from backend.models.anomaly import AnomalyDetection
 from backend.models.security_event import SecurityEvent
 from backend.models.user import UserAccount
-from backend.models.workstation import Workstation
-from backend.schemas.idp import IdPIdentityContext, IdPWorkstationContext
 from backend.schemas.user import RoleEnum
 from backend.services.idp_service import idp_service
 from backend.services.soar_service import PlaybookExecutionResult, SOARService
 from security.correlation_engine import SecurityCorrelationEngine
 from security.policy_engine import (
-    PolicyDecisionType,
     PolicyEvaluationResult,
     policy_engine,
 )

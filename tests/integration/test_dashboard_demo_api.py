@@ -120,7 +120,6 @@ async def test_trigger_student_cyber_threat_demo_scenario(
     assert soar_exec["workstation_final_status"] == "ISOLATED"
 
 
-
 @pytest.mark.asyncio
 async def test_trigger_technical_degradation_demo_scenario(
     async_client: AsyncClient,
@@ -227,4 +226,3 @@ async def test_trigger_demo_scenario_on_current_active_workstation(
     # Step 5: Verify that for SECURITY_ANOMALY, predicted_fault is None (no delay/hardware leak)
     assert receipt["step_5_ml_result"]["anomaly_type"] == "SECURITY_ANOMALY"
     assert receipt["step_5_ml_result"]["predicted_fault"] is None
-

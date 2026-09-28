@@ -8,7 +8,7 @@ Per engineering rules Section 7 (Versioned APIs) & Section 21 (SOAR & Incidents)
 """
 
 from datetime import datetime, timezone
-from typing import Annotated, Any
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -16,7 +16,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.database import get_async_session
-from backend.core.dependencies import get_current_active_user, require_roles
+from backend.core.dependencies import get_current_active_user
 from backend.models.incident import Incident
 from backend.models.user import UserAccount
 from backend.schemas.incident import (
@@ -73,9 +73,7 @@ async def get_incident(
     _: Annotated[UserAccount, Depends(get_current_active_user)],
 ) -> IncidentResponse:
     """Retrieve an incident by unique ID."""
-    result = await session.execute(
-        select(Incident).where(Incident.id == incident_id)
-    )
+    result = await session.execute(select(Incident).where(Incident.id == incident_id))
     inc = result.scalar_one_or_none()
     if inc is None:
         raise HTTPException(
@@ -138,9 +136,7 @@ async def update_incident_status(
     current_user: Annotated[UserAccount, Depends(get_current_active_user)],
 ) -> IncidentResponse:
     """Update an incident's lifecycle status."""
-    result = await session.execute(
-        select(Incident).where(Incident.id == incident_id)
-    )
+    result = await session.execute(select(Incident).where(Incident.id == incident_id))
     inc = result.scalar_one_or_none()
     if inc is None:
         raise HTTPException(

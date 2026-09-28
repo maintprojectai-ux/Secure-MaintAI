@@ -28,11 +28,9 @@ from backend.models.workstation import Workstation
 from backend.schemas.idp import (
     AuthorizedWorkload,
     IdPIdentityContext,
-    IdPWorkstationContext,
     WorkloadType,
 )
 from backend.services.idp_service import idp_service
-from security.policy_engine import policy_engine
 from tests.conftest import TestAsyncSession
 
 
@@ -95,9 +93,7 @@ async def test_scenario_1_technical_fault_maintenance_response(
         assert ws_check.status == "ONLINE"
 
         # Verify Maintenance Incident created
-        inc_res = await session.execute(
-            select(Incident).where(Incident.workstation_id == ws_id)
-        )
+        inc_res = await session.execute(select(Incident).where(Incident.workstation_id == ws_id))
         inc = inc_res.scalar_one_or_none()
         assert inc is not None
         assert inc.category == "MAINTENANCE"
@@ -187,9 +183,7 @@ async def test_scenario_2_cryptojacking_student_containment(
         assert ws_check.status == "ISOLATED"
 
         # Verify Security Incident created in CONTAINED state
-        inc_res = await session.execute(
-            select(Incident).where(Incident.workstation_id == ws_id)
-        )
+        inc_res = await session.execute(select(Incident).where(Incident.workstation_id == ws_id))
         inc = inc_res.scalar_one_or_none()
         assert inc is not None
         assert inc.category == "SECURITY_THREAT"
@@ -415,9 +409,7 @@ async def test_scenario_6_agent_offline_alert(
         ws_check = await session.get(Workstation, ws_id)
         assert ws_check.status == "OFFLINE"
 
-        alert_res = await session.execute(
-            select(Alert).where(Alert.source_id == ws_id)
-        )
+        alert_res = await session.execute(select(Alert).where(Alert.source_id == ws_id))
         alert = alert_res.scalar_one_or_none()
         assert alert is not None
         assert alert.source_type == "AGENT_HEALTH"

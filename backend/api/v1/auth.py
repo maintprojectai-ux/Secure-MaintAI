@@ -75,10 +75,7 @@ async def login(
     result = await session.execute(
         select(UserAccount)
         .options(selectinload(UserAccount.role))
-        .where(
-            (UserAccount.username == search_identity)
-            | (UserAccount.email == search_identity)
-        )
+        .where((UserAccount.username == search_identity) | (UserAccount.email == search_identity))
     )
     user = result.scalar_one_or_none()
 
@@ -211,9 +208,7 @@ async def refresh_token(
         )
 
     result = await session.execute(
-        select(UserAccount)
-        .options(selectinload(UserAccount.role))
-        .where(UserAccount.id == user_id)
+        select(UserAccount).options(selectinload(UserAccount.role)).where(UserAccount.id == user_id)
     )
     user = result.scalar_one_or_none()
 
@@ -342,9 +337,7 @@ async def register(
     audit = AuditService(session)
 
     # Check username uniqueness
-    existing = await session.execute(
-        select(UserAccount).where(UserAccount.username == user_data.username)
-    )
+    existing = await session.execute(select(UserAccount).where(UserAccount.username == user_data.username))
     if existing.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -352,9 +345,7 @@ async def register(
         )
 
     # Check email uniqueness
-    existing_email = await session.execute(
-        select(UserAccount).where(UserAccount.email == user_data.email)
-    )
+    existing_email = await session.execute(select(UserAccount).where(UserAccount.email == user_data.email))
     if existing_email.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -362,9 +353,7 @@ async def register(
         )
 
     # Resolve STUDENT role for public registration
-    role_result = await session.execute(
-        select(UserRole).where(UserRole.name == RoleEnum.STUDENT.value)
-    )
+    role_result = await session.execute(select(UserRole).where(UserRole.name == RoleEnum.STUDENT.value))
     role = role_result.scalar_one_or_none()
     if role is None:
         raise HTTPException(

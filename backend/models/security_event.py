@@ -8,7 +8,17 @@ Per engineering rules Section 17: normalized internal security event schema.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Index, JSON, String, Text, Uuid, func
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    Uuid,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.models.base import Base, UUIDPrimaryKeyMixin
@@ -56,9 +66,7 @@ class SecurityEvent(Base, UUIDPrimaryKeyMixin):
         default="new",
         comment="new, correlated, investigating, contained, closed",
     )
-    severity: Mapped[str] = mapped_column(
-        String(16), nullable=False, comment="LOW, MEDIUM, HIGH, CRITICAL"
-    )
+    severity: Mapped[str] = mapped_column(String(16), nullable=False, comment="LOW, MEDIUM, HIGH, CRITICAL")
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     evidence: Mapped[list | None] = mapped_column(JSON, nullable=True)
@@ -96,7 +104,4 @@ class SecurityEvent(Base, UUIDPrimaryKeyMixin):
     )
 
     def __repr__(self) -> str:
-        return (
-            f"<SecurityEvent(type={self.event_type}, "
-            f"severity={self.severity}, confidence={self.confidence})>"
-        )
+        return f"<SecurityEvent(type={self.event_type}, severity={self.severity}, confidence={self.confidence})>"
