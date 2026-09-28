@@ -2,10 +2,10 @@
 
 **AI-Driven University Infrastructure Resilience Platform**
 
-[![Tests](https://img.shields.io/badge/Tests-144%20Passed-success?style=flat-square&logo=pytest)](file:///d:/workspace/2026_2027/FirstSemester/KKU/secure-maintai/tests)
-[![Python](https://img.shields.io/badge/Python-3.11%20%7C%20FastAPI-blue?style=flat-square&logo=python)](file:///d:/workspace/2026_2027/FirstSemester/KKU/secure-maintai/backend)
-[![Next.js](https://img.shields.io/badge/Next.js-16.3.4%20(Turbopack)-black?style=flat-square&logo=next.js)](file:///d:/workspace/2026_2027/FirstSemester/KKU/secure-maintai/frontend)
-[![TailwindCSS](https://img.shields.io/badge/TailwindCSS-v4.3.3%20(CSS--first)-38bdf8?style=flat-square&logo=tailwindcss)](file:///d:/workspace/2026_2027/FirstSemester/KKU/secure-maintai/frontend)
+[![Tests](https://img.shields.io/badge/Tests-144%20Passed-success?style=flat-square&logo=pytest)](tests/)
+[![Python](https://img.shields.io/badge/Python-3.11%20%7C%20FastAPI-blue?style=flat-square&logo=python)](backend/)
+[![Next.js](https://img.shields.io/badge/Next.js-16.3.4%20(Turbopack)-black?style=flat-square&logo=next.js)](frontend/)
+[![TailwindCSS](https://img.shields.io/badge/TailwindCSS-v4.3.3%20(CSS--first)-38bdf8?style=flat-square&logo=tailwindcss)](frontend/)
 [![University](https://img.shields.io/badge/Institution-King%20Khalid%20University-006C35?style=flat-square)](https://www.kku.edu.sa)
 
 Secure-MaintAI is an AI-driven infrastructure resilience and automated response platform designed for university workstation and server environments. The system continuously ingests machine telemetry, detects operational deviations using machine learning, distinguishes between technical faults and cyber attacks, correlates events with SIEM/XDR adapters, enriches threat detections with university Identity Provider (IdP) context, and executes role-sensitive SOAR responses (such as non-destructive research state preservation or surgical network isolation without rebooting the host OS).
@@ -143,7 +143,7 @@ secure-maintai/
 │   └── migrations/versions/ # Foundation schema migrations
 ├── infrastructure/          # Docker compose and deployment configuration
 │   └── docker/              # Dockerfile.backend, compose configurations
-├── tests/                   # 133 automated tests across all test suites
+├── tests/                   # 144 automated tests across all test suites
 │   ├── unit/                # Unit tests (RBAC, policy, adapters, SOAR, IdP)
 │   ├── integration/         # Integration tests (APIs, anomaly persistence)
 │   ├── ml/                  # ML runtime inference and feature builder tests

@@ -111,8 +111,10 @@ ml/data/processed/
 # Allow only active production models required by backend (used model for Model 01)
 !ml/model_01_outputs/models/machine-1-1.joblib
 !ml/model02a_rcaeval_outputs/random_forest.joblib
+!ml/model02a_rcaeval_outputs/evaluation_metrics.csv
 !ml/model02b_apt_outputs/model_02b_windows_apt_random_forest.joblib
-
+!ml/model02b_apt_outputs/evaluation_metrics.csv
+!ml/model02b_apt_outputs/window_dataset.csv
 # ---------- Docker ----------
 docker-compose.override.yml
 
