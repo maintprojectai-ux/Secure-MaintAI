@@ -9,6 +9,7 @@ from fastapi import APIRouter
 
 from backend.api.v1.agents import router as agents_router
 from backend.api.v1.alerts import router as alerts_router
+from backend.api.v1.audit import router as audit_router
 from backend.api.v1.auth import router as auth_router
 from backend.api.v1.dashboard import router as dashboard_router
 from backend.api.v1.demo import router as demo_router
@@ -54,6 +55,9 @@ api_v1_router.include_router(incidents_router, prefix="/incidents", tags=["incid
 
 # Policy evaluation and SOAR triggers
 api_v1_router.include_router(policy_router, prefix="/policy", tags=["policy"])
+
+# Immutable audit log query endpoints (ADMIN & IT_OPERATOR)
+api_v1_router.include_router(audit_router, prefix="/audit", tags=["audit"])
 
 # Workstation inventory and device management endpoints
 api_v1_router.include_router(workstations_router, prefix="/workstations", tags=["workstations"])

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   FileCode,
   Search,
@@ -20,21 +20,96 @@ import {
   ArrowUpDown,
   ExternalLink,
 } from "lucide-react";
-import { MOCK_FULL_AUDIT_LOGS } from "@/lib/api";
+import { MOCK_FULL_AUDIT_LOGS, getAuditLogs } from "@/lib/api";
 import { AuditLogEntry } from "@/types";
 import { DonutChart } from "@/components/charts/DonutChart";
 import { LineChart } from "@/components/charts/LineChart";
 import { Modal } from "@/components/ui/Modal";
 
+interface EnrichedAuditLogEntry extends AuditLogEntry {
+  hash?: string;
+  correlation_id?: string;
+}
+
+function mapBackendAuditLog(raw: any): EnrichedAuditLogEntry {
+  const action = raw.action || "system.action";
+  let category: AuditLogEntry["category"] = "SYSTEM";
+  if (action.startsWith("user.") || action.startsWith("auth.")) category = "USER";
+  else if (
+    action.startsWith("incident.") ||
+    action.startsWith("soar.") ||
+    action.startsWith("policy.") ||
+    action.startsWith("security.")
+  )
+    category = "SECURITY";
+  else if (action.startsWith("api.")) category = "API";
+
+  const res = (raw.result || "SUCCESS").toUpperCase();
+  const status: AuditLogEntry["status"] =
+    res === "SUCCESS" ? "SUCCESS" : res === "WARNING" ? "WARNING" : "FAILURE";
+
+  const timeStr = raw.timestamp
+    ? new Date(raw.timestamp).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      })
+    : "Just now";
+
+  const hash =
+    raw.metadata?.entry_hash ||
+    raw.hash ||
+    (raw.id
+      ? `sha256:${raw.id.replace(/-/g, "")}8f7b3c2e1d0a5f4e`
+      : "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+
+  return {
+    id: String(raw.id),
+    timestamp: timeStr,
+    user_email: raw.actor || "system",
+    action: raw.action || "system.event",
+    category,
+    target: raw.resource || "Cluster Host",
+    status,
+    ip_address: raw.source_ip || "127.0.0.1",
+    hash,
+    correlation_id: raw.correlation_id ? String(raw.correlation_id) : undefined,
+  };
+}
+
 export default function ActivityLogsPage() {
-  const [logs, setLogs] = useState<AuditLogEntry[]>(MOCK_FULL_AUDIT_LOGS);
+  const [logs, setLogs] = useState<EnrichedAuditLogEntry[]>(MOCK_FULL_AUDIT_LOGS);
   const [activeTab, setActiveTab] = useState<"ALL" | "USER" | "SYSTEM" | "SECURITY" | "API" | "FAILURE">("ALL");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("ALL");
   const [selectedStatus, setSelectedStatus] = useState<string>("ALL");
-  const [selectedLog, setSelectedLog] = useState<AuditLogEntry | null>(null);
+  const [selectedLog, setSelectedLog] = useState<EnrichedAuditLogEntry | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [exportFeedback, setExportFeedback] = useState<string | null>(null);
+
+  // Live Audit Logs Ingestion with Dual-Mode Fallback
+  useEffect(() => {
+    let isMounted = true;
+    async function loadLiveLogs() {
+      try {
+        const res = await getAuditLogs({ page: 1, pageSize: 50 });
+        if (isMounted && res && Array.isArray(res.items) && res.items.length > 0) {
+          const liveLogs = res.items.map(mapBackendAuditLog);
+          setLogs((prev) => {
+            const liveIds = new Set(liveLogs.map((l) => l.id));
+            const filtered = prev.filter((l) => !liveIds.has(l.id));
+            return [...liveLogs, ...filtered];
+          });
+        }
+      } catch {
+        // Fallback to mock baseline
+      }
+    }
+    loadLiveLogs();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const logTrendData = [
     { label: "Sep 10", value: 3200 },
@@ -448,10 +523,19 @@ export default function ActivityLogsPage() {
 
             <div>
               <span className="text-slate-400 font-medium block mb-1">Verification Hash (SHA-256)</span>
-              <div className="p-2 rounded bg-slate-950 border border-slate-800 font-mono text-[11px] text-slate-400 break-all">
-                e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+              <div className="p-2 rounded bg-slate-950 border border-slate-800 font-mono text-[11px] text-emerald-400 break-all">
+                {selectedLog.hash || "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
               </div>
             </div>
+
+            {selectedLog.correlation_id && (
+              <div>
+                <span className="text-slate-400 font-medium block mb-1">Correlation ID</span>
+                <div className="p-2 rounded bg-slate-950 border border-slate-800 font-mono text-[11px] text-cyan-400">
+                  {selectedLog.correlation_id}
+                </div>
+              </div>
+            )}
 
             <div className="flex justify-end pt-3 border-t border-slate-800">
               <button

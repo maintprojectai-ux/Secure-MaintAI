@@ -60,3 +60,13 @@ class AuditLogResponse(BaseModel):
     metadata: dict | None = None
 
     model_config = {"from_attributes": True}
+
+
+class AuditLogPaginatedResponse(BaseModel):
+    """Paginated response containing a list of audit log entries."""
+
+    items: list[AuditLogResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int

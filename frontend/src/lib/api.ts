@@ -1556,7 +1556,7 @@ export async function isolateWorkstation(
   workstationId: string
 ): Promise<{ status: string; message: string }> {
   return apiFetch<{ status: string; message: string }>(
-    `/policy/evaluate/${workstationId}?execute_playbook=true`,
+    `/policy/evaluate/${workstationId}?auto_execute=true`,
     {
       method: "POST",
     }
@@ -1572,5 +1572,184 @@ export async function rollbackWorkstationIsolation(
       method: "POST",
     }
   );
+}
+
+// -------------------------------------------------------------
+// Live Alerts API
+// -------------------------------------------------------------
+
+export async function getAlerts(params?: {
+  status?: string;
+  severity?: string;
+  sourceType?: string;
+  limit?: number;
+}): Promise<any[]> {
+  const query = new URLSearchParams();
+  if (params?.status) query.set("status", params.status);
+  if (params?.severity) query.set("severity", params.severity);
+  if (params?.sourceType) query.set("source_type", params.sourceType);
+  if (params?.limit) query.set("limit", params.limit.toString());
+
+  const qs = query.toString();
+  return apiFetch<any[]>(`/alerts${qs ? `?${qs}` : ""}`);
+}
+
+export async function acknowledgeAlert(alertId: string): Promise<any> {
+  return apiFetch<any>(`/alerts/${alertId}/acknowledge`, {
+    method: "POST",
+  });
+}
+
+export async function resolveAlert(alertId: string, notes?: string): Promise<any> {
+  return apiFetch<any>(`/alerts/${alertId}/resolve`, {
+    method: "POST",
+    body: JSON.stringify({ notes: notes || "Resolved by operator" }),
+  });
+}
+
+// -------------------------------------------------------------
+// Live Cybersecurity & Incidents API
+// -------------------------------------------------------------
+
+export async function getIncidents(params?: {
+  status?: string;
+  severity?: string;
+  category?: string;
+  workstationId?: string;
+  limit?: number;
+}): Promise<any[]> {
+  const query = new URLSearchParams();
+  if (params?.status) query.set("status", params.status);
+  if (params?.severity) query.set("severity", params.severity);
+  if (params?.category) query.set("category", params.category);
+  if (params?.workstationId) query.set("workstation_id", params.workstationId);
+  if (params?.limit) query.set("limit", params.limit.toString());
+
+  const qs = query.toString();
+  return apiFetch<any[]>(`/incidents${qs ? `?${qs}` : ""}`);
+}
+
+export async function getSecurityEvents(params?: {
+  severity?: string;
+  eventType?: string;
+  source?: string;
+  workstationId?: string;
+  limit?: number;
+}): Promise<any[]> {
+  const query = new URLSearchParams();
+  if (params?.severity) query.set("severity", params.severity);
+  if (params?.eventType) query.set("event_type", params.eventType);
+  if (params?.source) query.set("source", params.source);
+  if (params?.workstationId) query.set("workstation_id", params.workstationId);
+  if (params?.limit) query.set("limit", params.limit.toString());
+
+  const qs = query.toString();
+  return apiFetch<any[]>(`/security/events${qs ? `?${qs}` : ""}`);
+}
+
+// -------------------------------------------------------------
+// Live Users Management API
+// -------------------------------------------------------------
+
+export interface UsersPaginatedResponse {
+  items: Array<{
+    id: string;
+    username: string;
+    email: string;
+    role: string;
+    status: string;
+    last_login_at?: string;
+    created_at: string;
+  }>;
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}
+
+export async function getUsers(params?: {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  role?: string;
+}): Promise<UsersPaginatedResponse> {
+  const query = new URLSearchParams();
+  if (params?.page) query.set("page", params.page.toString());
+  if (params?.pageSize) query.set("page_size", params.pageSize.toString());
+  if (params?.search) query.set("search", params.search);
+  if (params?.role) query.set("role", params.role);
+
+  const qs = query.toString();
+  return apiFetch<UsersPaginatedResponse>(`/users${qs ? `?${qs}` : ""}`);
+}
+
+export async function createUser(payload: {
+  username: string;
+  email: string;
+  password?: string;
+  role: string;
+}): Promise<any> {
+  return apiFetch<any>("/users", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateUser(
+  userId: string,
+  payload: { status?: string; role_id?: string }
+): Promise<any> {
+  return apiFetch<any>(`/users/${userId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteUser(userId: string): Promise<any> {
+  return apiFetch<any>(`/users/${userId}`, {
+    method: "DELETE",
+  });
+}
+
+// -------------------------------------------------------------
+// Live Audit Log API
+// -------------------------------------------------------------
+
+export interface AuditLogPaginatedResponse {
+  items: Array<{
+    id: string;
+    actor: string;
+    action: string;
+    resource: string;
+    timestamp: string;
+    source_ip?: string;
+    result: string;
+    correlation_id?: string;
+    metadata?: Record<string, any>;
+  }>;
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}
+
+export async function getAuditLogs(params?: {
+  page?: number;
+  pageSize?: number;
+  action?: string;
+  actor?: string;
+  result?: string;
+  search?: string;
+}): Promise<AuditLogPaginatedResponse> {
+  const query = new URLSearchParams();
+  if (params?.page) query.set("page", params.page.toString());
+  if (params?.pageSize) query.set("page_size", params.pageSize.toString());
+  if (params?.action) query.set("action", params.action);
+  if (params?.actor) query.set("actor", params.actor);
+  if (params?.result) query.set("result", params.result);
+  if (params?.search) query.set("search", params.search);
+
+  const qs = query.toString();
+  return apiFetch<AuditLogPaginatedResponse>(`/audit/logs${qs ? `?${qs}` : ""}`);
 }
 
