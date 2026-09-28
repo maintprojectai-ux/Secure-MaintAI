@@ -77,7 +77,7 @@ function mapBackendIncidentToThreat(raw: any): ActiveThreatItem {
     target_description: raw.description || "Active security incident detected",
     target_ip: "10.10.1.15",
     time_ago: raw.created_at
-      ? new Date(raw.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      ? new Date(raw.created_at).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true })
       : "Just now",
     status,
     statusColor,
@@ -90,7 +90,7 @@ function mapBackendSecurityEvent(raw: any): SecurityEventItem {
     sev === "CRITICAL" ? "Critical" : sev === "HIGH" ? "High" : sev === "LOW" ? "Low" : "Medium";
 
   const timeFormatted = raw.created_at || raw.timestamp
-    ? new Date(raw.created_at || raw.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    ? new Date(raw.created_at || raw.timestamp).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true })
     : "Just now";
 
   const status: SecurityEventItem["status"] =

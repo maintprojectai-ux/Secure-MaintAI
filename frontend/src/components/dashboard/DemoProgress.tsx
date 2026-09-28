@@ -198,8 +198,13 @@ export function DemoProgress({ receipt, activeStep, onStepSelect, onReset }: Dem
                       {receipt.step_4_scenario.name}
                     </span>
                   </div>
-                  <span className="text-slate-400 text-[11px]">
-                    Triggered: {new Date(receipt.step_4_scenario.triggered_at).toLocaleTimeString()}
+                  <span suppressHydrationWarning className="text-slate-400 text-[11px]">
+                    Triggered: {new Date(receipt.step_4_scenario.triggered_at).toLocaleTimeString("en-US", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      second: "2-digit",
+                      hour12: true,
+                    })}
                   </span>
                 </div>
 

@@ -1438,8 +1438,12 @@ export default function PredictionsPage() {
                         <td className="py-2.5 px-3 text-slate-400">
                           {anom.predicted_fault || anom.model_name || "Ensemble Specialist"}
                         </td>
-                        <td className="py-2.5 px-3 text-right text-slate-500">
-                          {new Date(anom.timestamp || anom.created_at || Date.now()).toLocaleTimeString()}
+                        <td suppressHydrationWarning className="py-2.5 px-3 text-right text-slate-500">
+                          {new Date(anom.timestamp || anom.created_at || Date.now()).toLocaleTimeString("en-US", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                            hour12: true,
+                          })}
                         </td>
                       </tr>
                     ))}

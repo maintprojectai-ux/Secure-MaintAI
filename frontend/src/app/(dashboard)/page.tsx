@@ -65,7 +65,24 @@ const DEFAULT_RECENT_ALERTS = [
   },
 ];
 
+function formatAlertTime(dateStr?: string, fallback = "Just now"): string {
+  if (!dateStr) return fallback;
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return fallback;
+    return d.toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    });
+  } catch {
+    return fallback;
+  }
+}
+
 export default function DashboardPage() {
+  const [mounted, setMounted] = useState(false);
+
   const [selectedTimeframe, setSelectedTimeframe] = useState("Real-time");
   const [selectedResource, setSelectedResource] = useState("CPU");
   const [selectedThreatPeriod, setSelectedThreatPeriod] = useState("Today");
@@ -124,6 +141,7 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
+    setMounted(true);
     loadLiveData();
     const interval = setInterval(loadLiveData, 5000);
     return () => clearInterval(interval);
@@ -246,7 +264,7 @@ export default function DashboardPage() {
 
   // Dynamic Recent Alerts list derived from live alerts with resilient default
   const recentAlerts = useMemo(() => {
-    if (!safeAlerts || safeAlerts.length === 0) {
+    if (!mounted || !safeAlerts || safeAlerts.length === 0) {
       return DEFAULT_RECENT_ALERTS;
     }
     return safeAlerts.slice(0, 5).map((a: any, idx: number) => {
@@ -267,7 +285,7 @@ export default function DashboardPage() {
             : "bg-blue-500/15 text-blue-400 border-blue-500/30";
 
       const timeStr = a.created_at
-        ? new Date(a.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        ? formatAlertTime(a.created_at, a.time || `${(idx + 1) * 3} min ago`)
         : a.time || `${(idx + 1) * 3} min ago`;
 
       return {
@@ -280,7 +298,7 @@ export default function DashboardPage() {
         time: timeStr,
       };
     });
-  }, [safeAlerts]);
+  }, [mounted, safeAlerts]);
 
   // Top Devices by Resource Usage (sorted dynamically per metric)
   interface TopDevice {
@@ -721,7 +739,7 @@ export default function DashboardPage() {
                         {alert.device}
                       </Link>
                     </td>
-                    <td className="py-3 px-2 text-[11px] text-slate-400 whitespace-nowrap">
+                    <td suppressHydrationWarning className="py-3 px-2 text-[11px] text-slate-400 whitespace-nowrap">
                       {alert.time}
                     </td>
                     <td className="py-3 px-1 text-right">

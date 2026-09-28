@@ -49,7 +49,7 @@ function mapBackendUserToItem(u: any): UserManagementItem {
         ? "PENDING"
         : "SUSPENDED";
   const lastLogin = u.last_login_at
-    ? new Date(u.last_login_at).toLocaleDateString()
+    ? new Date(u.last_login_at).toLocaleDateString("en-US")
     : "Recently";
 
   return {

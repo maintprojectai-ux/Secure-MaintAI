@@ -49,10 +49,11 @@ function mapBackendAuditLog(raw: any): EnrichedAuditLogEntry {
     res === "SUCCESS" ? "SUCCESS" : res === "WARNING" ? "WARNING" : "FAILURE";
 
   const timeStr = raw.timestamp
-    ? new Date(raw.timestamp).toLocaleTimeString([], {
+    ? new Date(raw.timestamp).toLocaleTimeString("en-US", {
         hour: "2-digit",
         minute: "2-digit",
         second: "2-digit",
+        hour12: true,
       })
     : "Just now";
 

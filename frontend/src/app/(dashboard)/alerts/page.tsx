@@ -611,7 +611,15 @@ function mapBackendAlertToItem(raw: any): AlertItem {
 
   const id = String(raw.id || "");
   const shortId = id.includes("-") ? id.slice(0, 8).toUpperCase() : id.slice(0, 8);
-  const formattedTime = raw.created_at ? new Date(raw.created_at).toLocaleString() : "Just now";
+  const formattedTime = raw.created_at
+    ? new Date(raw.created_at).toLocaleString("en-US", {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      })
+    : "Just now";
 
   return {
     id,
@@ -653,7 +661,11 @@ function mapBackendAlertToItem(raw: any): AlertItem {
     notes: raw.acknowledged_at
       ? [
           {
-            timestamp: new Date(raw.acknowledged_at).toLocaleTimeString(),
+            timestamp: new Date(raw.acknowledged_at).toLocaleTimeString("en-US", {
+              hour: "2-digit",
+              minute: "2-digit",
+              hour12: true,
+            }),
             author: "Operator",
             type: "Operator" as const,
             content: "Alert acknowledged in system.",
