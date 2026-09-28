@@ -1,0 +1,31 @@
+{
+  "project": "Secure-MaintAI",
+  "model_name": "model_01_isolation_forest",
+  "model_version": "1.0.0",
+  "feature_version": "1.0.0",
+  "training_date": "2026-09-09T20:02:26.110971Z",
+  "model": "Model 01 \u2014 System Telemetry & Anomaly Detection",
+  "dataset": "Server Machine Dataset (SMD)",
+  "machines_evaluated": 28,
+  "detector": "Isolation Forest",
+  "configuration": {
+    "n_estimators": 150,
+    "max_samples": 2048,
+    "scaler": "RobustScaler",
+    "threshold_quantile": 0.99,
+    "seed": 42,
+    "features": "38 raw channels + causal temporal features"
+  },
+  "macro_results": {
+    "Precision": 0.2909602928338332,
+    "Recall": 0.4049787760061817,
+    "F1": 0.25310129386918007,
+    "Balanced Accuracy": 0.6631547374703616,
+    "ROC-AUC": 0.812797476826984,
+    "Average Precision": 0.34928907493265754,
+    "Event Recall": 0.9137570762570763,
+    "False Positive Rate": 0.07866930106545864
+  },
+  "secondary_detector": "PCA reconstruction error",
+  "safety_boundary": "Anomaly evidence only. No diagnosis and no direct SOAR action."
+}

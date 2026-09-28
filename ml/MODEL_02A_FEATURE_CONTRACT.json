@@ -1,0 +1,54 @@
+{
+  "model": "Model 02-A Technical Failure Specialist",
+  "purpose": "Classify technical failure type after Model 01 raises an infrastructure anomaly.",
+  "training_dataset": "RCAEval RE1/RE2",
+  "target_classes": [
+    "cpu",
+    "mem",
+    "disk",
+    "delay",
+    "loss",
+    "socket"
+  ],
+  "deployment_sources": [
+    "OpenTelemetry Metrics",
+    "OpenTelemetry Logs/Traces for future multi-source extension"
+  ],
+  "canonical_features": [
+    "cpu_utilization",
+    "memory_utilization",
+    "disk_utilization",
+    "request_latency",
+    "request_rate",
+    "error_rate",
+    "network_delay",
+    "network_loss",
+    "telemetry_global"
+  ],
+  "window_statistics": [
+    "mean",
+    "std",
+    "min",
+    "max",
+    "p95",
+    "last",
+    "slope"
+  ],
+  "metadata_never_used_as_feature": [
+    "fault",
+    "case_id",
+    "root_cause_service",
+    "fault_description",
+    "inject_time",
+    "repetition",
+    "dataset",
+    "suite",
+    "system_name",
+    "window_end_time"
+  ],
+  "deployment_boundary": {
+    "input": "canonical telemetry window",
+    "output": "failure_type + confidence/evidence",
+    "soar_execution": false
+  }
+}

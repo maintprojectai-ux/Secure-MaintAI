@@ -1,0 +1,11 @@
+              precision    recall  f1-score   support
+
+         cpu       0.95      0.79      0.86      2305
+       delay       0.67      0.66      0.66       853
+        disk       0.74      0.98      0.84       595
+        loss       0.34      0.53      0.41       537
+         mem       0.99      0.93      0.96      1711
+
+    accuracy                           0.81      6001
+   macro avg       0.74      0.78      0.75      6001
+weighted avg       0.85      0.81      0.82      6001

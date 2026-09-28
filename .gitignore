@@ -1,0 +1,141 @@
+# =============================================================================
+# Secure-MaintAI .gitignore
+# =============================================================================
+
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.whl
+.eggs/
+*.manifest
+*.spec
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pytype/
+
+# Testing
+.pytest_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.tox/
+.nox/
+
+# ---------- AI / Agents ----------
+docs/
+.agents/
+.claude/
+ml/data/
+.agent_state.json
+
+# Distribution / Archives
+*.tar.gz
+*.whl
+*.zip
+*.rar
+*.7z
+
+# ---------- Node.js / Frontend ----------
+node_modules/
+.next/
+out/
+.nuxt/
+dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+*.tsbuildinfo
+
+# ---------- IDE ----------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+*.sublime-workspace
+*.sublime-project
+
+# ---------- Environment / Secrets ----------
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+.env.*.local
+!.env.example
+
+# ---------- Database ----------
+*.db
+*.sqlite
+*.sqlite3
+
+# ---------- ML / Data ----------
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+*.joblib
+*.onnx
+ml/models/artifacts/
+ml/data/raw/
+ml/data/processed/
+*.csv
+!ml/data/sample/*.csv
+!ml/model_01_outputs/*.csv
+
+# Allow only active production models required by backend (used model for Model 01)
+!ml/model_01_outputs/models/machine-1-1.joblib
+!ml/model02a_rcaeval_outputs/random_forest.joblib
+!ml/model02b_apt_outputs/model_02b_windows_apt_random_forest.joblib
+
+# ---------- Docker ----------
+docker-compose.override.yml
+
+# ---------- OS ----------
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ---------- Logs ----------
+logs/
+*.log
+
+# ---------- Certificates / Keys ----------
+*.pem
+*.key
+*.crt
+*.csr
+*.p12
+*.pfx
+
+# ---------- Temporary ----------
+tmp/
+temp/
+scratch/

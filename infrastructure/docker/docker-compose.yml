@@ -1,0 +1,44 @@
+# Secure-MaintAI — Development Docker Compose
+# Usage: docker compose -f infrastructure/docker/docker-compose.yml up -d
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: secure_maintai
+      POSTGRES_PASSWORD: change-me
+      POSTGRES_DB: secure_maintai
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U secure_maintai"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ../../
+      dockerfile: infrastructure/docker/Dockerfile.backend
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENV: development
+      APP_DEBUG: "true"
+      APP_LOG_LEVEL: DEBUG
+      APP_SECRET_KEY: dev-secret-key-change-in-production
+      DATABASE_HOST: db
+      DATABASE_PORT: 5432
+      DATABASE_NAME: secure_maintai
+      DATABASE_USER: secure_maintai
+      DATABASE_PASSWORD: change-me
+      AUTH_JWT_SECRET_KEY: dev-jwt-secret-change-in-production
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:

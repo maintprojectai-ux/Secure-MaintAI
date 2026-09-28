@@ -1,0 +1,21 @@
+# =============================================================================
+# Secure-MaintAI — Endpoint Monitoring Agent Dependencies
+# =============================================================================
+#
+# Lightweight dependencies for standalone workstation deployment:
+# - psutil: Non-intrusive CPU, Memory, Disk, Network, Process sampling
+# - httpx: Async HTTPS client with retry/backoff
+# - pydantic: Configuration validation and type safety
+#
+# Install:
+#   pip install -r requirements.txt
+# =============================================================================
+
+# System and Hardware Metric Collectors
+psutil>=6.0.0,<8.0.0
+
+# HTTP/TLS Transport Client
+httpx>=0.27.0,<1.0.0
+
+# Configuration Management & Validation
+pydantic>=2.7.0,<3.0.0

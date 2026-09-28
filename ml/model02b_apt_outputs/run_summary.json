@@ -1,0 +1,11 @@
+{
+  "combined_rows": 102011,
+  "mapping_rows": 102011,
+  "parsed_events": 102011,
+  "training_windows": 1944,
+  "positive_windows": 1756,
+  "negative_windows": 188,
+  "feature_count": 30,
+  "split_seed": 42,
+  "elapsed_seconds": 32.02
+}
