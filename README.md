@@ -286,8 +286,3 @@ The system implements strict, server-authoritative RBAC (Rule 8):
 ## 8. Research Integrity & Context
 
 Secure-MaintAI is developed as academic research at **King Khalid University**. All measured benchmarks, detection latencies, and classification confusion matrices reflect actual local experiments and test executions, in accordance with Rule 39.
-
-For detailed design specifications, consult:
-- [`walkthrough.md`](file:///d:/workspace/2026_2027/FirstSemester/KKU/secure-maintai/.agents/plans/walkthrough.md) — Implementation and verification record
-- [`docs/architecture/`](file:///d:/workspace/2026_2027/FirstSemester/KKU/secure-maintai/docs/architecture) — Architecture documents and ADRs
-- [`docs/ml/README.md`](file:///d:/workspace/2026_2027/FirstSemester/KKU/secure-maintai/docs/ml/README.md) — Multi-stage ML engine specifications
