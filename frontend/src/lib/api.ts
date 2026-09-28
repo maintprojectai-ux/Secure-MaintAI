@@ -53,7 +53,13 @@ export class ApiError extends Error {
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
   const token = localStorage.getItem("access_token");
-  if (!token || token === "demo-jwt-token-active" || token.startsWith("jwt-") || token === "demo-session") {
+  if (
+    !token ||
+    token.startsWith("demo-") ||
+    token.startsWith("jwt-") ||
+    token === "demo-jwt-token-active" ||
+    token === "demo-session"
+  ) {
     return null;
   }
   return token;
@@ -107,6 +113,9 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
     });
 
     if (!res.ok) {
+      if (res.status === 401) {
+        clearToken();
+      }
       const errorData = await res.json().catch(() => ({}));
       throw new ApiError(
         res.status,

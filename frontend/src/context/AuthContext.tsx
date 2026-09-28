@@ -33,12 +33,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const existingUser = getStoredUser();
 
       if (existingToken && existingUser) {
-        if (isMounted) {
-          setUser(existingUser);
-          setTokenState(existingToken);
-          setIsLoading(false);
+        try {
+          const testRes = await fetch("/api/v1/users/me", {
+            headers: { Authorization: `Bearer ${existingToken}` },
+          });
+          if (testRes.ok) {
+            if (isMounted) {
+              setUser(existingUser);
+              setTokenState(existingToken);
+              setIsLoading(false);
+            }
+            return;
+          }
+          if (testRes.status === 401) {
+            clearToken();
+          }
+        } catch {
+          if (isMounted) {
+            setUser(existingUser);
+            setTokenState(existingToken);
+            setIsLoading(false);
+          }
+          return;
         }
-        return;
       }
 
       // Try automatic institutional authentication with backend for initial session
