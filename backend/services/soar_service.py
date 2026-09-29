@@ -235,6 +235,17 @@ class SOARService:
         self._session.add(inc)
         await self._session.flush()
 
+        alert = Alert(
+            source_type="INCIDENT",
+            source_id=inc.id,
+            severity=eval_res.correlated_incident.severity,
+            status="OPEN",
+            title=f"Host Surgical Isolation: {eval_res.correlated_incident.incident_category}",
+            description=eval_res.reason,
+        )
+        self._session.add(alert)
+        await self._session.flush()
+
         audit_entry = await self._audit.log(
             actor=operator,
             action="soar.playbook.surgical_isolation",
@@ -242,6 +253,7 @@ class SOARService:
             result="success",
             metadata_={
                 "incident_id": str(inc.id),
+                "alert_id": str(alert.id),
                 "category": eval_res.correlated_incident.incident_category,
                 "evidence": eval_res.correlated_incident.evidence,
                 "role": eval_res.user_context.role,
@@ -257,6 +269,7 @@ class SOARService:
             status="SUCCESS",
             action_taken="Applied surgical network isolation rules to host. Management agent telemetry remains active.",
             incident_id=inc.id,
+            alert_id=alert.id,
             audit_id=audit_entry.id,
             can_rollback=True,
         )

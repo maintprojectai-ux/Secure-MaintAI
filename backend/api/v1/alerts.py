@@ -120,6 +120,12 @@ async def create_alert(
     response_model=AlertResponse,
     summary="Acknowledge an alert",
 )
+@router.post(
+    "/{alert_id}/acknowledge",
+    response_model=AlertResponse,
+    summary="Acknowledge an alert (POST alias)",
+    include_in_schema=False,
+)
 async def acknowledge_alert(
     alert_id: UUID,
     session: Annotated[AsyncSession, Depends(get_async_session)],
@@ -152,6 +158,12 @@ async def acknowledge_alert(
     "/{alert_id}/resolve",
     response_model=AlertResponse,
     summary="Resolve an alert",
+)
+@router.post(
+    "/{alert_id}/resolve",
+    response_model=AlertResponse,
+    summary="Resolve an alert (POST alias)",
+    include_in_schema=False,
 )
 async def resolve_alert(
     alert_id: UUID,
