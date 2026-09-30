@@ -45,6 +45,21 @@ class IdPService:
         # Outage simulation flag
         self._outage_mode: bool = False
 
+    @property
+    def is_outage_mode(self) -> bool:
+        """Return True if simulated outage mode is active."""
+        return self._outage_mode
+
+    @property
+    def mock_users_count(self) -> int:
+        """Return total count of registered directory profiles."""
+        return len(self._mock_directory)
+
+    @property
+    def active_workloads_count(self) -> int:
+        """Return total count of active registered workloads."""
+        return sum(len(wl) for wl in self._active_workloads.values())
+
     def set_outage_mode(self, enabled: bool) -> None:
         """Enable or disable simulated IdP outage for testing and resilience verification."""
         self._outage_mode = enabled

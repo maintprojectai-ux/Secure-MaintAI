@@ -1762,3 +1762,140 @@ export async function getAuditLogs(params?: {
   return apiFetch<AuditLogPaginatedResponse>(`/audit/logs${qs ? `?${qs}` : ""}`);
 }
 
+// -------------------------------------------------------------
+// Live Predictive Maintenance API
+// -------------------------------------------------------------
+
+export interface MaintenanceTaskItem {
+  id: string;
+  title: string;
+  workstation_id?: string;
+  workstation_hostname: string;
+  department: string;
+  status: "Scheduled" | "In Progress" | "Completed" | "Overdue";
+  scheduled_time: string;
+  duration: string;
+  duration_minutes: number;
+  assigned_to: string;
+  priority: "Low" | "Medium" | "High";
+  category: "System" | "Database" | "Network" | "Backup" | "Security" | "Application" | "Virtualization";
+  description: string;
+  affected_systems: string[];
+  incident_number?: string;
+}
+
+export interface MaintenanceKPIs {
+  scheduled_today: number;
+  in_progress: number;
+  completed_this_week: number;
+  overdue: number;
+  system_health_score: number;
+}
+
+export async function getMaintenanceTasks(params?: {
+  status?: string;
+  limit?: number;
+}): Promise<MaintenanceTaskItem[]> {
+  const query = new URLSearchParams();
+  if (params?.status) query.set("status", params.status);
+  if (params?.limit) query.set("limit", params.limit.toString());
+  const qs = query.toString();
+  return apiFetch<MaintenanceTaskItem[]>(`/maintenance/tasks${qs ? `?${qs}` : ""}`);
+}
+
+export async function getMaintenanceKPIs(): Promise<MaintenanceKPIs> {
+  return apiFetch<MaintenanceKPIs>("/maintenance/kpis");
+}
+
+export async function createMaintenanceTask(payload: {
+  title: string;
+  workstation_id?: string;
+  category?: string;
+  priority?: string;
+  scheduled_time?: string;
+  duration_minutes?: number;
+  description?: string;
+  assigned_to?: string;
+}): Promise<MaintenanceTaskItem> {
+  return apiFetch<MaintenanceTaskItem>("/maintenance/tasks", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateMaintenanceTaskStatus(
+  taskId: string,
+  status: string,
+  notes?: string
+): Promise<MaintenanceTaskItem> {
+  return apiFetch<MaintenanceTaskItem>(`/maintenance/tasks/${taskId}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({ status, notes }),
+  });
+}
+
+// -------------------------------------------------------------
+// Live Executive Reports API
+// -------------------------------------------------------------
+
+export interface ExecutiveReportSummary {
+  generated_at: string;
+  fleet_total_workstations: number;
+  fleet_online_workstations: number;
+  fleet_uptime_percentage: number;
+  total_incidents: number;
+  active_security_threats: number;
+  resolved_incidents: number;
+  maintenance_advisories: number;
+  total_alerts: number;
+  critical_alerts: number;
+  mean_time_to_resolution_minutes: number;
+  threat_distribution: Record<string, number>;
+  system_health_rating: string;
+}
+
+export async function getReportSummary(): Promise<ExecutiveReportSummary> {
+  return apiFetch<ExecutiveReportSummary>("/reports/summary");
+}
+
+// -------------------------------------------------------------
+// Live System Settings & Platform Diagnostics API
+// -------------------------------------------------------------
+
+export interface SystemSettingsData {
+  app_name: string;
+  app_env: string;
+  kill_switch_active: boolean;
+  smd_threshold: number;
+  sysmon_confidence: number;
+  auto_surgical_isolation: boolean;
+  notify_critical: boolean;
+  notify_daily_report: boolean;
+  idp_mode: string;
+  idp_status: string;
+}
+
+export interface IdPHealthCheck {
+  status: "healthy" | "degraded" | "outage";
+  latency_ms: number;
+  protocol: string;
+  mock_users_registered: number;
+  active_workloads_registered: number;
+  outage_mode_active: boolean;
+}
+
+export async function getSystemSettings(): Promise<SystemSettingsData> {
+  return apiFetch<SystemSettingsData>("/system/settings");
+}
+
+export async function updateSystemSettings(payload: Partial<SystemSettingsData>): Promise<SystemSettingsData> {
+  return apiFetch<SystemSettingsData>("/system/settings", {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function checkIdPHealth(): Promise<IdPHealthCheck> {
+  return apiFetch<IdPHealthCheck>("/system/health/idp");
+}
+
