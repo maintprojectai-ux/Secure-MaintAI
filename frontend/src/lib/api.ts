@@ -1858,6 +1858,22 @@ export async function getReportSummary(): Promise<ExecutiveReportSummary> {
   return apiFetch<ExecutiveReportSummary>("/reports/summary");
 }
 
+export async function downloadReportExport(format: "csv" | "json" = "csv"): Promise<Blob> {
+  const token = getToken();
+  const headers: HeadersInit = {};
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  const res = await fetch(`${API_BASE}/reports/export?format=${format}`, {
+    method: "GET",
+    headers,
+  });
+  if (!res.ok) {
+    throw new ApiError(res.status, `Export download failed with status ${res.status}`);
+  }
+  return res.blob();
+}
+
 // -------------------------------------------------------------
 // Live System Settings & Platform Diagnostics API
 // -------------------------------------------------------------

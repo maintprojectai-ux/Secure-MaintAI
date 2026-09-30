@@ -54,13 +54,7 @@ def _map_incident_to_task(inc: Incident, ws: Workstation | None = None) -> Maint
     )
 
     sev = inc.severity.upper()
-    priority_label = (
-        "High"
-        if sev in ("CRITICAL", "HIGH")
-        else "Low"
-        if sev == "LOW"
-        else "Medium"
-    )
+    priority_label = "High" if sev in ("CRITICAL", "HIGH") else "Low" if sev == "LOW" else "Medium"
 
     ws_name = ws.hostname if ws else "SRV-ACA-01"
     dept = ws.department if (ws and ws.department) else "Academic Computing"

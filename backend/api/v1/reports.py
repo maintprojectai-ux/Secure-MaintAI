@@ -69,9 +69,7 @@ async def get_report_summary(
     uptime_pct = round((online_ws / total_ws * 100), 2) if (total_ws and total_ws > 0) else 99.4
 
     # 2. Incidents count by category
-    inc_cat_res = await session.execute(
-        select(Incident.category, func.count(Incident.id)).group_by(Incident.category)
-    )
+    inc_cat_res = await session.execute(select(Incident.category, func.count(Incident.id)).group_by(Incident.category))
     cat_counts = {cat: count for cat, count in inc_cat_res.all()}
 
     total_inc = sum(cat_counts.values())
@@ -101,7 +99,13 @@ async def get_report_summary(
         "Technical Faults": max(maint_count, 3),
     }
 
-    rating = "Optimal (A+)" if uptime_pct >= 99.0 and crit_alt == 0 else "Good (A)" if uptime_pct >= 95.0 else "Attention Required"
+    rating = (
+        "Optimal (A+)"
+        if uptime_pct >= 99.0 and crit_alt == 0
+        else "Good (A)"
+        if uptime_pct >= 95.0
+        else "Attention Required"
+    )
 
     return ExecutiveReportSummary(
         generated_at=now,
@@ -133,15 +137,11 @@ async def export_report(
     now_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
     # Fetch recent incidents
-    inc_res = await session.execute(
-        select(Incident).order_by(desc(Incident.created_at)).limit(100)
-    )
+    inc_res = await session.execute(select(Incident).order_by(desc(Incident.created_at)).limit(100))
     incidents = inc_res.scalars().all()
 
     # Fetch recent audit logs
-    audit_res = await session.execute(
-        select(AuditLog).order_by(desc(AuditLog.timestamp)).limit(100)
-    )
+    audit_res = await session.execute(select(AuditLog).order_by(desc(AuditLog.timestamp)).limit(100))
     audit_logs = audit_res.scalars().all()
 
     if format == "json":
@@ -192,28 +192,32 @@ async def export_report(
     writer.writerow(["--- INCIDENTS & MAINTENANCE ---"])
     writer.writerow(["Incident Number", "Category", "Severity", "Status", "Title", "Created At"])
     for i in incidents:
-        writer.writerow([
-            i.incident_number,
-            i.category,
-            i.severity,
-            i.status,
-            i.title,
-            i.created_at.isoformat(),
-        ])
+        writer.writerow(
+            [
+                i.incident_number,
+                i.category,
+                i.severity,
+                i.status,
+                i.title,
+                i.created_at.isoformat(),
+            ]
+        )
 
     writer.writerow([])
     # Audit Logs Section
     writer.writerow(["--- IMMUTABLE AUDIT TRAIL ---"])
     writer.writerow(["Audit ID", "Timestamp", "Actor", "Action", "Resource", "Result"])
     for a in audit_logs:
-        writer.writerow([
-            str(a.id),
-            a.timestamp.isoformat(),
-            a.actor,
-            a.action,
-            a.resource,
-            a.result,
-        ])
+        writer.writerow(
+            [
+                str(a.id),
+                a.timestamp.isoformat(),
+                a.actor,
+                a.action,
+                a.resource,
+                a.result,
+            ]
+        )
 
     csv_bytes = output.getvalue().encode("utf-8")
     return StreamingResponse(

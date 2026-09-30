@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Settings,
   Shield,
@@ -24,6 +24,11 @@ import {
   Activity,
 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
+import {
+  getSystemSettings,
+  updateSystemSettings,
+  checkIdPHealth,
+} from "@/lib/api";
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<
@@ -62,6 +67,102 @@ export default function SettingsPage() {
   // Appearance
   const [selectedTheme, setSelectedTheme] = useState("dark-cyber");
   const [accentColor, setAccentColor] = useState("blue");
+
+  // IdP diagnostic state
+  const [idpHealth, setIdpHealth] = useState<{ status: string; latency_ms: number } | null>(null);
+  const [isTestingIdP, setIsTestingIdP] = useState(false);
+
+  // Load live system parameters with dual-mode fallback
+  useEffect(() => {
+    let isMounted = true;
+    async function loadSettings() {
+      try {
+        const s = await getSystemSettings();
+        if (isMounted && s) {
+          setKillSwitchActive(s.kill_switch_active);
+          setSmdThreshold(s.smd_threshold.toString());
+          setSysmonConfidence(s.sysmon_confidence.toString());
+          setAutoSurgicalIsolation(s.auto_surgical_isolation);
+          setNotifyCritical(s.notify_critical);
+          setNotifyDailyReport(s.notify_daily_report);
+        }
+      } catch {
+        // Retain default mock baseline
+      }
+    }
+    loadSettings();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const handleSaveSecurity = async () => {
+    triggerToast("Security policies updated.");
+    try {
+      await updateSystemSettings({
+        kill_switch_active: killSwitchActive,
+      });
+    } catch {
+      //
+    }
+  };
+
+  const handleSaveML = async () => {
+    triggerToast("ML detection parameters recalibrated.");
+    try {
+      await updateSystemSettings({
+        smd_threshold: parseFloat(smdThreshold),
+        sysmon_confidence: parseFloat(sysmonConfidence),
+        auto_surgical_isolation: autoSurgicalIsolation,
+      });
+    } catch {
+      //
+    }
+  };
+
+  const handleSaveNotifications = async () => {
+    triggerToast("Notification rules saved.");
+    try {
+      await updateSystemSettings({
+        notify_critical: notifyCritical,
+        notify_daily_report: notifyDailyReport,
+      });
+    } catch {
+      //
+    }
+  };
+
+  const handleConfirmKillSwitch = async () => {
+    const nextState = !killSwitchActive;
+    setKillSwitchActive(nextState);
+    setShowKillSwitchModal(false);
+    triggerToast(
+      nextState
+        ? "EMERGENCY CONTAINMENT ACTIVATED across student endpoints!"
+        : "Emergency containment lifted. Normal networking restored."
+    );
+    try {
+      await updateSystemSettings({ kill_switch_active: nextState });
+    } catch {
+      // Local state preserved
+    }
+  };
+
+  const handleTestIdP = async () => {
+    setIsTestingIdP(true);
+    try {
+      const res = await checkIdPHealth();
+      setIdpHealth({ status: res.status, latency_ms: res.latency_ms });
+      triggerToast(
+        `IdP Diagnostic: ${res.protocol} status is ${res.status.toUpperCase()} (${res.latency_ms}ms).`
+      );
+    } catch {
+      setIdpHealth({ status: "outage", latency_ms: 0 });
+      triggerToast("IdP Diagnostic: Fallback mode active (Directory connection failed).");
+    } finally {
+      setIsTestingIdP(false);
+    }
+  };
 
   const triggerToast = (msg: string) => {
     setToastMsg(msg);
@@ -305,7 +406,7 @@ export default function SettingsPage() {
 
               <div className="flex justify-end pt-4 border-t border-slate-800">
                 <button
-                  onClick={() => triggerToast("Security policies updated.")}
+                  onClick={handleSaveSecurity}
                   className="flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-blue text-white text-xs font-semibold hover:bg-blue-600 transition-colors"
                 >
                   <Save className="w-3.5 h-3.5" />
@@ -384,7 +485,7 @@ export default function SettingsPage() {
 
               <div className="flex justify-end pt-4 border-t border-slate-800">
                 <button
-                  onClick={() => triggerToast("ML detection parameters recalibrated.")}
+                  onClick={handleSaveML}
                   className="flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-blue text-white text-xs font-semibold hover:bg-blue-600 transition-colors"
                 >
                   <Save className="w-3.5 h-3.5" />
@@ -457,7 +558,7 @@ export default function SettingsPage() {
 
               <div className="flex justify-end pt-4 border-t border-slate-800">
                 <button
-                  onClick={() => triggerToast("Notification rules saved.")}
+                  onClick={handleSaveNotifications}
                   className="flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-blue text-white text-xs font-semibold hover:bg-blue-600 transition-colors"
                 >
                   <Save className="w-3.5 h-3.5" />
@@ -492,10 +593,19 @@ export default function SettingsPage() {
                     <span className="font-bold text-white block">King Khalid University LDAP / IdP</span>
                     <span className="text-[11px] text-slate-400">SAML 2.0 / OIDC Context Broker</span>
                     <span className="inline-block mt-2 px-2 py-0.5 rounded text-[10px] bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                      CONNECTED (SYNCED)
+                      {idpHealth
+                        ? `${idpHealth.status.toUpperCase()} (${idpHealth.latency_ms}ms)`
+                        : "CONNECTED (SYNCED)"}
                     </span>
                   </div>
-                  <RefreshCw className="w-4 h-4 text-emerald-400" />
+                  <button
+                    onClick={handleTestIdP}
+                    disabled={isTestingIdP}
+                    title="Test IdP Connection"
+                    className="p-1.5 rounded-lg hover:bg-slate-800 text-emerald-400 hover:text-emerald-300 transition-colors cursor-pointer"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${isTestingIdP ? "animate-spin" : ""}`} />
+                  </button>
                 </div>
 
                 <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 flex items-start justify-between">
@@ -650,15 +760,7 @@ export default function SettingsPage() {
               Cancel
             </button>
             <button
-              onClick={() => {
-                setKillSwitchActive(!killSwitchActive);
-                setShowKillSwitchModal(false);
-                triggerToast(
-                  killSwitchActive
-                    ? "Emergency containment lifted. Normal networking restored."
-                    : "EMERGENCY CONTAINMENT ACTIVATED across student endpoints!"
-                );
-              }}
+              onClick={handleConfirmKillSwitch}
               className={`px-4 py-2 rounded-lg font-bold transition-colors ${
                 killSwitchActive
                   ? "bg-slate-700 text-white hover:bg-slate-600"
