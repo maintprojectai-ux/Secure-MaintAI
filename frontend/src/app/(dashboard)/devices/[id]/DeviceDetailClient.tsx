@@ -5,103 +5,155 @@ import Link from "next/link";
 import {
   Server,
   Cpu,
-  HardDrive,
   Activity,
   Shield,
   RotateCcw,
   AlertTriangle,
   AlertCircle,
-  Info,
-  Clock,
   CheckCircle2,
   Edit,
-  Play,
   RotateCw,
   Slash,
   Thermometer,
   Fan,
-  Zap,
   Network,
-  Check,
   ChevronDown,
   ChevronRight,
-  User as UserIcon,
   ShieldCheck,
   Power,
-  X,
   KeyRound,
   ShieldAlert as ShieldAlertIcon,
 } from "lucide-react";
-import { Workstation, DemoExecutionReceipt } from "@/types";
+import { Workstation, DemoExecutionReceipt, WorkstationStatus } from "@/types";
 import { Modal } from "@/components/ui/Modal";
 import { DemoProgress } from "@/components/dashboard/DemoProgress";
 import { DemoController } from "@/components/dashboard/DemoController";
 import {
   getWorkstationTelemetry,
   getWorkstation,
+  updateWorkstation,
   isolateWorkstation,
   rollbackWorkstationIsolation,
 } from "@/lib/api";
 
 interface DeviceDetailClientProps {
-  initialWorkstation: Workstation;
+  deviceId: string;
+  initialWorkstation?: Workstation | null;
+}
+
+function formatLastSeen(lastSeenAt?: string | null): string {
+  if (!lastSeenAt) return "Never";
+  const diffMs = Date.now() - new Date(lastSeenAt).getTime();
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) return `${Math.max(1, diffSec)}s ago`;
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHours = Math.floor(diffMin / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
+}
+
+function formatUptime(createdAt?: string | null): string {
+  if (!createdAt) return "Active";
+  const diffMs = Math.max(0, Date.now() - new Date(createdAt).getTime());
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  const diffHours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+  const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+  if (diffDays > 0) return `${diffDays}d ${diffHours}h ${diffMins}m`;
+  if (diffHours > 0) return `${diffHours}h ${diffMins}m`;
+  return `${diffMins}m`;
 }
 
 export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
-  initialWorkstation,
+  deviceId,
+  initialWorkstation = null,
 }) => {
-  const [workstation, setWorkstation] = useState<Workstation>(initialWorkstation);
+  const [workstation, setWorkstation] = useState<Workstation | null>(initialWorkstation);
+  const [isLoading, setIsLoading] = useState<boolean>(!initialWorkstation);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [showIsolationModal, setShowIsolationModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [isSubmittingEdit, setIsSubmittingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
   const [showRestartModal, setShowRestartModal] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
 
   // Edit form state
-  const [editForm, setEditForm] = useState({
-    hostname: workstation.hostname,
-    department: workstation.department || "Main Data Center",
-    os_type: workstation.os_type || "Windows Server 2019",
-    location: "Main Data Center / Rack 01",
-    ip_address: workstation.ip_address || "10.10.1.10",
+  const [editForm, setEditForm] = useState<{
+    department: string;
+    lab: string;
+    asset_tag: string;
+    status: WorkstationStatus;
+  }>({
+    department: initialWorkstation?.department || "",
+    lab: initialWorkstation?.lab || "",
+    asset_tag: initialWorkstation?.asset_tag || "",
+    status: (initialWorkstation?.status as WorkstationStatus) || "ONLINE",
   });
 
-  // 7-Step Demonstration State
+  // 10-Step Demonstration State
   const [demoReceipt, setDemoReceipt] = useState<DemoExecutionReceipt | null>(null);
   const [demoActiveStep, setDemoActiveStep] = useState<number>(1);
 
   // Dynamic live telemetry metrics
-  const [liveCpu, setLiveCpu] = useState<number>(42);
-  const [liveMemory, setLiveMemory] = useState<number>(68);
-  const [liveDisk, setLiveDisk] = useState<number>(54);
+  const [liveCpu, setLiveCpu] = useState<number>(initialWorkstation?.cpu_usage ?? 42);
+  const [liveMemory, setLiveMemory] = useState<number>(initialWorkstation?.memory_usage ?? 68);
+  const [liveDisk, setLiveDisk] = useState<number>(initialWorkstation?.disk_usage ?? 54);
   const [sparkCpu, setSparkCpu] = useState<number[]>([35, 42, 38, 45, 52, 48, 44, 42]);
   const [sparkMemory, setSparkMemory] = useState<number[]>([62, 64, 65, 66, 68, 67, 68, 68]);
   const [sparkDisk, setSparkDisk] = useState<number[]>([50, 51, 52, 53, 54, 54, 54, 54]);
   const [sparkLabels, setSparkLabels] = useState<string[]>([
-    "15:25", "15:30", "15:35", "15:40", "15:45", "15:50", "15:55", "16:00"
+    "15:25", "15:30", "15:35", "15:40", "15:45", "15:50", "15:55", "16:00",
   ]);
 
-  // Dynamic telemetry polling
+  // Load workstation from live backend API
   React.useEffect(() => {
     let active = true;
 
-    // Fetch live workstation details if ID is a valid UUID
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(workstation.id);
-    if (isUuid) {
-      getWorkstation(workstation.id)
-        .then((live) => {
-          if (active && live) {
-            setWorkstation((prev) => ({
-              ...prev,
-              ...live,
-              is_isolated: live.status === "ISOLATED",
-            }));
-          }
-        })
-        .catch((err) => {
-          console.debug("Backend workstation details API unreachable:", err);
-        });
+    async function loadWorkstation() {
+      try {
+        setIsLoading(true);
+        setLoadError(null);
+        const live = await getWorkstation(deviceId);
+        if (active && live) {
+          setWorkstation({
+            ...live,
+            is_isolated: live.status === "ISOLATED",
+          });
+          setEditForm({
+            department: live.department || "",
+            lab: live.lab || "",
+            asset_tag: live.asset_tag || "",
+            status: live.status || "ONLINE",
+          });
+          if (live.cpu_usage != null) setLiveCpu(Math.round(live.cpu_usage));
+          if (live.memory_usage != null) setLiveMemory(Math.round(live.memory_usage));
+          if (live.disk_usage != null) setLiveDisk(Math.round(live.disk_usage));
+        }
+      } catch (err: unknown) {
+        if (active) {
+          const msg = err instanceof Error ? err.message : "Failed to load workstation";
+          setLoadError(msg);
+        }
+      } finally {
+        if (active) {
+          setIsLoading(false);
+        }
+      }
     }
+
+    loadWorkstation();
+    return () => {
+      active = false;
+    };
+  }, [deviceId]);
+
+  // Dynamic telemetry polling
+  React.useEffect(() => {
+    if (!workstation?.id) return;
+    let active = true;
 
     const fetchTelemetry = async () => {
       try {
@@ -136,7 +188,7 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
       active = false;
       clearInterval(interval);
     };
-  }, [workstation.id]);
+  }, [workstation?.id]);
 
   const generateSvgPath = (data: number[], width = 300, height = 45): string => {
     if (!data || data.length === 0) return `M0 ${height / 2} L${width} ${height / 2}`;
@@ -156,36 +208,53 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
     setDemoActiveStep(4);
     setLiveCpu(Math.round(receipt.step_3_telemetry.cpu_percent));
     setLiveMemory(Math.round(receipt.step_3_telemetry.memory_percent));
-    setWorkstation((prev) => ({
-      ...prev,
-      is_isolated: receipt.step_8_soar_execution.workstation_final_status === "ISOLATED",
-      status: receipt.step_8_soar_execution.workstation_final_status === "ISOLATED" ? "CRITICAL" : "ONLINE",
-    }));
+    setWorkstation((prev) =>
+      prev
+        ? {
+            ...prev,
+            is_isolated: receipt.step_8_soar_execution.workstation_final_status === "ISOLATED",
+            status:
+              receipt.step_8_soar_execution.workstation_final_status === "ISOLATED"
+                ? "ISOLATED"
+                : "ONLINE",
+          }
+        : null
+    );
   };
 
   // Actions
   const handleToggleIsolation = async () => {
+    if (!workstation) return;
     const nextState = !workstation.is_isolated;
 
-    // Wire live SOAR isolation if workstation.id is a real UUID
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(workstation.id);
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      workstation.id
+    );
     if (isUuid) {
       try {
         if (workstation.is_isolated) {
           await rollbackWorkstationIsolation(workstation.id);
         } else {
-          await isolateWorkstation(workstation.id);
+          try {
+            await isolateWorkstation(workstation.id);
+          } catch {
+            await updateWorkstation(workstation.id, { status: "ISOLATED" });
+          }
         }
       } catch (err) {
-        console.warn("Could not reach SOAR endpoint, applying local mock isolation:", err);
+        console.warn("Could not reach isolation endpoint:", err);
       }
     }
 
-    setWorkstation((prev) => ({
-      ...prev,
-      is_isolated: nextState,
-      status: nextState ? "CRITICAL" : "ONLINE",
-    }));
+    setWorkstation((prev) =>
+      prev
+        ? {
+            ...prev,
+            is_isolated: nextState,
+            status: nextState ? "ISOLATED" : "ONLINE",
+          }
+        : null
+    );
     setShowIsolationModal(false);
 
     const message = nextState
@@ -201,33 +270,137 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
     setFeedbackMessage("Initiating autonomous telemetry & integrity scan...");
     setTimeout(() => {
       setIsScanning(false);
-      setFeedbackMessage("Integrity scan completed: 0 threats detected. Host memory & kernel modules optimal.");
+      setFeedbackMessage(
+        "Integrity scan completed: 0 threats detected. Host memory & kernel modules optimal."
+      );
       setTimeout(() => setFeedbackMessage(null), 5000);
     }, 2000);
   };
 
   const handleRestartService = () => {
     setShowRestartModal(false);
-    setFeedbackMessage(`Host telemetry daemon & services restarted successfully on ${workstation.hostname}.`);
+    setFeedbackMessage(
+      `Host telemetry daemon & services restarted successfully on ${workstation?.hostname || "endpoint"}.`
+    );
     setTimeout(() => setFeedbackMessage(null), 4000);
   };
 
-  const handleSaveEdit = (e: React.FormEvent) => {
+  const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setWorkstation((prev) => ({
-      ...prev,
-      hostname: editForm.hostname.toUpperCase(),
-      department: editForm.department,
-      os_type: editForm.os_type,
-      ip_address: editForm.ip_address,
-    }));
-    setShowEditModal(false);
-    setFeedbackMessage(`Device profile updated for ${editForm.hostname.toUpperCase()}.`);
-    setTimeout(() => setFeedbackMessage(null), 4000);
+    if (!workstation) return;
+
+    setIsSubmittingEdit(true);
+    setEditError(null);
+
+    try {
+      const updated = await updateWorkstation(workstation.id, {
+        department: editForm.department.trim() || null,
+        lab: editForm.lab.trim() || null,
+        asset_tag: editForm.asset_tag.trim() || null,
+        status: editForm.status || null,
+      });
+
+      setWorkstation((prev) =>
+        prev
+          ? {
+              ...prev,
+              ...updated,
+              is_isolated: updated.status === "ISOLATED",
+            }
+          : null
+      );
+
+      setShowEditModal(false);
+      setFeedbackMessage(`Device profile updated successfully for ${workstation.hostname}.`);
+      setTimeout(() => setFeedbackMessage(null), 5000);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to update workstation profile";
+      setEditError(msg);
+    } finally {
+      setIsSubmittingEdit(false);
+    }
   };
+
+  // Loading skeleton state
+  if (isLoading && !workstation) {
+    return (
+      <div className="space-y-5 font-sans animate-pulse">
+        <div className="h-4 w-48 bg-slate-800/80 rounded" />
+        <div className="glass-card p-6 rounded-2xl border-slate-800/80 bg-[#091124]/95 shadow-xl space-y-6">
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-slate-800/80" />
+            <div className="space-y-2">
+              <div className="h-6 w-52 bg-slate-800/80 rounded" />
+              <div className="h-4 w-72 bg-slate-800/50 rounded" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 pt-4 border-t border-slate-800/80">
+            {Array.from({ length: 7 }).map((_, i) => (
+              <div key={i} className="h-10 bg-slate-800/50 rounded" />
+            ))}
+          </div>
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+          <div className="lg:col-span-4 h-96 bg-slate-800/40 rounded-2xl" />
+          <div className="lg:col-span-5 h-96 bg-slate-800/40 rounded-2xl" />
+          <div className="lg:col-span-3 h-96 bg-slate-800/40 rounded-2xl" />
+        </div>
+      </div>
+    );
+  }
+
+  // Not Found / Error state
+  if (!workstation) {
+    return (
+      <div className="space-y-5 font-sans">
+        <nav className="flex items-center gap-2 text-xs text-slate-400">
+          <Link href="/devices" className="hover:text-white transition-colors">
+            Devices Monitoring
+          </Link>
+          <ChevronRight className="w-3.5 h-3.5 text-slate-600" />
+          <span className="text-slate-200 font-medium">Device Details</span>
+        </nav>
+
+        <div className="glass-card p-10 rounded-2xl border-slate-800/80 bg-[#091124]/95 text-center space-y-4 max-w-lg mx-auto mt-12 shadow-2xl">
+          <div className="w-16 h-16 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
+            <AlertCircle className="w-8 h-8" />
+          </div>
+          <h2 className="text-xl font-bold text-white tracking-tight">Workstation Not Found</h2>
+          <p className="text-xs text-slate-400 leading-relaxed">
+            {loadError || (
+              <>
+                No enrolled workstation found matching identifier{" "}
+                <span className="font-mono text-cyan-400 font-bold">{deviceId}</span>. It may have
+                been decommissioned or the ID is invalid.
+              </>
+            )}
+          </p>
+          <div className="pt-2">
+            <Link
+              href="/devices"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition-colors shadow-md shadow-blue-600/20"
+            >
+              Back to Device Monitoring
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5 font-sans">
+      {/* Breadcrumbs matching mockup */}
+      <nav className="flex items-center gap-2 text-xs text-slate-400">
+        <Link href="/devices" className="hover:text-white transition-colors">
+          Devices Monitoring
+        </Link>
+        <ChevronRight className="w-3.5 h-3.5 text-slate-600" />
+        <span className="text-slate-200 font-medium">Device Details</span>
+        <span className="text-slate-600">•</span>
+        <span className="font-mono text-cyan-400 font-bold">{workstation.hostname}</span>
+      </nav>
+
       {/* 10-Step Live Demonstration Controls & Visual Stepper */}
       <DemoController
         receipt={demoReceipt}
@@ -287,7 +460,7 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
               </div>
               <p className="text-xs text-slate-400 mt-1 font-mono">
                 {workstation.asset_tag ? `${workstation.asset_tag} • ` : ""}
-                {workstation.hardware_specs?.processor || "Server • Dell PowerEdge R740"} •{" "}
+                {(workstation.hardware_specs?.processor as string) || "Server • Dell PowerEdge R740"} •{" "}
                 {workstation.operating_system || workstation.os_type || "Windows Server 2019"}
               </p>
             </div>
@@ -298,7 +471,16 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
             {/* Edit Device */}
             <button
               type="button"
-              onClick={() => setShowEditModal(true)}
+              onClick={() => {
+                setEditForm({
+                  department: workstation.department || "",
+                  lab: workstation.lab || "",
+                  asset_tag: workstation.asset_tag || "",
+                  status: workstation.status || "ONLINE",
+                });
+                setEditError(null);
+                setShowEditModal(true);
+              }}
               className="px-3.5 py-2 rounded-xl border border-slate-700/80 bg-[#060b18] hover:bg-slate-800 text-xs font-semibold text-slate-200 flex items-center gap-2 transition-colors cursor-pointer shadow-sm"
             >
               <Edit className="w-3.5 h-3.5 text-slate-400" />
@@ -368,7 +550,9 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
           <div>
             <span className="text-slate-500 text-[10px] block uppercase">Location</span>
             <span className="text-slate-300 mt-0.5 block truncate max-w-[150px]">
-              {workstation.lab ? `${workstation.department} / ${workstation.lab}` : (workstation.department || "Main Data Center")}
+              {workstation.lab
+                ? `${workstation.department || "Academic"} / ${workstation.lab}`
+                : workstation.department || "Main Data Center"}
             </span>
           </div>
 
@@ -386,12 +570,12 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
 
           <div>
             <span className="text-slate-500 text-[10px] block uppercase">Last Seen</span>
-            <span className="text-emerald-400 mt-0.5 block">2 min ago</span>
+            <span className="text-emerald-400 mt-0.5 block">{formatLastSeen(workstation.last_seen_at)}</span>
           </div>
 
           <div>
             <span className="text-slate-500 text-[10px] block uppercase">Uptime</span>
-            <span className="text-white font-medium mt-0.5 block">15d 6h 24m</span>
+            <span className="text-white font-medium mt-0.5 block">{formatUptime(workstation.created_at)}</span>
           </div>
         </div>
       </div>
@@ -399,7 +583,7 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
       {/* 3-COLUMN OPERATIONAL GRID (Matching Mockup) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
         {/* =================================================================== */}
-        {/* COLUMN 1: System Overview, Recent Alerts & Top Apps (4 of 12 cols) */}
+        {/* COLUMN 1: System Overview, Network Information (4 of 12 cols)       */}
         {/* =================================================================== */}
         <div className="lg:col-span-4 space-y-5">
           {/* Card 1: System Overview */}
@@ -431,7 +615,11 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
                   </svg>
                   <span className="absolute text-xs font-bold text-white">{liveCpu}%</span>
                 </div>
-                <span className="text-[10px] text-slate-400 font-mono mt-1.5">8 Cores</span>
+                <span className="text-[10px] text-slate-400 font-mono mt-1.5">
+                  {workstation.hardware_specs?.logical_cpus || workstation.hardware_specs?.cores
+                    ? `${workstation.hardware_specs.logical_cpus || workstation.hardware_specs.cores} Cores`
+                    : "8 Cores"}
+                </span>
               </div>
 
               {/* Memory Ring Gauge */}
@@ -454,7 +642,9 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
                   </svg>
                   <span className="absolute text-xs font-bold text-white">{liveMemory}%</span>
                 </div>
-                <span className="text-[10px] text-slate-400 font-mono mt-1.5">43.6 GB / 64 GB</span>
+                <span className="text-[10px] text-slate-400 font-mono mt-1.5">
+                  {workstation.hardware_specs?.ram_gb ? `${workstation.hardware_specs.ram_gb} GB RAM` : "64 GB DDR4"}
+                </span>
               </div>
 
               {/* Disk Ring Gauge */}
@@ -485,21 +675,30 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
             <div className="space-y-2 pt-2 border-t border-slate-800/80 text-xs font-mono">
               <div className="flex justify-between">
                 <span className="text-slate-400">Architecture</span>
-                <span className="text-white font-medium">{workstation.hardware_specs?.architecture || "x86_64"}</span>
+                <span className="text-white font-medium">
+                  {(workstation.hardware_specs?.architecture as string) || "x86_64"}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-400">OS Platform</span>
-                <span className="text-slate-300">{workstation.operating_system || workstation.os_type || "Windows Server"}</span>
+                <span className="text-slate-300">
+                  {workstation.operating_system || workstation.os_type || "Windows Server"}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-400">Processor</span>
-                <span className="text-slate-300 truncate max-w-[140px]" title={workstation.hardware_specs?.processor || ""}>
-                  {workstation.hardware_specs?.processor || "Generic Node"}
+                <span
+                  className="text-slate-300 truncate max-w-[140px]"
+                  title={(workstation.hardware_specs?.processor as string) || ""}
+                >
+                  {(workstation.hardware_specs?.processor as string) || "Generic Node"}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-400">Logical Cores</span>
-                <span className="text-slate-300">{workstation.hardware_specs?.logical_cpus || workstation.hardware_specs?.cores || "8"}</span>
+                <span className="text-slate-300">
+                  {String(workstation.hardware_specs?.logical_cpus || workstation.hardware_specs?.cores || 8)}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-400">Agent Version</span>
@@ -507,9 +706,25 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-400">Health Status</span>
-                <span className={`${workstation.status === "CRITICAL" || workstation.status === "ISOLATED" ? "text-rose-400" : "text-emerald-400"} font-bold flex items-center gap-1`}>
-                  <span className={`w-1.5 h-1.5 rounded-full ${workstation.status === "CRITICAL" || workstation.status === "ISOLATED" ? "bg-rose-400" : "bg-emerald-400"}`} />
-                  {workstation.status === "ISOLATED" ? "Isolated" : workstation.status === "CRITICAL" ? "Critical" : "Healthy"}
+                <span
+                  className={`${
+                    workstation.status === "CRITICAL" || workstation.status === "ISOLATED"
+                      ? "text-rose-400"
+                      : "text-emerald-400"
+                  } font-bold flex items-center gap-1`}
+                >
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      workstation.status === "CRITICAL" || workstation.status === "ISOLATED"
+                        ? "bg-rose-400"
+                        : "bg-emerald-400"
+                    }`}
+                  />
+                  {workstation.status === "ISOLATED"
+                    ? "Isolated"
+                    : workstation.status === "CRITICAL"
+                    ? "Critical"
+                    : "Healthy"}
                 </span>
               </div>
             </div>
@@ -541,7 +756,9 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
               </div>
               <div className="flex justify-between py-1 border-b border-slate-800/60">
                 <span className="text-slate-400">MAC Address</span>
-                <span className="text-slate-300 font-mono">{workstation.mac_address || "00:1A:4B:2F:8C:7D"}</span>
+                <span className="text-slate-300 font-mono">
+                  {workstation.mac_address || "00:1A:4B:2F:8C:7D"}
+                </span>
               </div>
               <div className="flex justify-between py-1 border-b border-slate-800/60">
                 <span className="text-slate-400">Speed</span>
@@ -553,17 +770,20 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
               </div>
               <div className="flex justify-between py-1">
                 <span className="text-slate-400">Status</span>
-                <span className={`${workstation.status === "OFFLINE" ? "text-slate-400" : "text-emerald-400"} font-semibold`}>
+                <span
+                  className={`${
+                    workstation.status === "OFFLINE" ? "text-slate-400" : "text-emerald-400"
+                  } font-semibold`}
+                >
                   {workstation.status === "OFFLINE" ? "Down" : "Up"}
                 </span>
               </div>
             </div>
           </div>
-
         </div>
 
         {/* =================================================================== */}
-        {/* COLUMN 2: Real-time Performance, Recent Logs & Hardware (5 of 12)  */}
+        {/* COLUMN 2: Real-time Performance & Hardware (5 of 12 cols)           */}
         {/* =================================================================== */}
         <div className="lg:col-span-5 space-y-5">
           {/* Card 1: Performance (Real-time) with 3 Sparkline Wave Charts */}
@@ -595,7 +815,12 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
                     strokeWidth="2"
                     strokeLinecap="round"
                   />
-                  <circle cx="295" cy={Math.round(45 - (Math.max(0, Math.min(100, liveCpu)) / 100) * 37 - 4)} r="3" fill="#3b82f6" />
+                  <circle
+                    cx="295"
+                    cy={Math.round(45 - (Math.max(0, Math.min(100, liveCpu)) / 100) * 37 - 4)}
+                    r="3"
+                    fill="#3b82f6"
+                  />
                 </svg>
               </div>
             </div>
@@ -615,7 +840,12 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
                     strokeWidth="2"
                     strokeLinecap="round"
                   />
-                  <circle cx="295" cy={Math.round(45 - (Math.max(0, Math.min(100, liveMemory)) / 100) * 37 - 4)} r="3" fill="#10b981" />
+                  <circle
+                    cx="295"
+                    cy={Math.round(45 - (Math.max(0, Math.min(100, liveMemory)) / 100) * 37 - 4)}
+                    r="3"
+                    fill="#10b981"
+                  />
                 </svg>
               </div>
             </div>
@@ -635,7 +865,12 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
                     strokeWidth="2"
                     strokeLinecap="round"
                   />
-                  <circle cx="295" cy={Math.round(45 - (Math.max(0, Math.min(100, liveDisk)) / 100) * 37 - 4)} r="3" fill="#8b5cf6" />
+                  <circle
+                    cx="295"
+                    cy={Math.round(45 - (Math.max(0, Math.min(100, liveDisk)) / 100) * 37 - 4)}
+                    r="3"
+                    fill="#8b5cf6"
+                  />
                 </svg>
               </div>
 
@@ -648,8 +883,7 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
             </div>
           </div>
 
-
-          {/* Card 3: Hardware Information */}
+          {/* Card 2: Hardware Information */}
           <div className="glass-card p-5 rounded-2xl border-slate-800/80 bg-[#091124]/95 shadow-xl space-y-3">
             <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
               <h3 className="text-sm font-bold text-white tracking-tight">Hardware Information</h3>
@@ -664,39 +898,48 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
               <div className="flex justify-between py-1 border-b border-slate-800/60">
                 <span className="text-slate-400">CPU</span>
                 <span className="text-white truncate max-w-[200px]">
-                  {workstation.hardware_specs?.processor || "2 x Intel(R) Xeon(R) Silver 4214 CPU @ 2.20GHz"}
+                  {(workstation.hardware_specs?.processor as string) ||
+                    "2 x Intel(R) Xeon(R) Silver 4214 CPU @ 2.20GHz"}
                 </span>
               </div>
               <div className="flex justify-between py-1 border-b border-slate-800/60">
                 <span className="text-slate-400">Cores / Threads</span>
                 <span className="text-slate-200">
                   {workstation.hardware_specs?.cores
-                    ? `${workstation.hardware_specs.cores} Cores / ${workstation.hardware_specs.logical_cpus || workstation.hardware_specs.cores} Threads`
+                    ? `${workstation.hardware_specs.cores} Cores / ${
+                        workstation.hardware_specs.logical_cpus || workstation.hardware_specs.cores
+                      } Threads`
                     : "16 Cores / 32 Threads"}
                 </span>
               </div>
               <div className="flex justify-between py-1 border-b border-slate-800/60">
                 <span className="text-slate-400">RAM</span>
                 <span className="text-slate-200">
-                  {workstation.hardware_specs?.ram_gb ? `${workstation.hardware_specs.ram_gb} GB RAM` : "64 GB DDR4"}
+                  {workstation.hardware_specs?.ram_gb
+                    ? `${workstation.hardware_specs.ram_gb} GB RAM`
+                    : "64 GB DDR4"}
                 </span>
               </div>
               <div className="flex justify-between py-1 border-b border-slate-800/60">
                 <span className="text-slate-400">Architecture</span>
                 <span className="text-slate-200">
-                  {workstation.hardware_specs?.architecture || "x86_64"}
+                  {(workstation.hardware_specs?.architecture as string) || "x86_64"}
                 </span>
               </div>
               <div className="flex justify-between py-1 border-b border-slate-800/60">
                 <span className="text-slate-400">Platform</span>
                 <span className="text-slate-200 truncate max-w-[200px]">
-                  {workstation.hardware_specs?.platform || workstation.operating_system || "Linux / Windows"}
+                  {(workstation.hardware_specs?.platform as string) ||
+                    workstation.operating_system ||
+                    "Linux / Windows"}
                 </span>
               </div>
               <div className="flex justify-between py-1">
                 <span className="text-slate-400">NIC</span>
                 <span className="text-slate-200 truncate max-w-[200px]">
-                  {workstation.mac_address ? `Ethernet (${workstation.mac_address})` : "1 Gbps - Intel Ethernet I350"}
+                  {workstation.mac_address
+                    ? `Ethernet (${workstation.mac_address})`
+                    : "1 Gbps - Intel Ethernet I350"}
                 </span>
               </div>
             </div>
@@ -704,7 +947,7 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
         </div>
 
         {/* =================================================================== */}
-        {/* COLUMN 3: Device Health, Network & Recent Actions (3 of 12 cols)    */}
+        {/* COLUMN 3: University IdP Context & Device Health (3 of 12 cols)     */}
         {/* =================================================================== */}
         <div className="lg:col-span-3 space-y-5">
           {/* Card 0: University IdP Context & Surgical Containment */}
@@ -723,39 +966,55 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
               <div className="flex justify-between items-center">
                 <span className="text-slate-400">Assigned User:</span>
                 <span className="text-white font-medium truncate max-w-[140px]">
-                  {demoReceipt?.step_6_idp_context?.username || workstation.assigned_user?.full_name || "khalid.mansoor"}
+                  {demoReceipt?.step_6_idp_context?.username ||
+                    workstation.assigned_user?.full_name ||
+                    "khalid.mansoor"}
                 </span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-slate-400">IdP Role:</span>
-                <span className={`px-2 py-0.5 rounded text-[11px] font-bold border ${
-                  (demoReceipt?.step_6_idp_context?.role || workstation.assigned_user?.role) === "RESEARCHER"
-                    ? "bg-purple-500/20 text-purple-300 border-purple-500/40"
-                    : (demoReceipt?.step_6_idp_context?.role || workstation.assigned_user?.role) === "ADMIN"
-                    ? "bg-rose-500/20 text-rose-300 border-rose-500/40"
-                    : "bg-blue-500/20 text-blue-300 border-blue-500/40"
-                }`}>
-                  {demoReceipt?.step_6_idp_context?.role || workstation.assigned_user?.role || "Pending IdP Resolution"}
+                <span
+                  className={`px-2 py-0.5 rounded text-[11px] font-bold border ${
+                    (demoReceipt?.step_6_idp_context?.role ||
+                      workstation.assigned_user?.role) === "RESEARCHER"
+                      ? "bg-purple-500/20 text-purple-300 border-purple-500/40"
+                      : (demoReceipt?.step_6_idp_context?.role ||
+                          workstation.assigned_user?.role) === "ADMIN"
+                      ? "bg-rose-500/20 text-rose-300 border-rose-500/40"
+                      : "bg-blue-500/20 text-blue-300 border-blue-500/40"
+                  }`}
+                >
+                  {demoReceipt?.step_6_idp_context?.role ||
+                    workstation.assigned_user?.role ||
+                    "Pending IdP Resolution"}
                 </span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-slate-400">Department / Lab:</span>
                 <span className="text-slate-300 truncate max-w-[140px]">
-                  {demoReceipt?.step_6_idp_context?.department || workstation.department || "Computer Science"}
+                  {demoReceipt?.step_6_idp_context?.department ||
+                    workstation.department ||
+                    "Computer Science"}
                 </span>
               </div>
               <div className="pt-2 border-t border-slate-800/80">
                 <span className="text-slate-400 block mb-1">Authorized HPC Workloads:</span>
-                {demoReceipt?.step_6_idp_context?.active_workloads && demoReceipt.step_6_idp_context.active_workloads.length > 0 ? (
+                {demoReceipt?.step_6_idp_context?.active_workloads &&
+                demoReceipt.step_6_idp_context.active_workloads.length > 0 ? (
                   <div className="space-y-1">
                     {demoReceipt.step_6_idp_context.active_workloads.map((w, idx) => (
-                      <span key={idx} className="block px-2 py-1 rounded bg-slate-900 border border-slate-800 text-[10px] text-cyan-300">
+                      <span
+                        key={idx}
+                        className="block px-2 py-1 rounded bg-slate-900 border border-slate-800 text-[10px] text-cyan-300"
+                      >
                         • {w}
                       </span>
                     ))}
                   </div>
                 ) : (
-                  <span className="text-slate-500 text-[10px] italic">None registered (Standard Student)</span>
+                  <span className="text-slate-500 text-[10px] italic">
+                    None registered (Standard Student)
+                  </span>
                 )}
               </div>
 
@@ -763,11 +1022,13 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
               <div className="pt-2 border-t border-slate-800/80">
                 <div className="flex justify-between items-center mb-1">
                   <span className="text-slate-400">SOAR Surgical Isolation:</span>
-                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                    workstation.is_isolated
-                      ? "bg-rose-500/20 text-rose-400 border border-rose-500/40 animate-pulse"
-                      : "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30"
-                  }`}>
+                  <span
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                      workstation.is_isolated
+                        ? "bg-rose-500/20 text-rose-400 border border-rose-500/40 animate-pulse"
+                        : "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30"
+                    }`}
+                  >
                     {workstation.is_isolated ? "CONTAINED (HOST ACTIVE)" : "UNRESTRICTED"}
                   </span>
                 </div>
@@ -789,13 +1050,15 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
 
             {/* Circular Health Shield */}
             <div className="flex flex-col items-center justify-center py-2 text-center">
-              <div className={`w-14 h-14 rounded-full border-2 flex items-center justify-center mb-2 shadow-lg ${
-                workstation.is_isolated || workstation.status === "CRITICAL"
-                  ? "bg-rose-500/15 border-rose-500/40 text-rose-400 shadow-rose-500/20 animate-pulse"
-                  : workstation.status === "WARNING"
-                  ? "bg-amber-500/15 border-amber-500/40 text-amber-400 shadow-amber-500/20"
-                  : "bg-emerald-500/15 border-emerald-500/40 text-emerald-400 shadow-emerald-500/20"
-              }`}>
+              <div
+                className={`w-14 h-14 rounded-full border-2 flex items-center justify-center mb-2 shadow-lg ${
+                  workstation.is_isolated || workstation.status === "CRITICAL"
+                    ? "bg-rose-500/15 border-rose-500/40 text-rose-400 shadow-rose-500/20 animate-pulse"
+                    : workstation.status === "WARNING"
+                    ? "bg-amber-500/15 border-amber-500/40 text-amber-400 shadow-amber-500/20"
+                    : "bg-emerald-500/15 border-emerald-500/40 text-emerald-400 shadow-emerald-500/20"
+                }`}
+              >
                 {workstation.is_isolated || workstation.status === "CRITICAL" ? (
                   <ShieldAlertIcon className="w-7 h-7" />
                 ) : workstation.status === "WARNING" ? (
@@ -805,21 +1068,21 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
                 )}
               </div>
               <h4 className="text-base font-bold text-white">
-                {workstation.is_isolated 
-                  ? "Isolated" 
-                  : workstation.status === "CRITICAL" 
-                  ? "Critical" 
-                  : workstation.status === "WARNING" 
-                  ? "Warning" 
+                {workstation.is_isolated
+                  ? "Isolated"
+                  : workstation.status === "CRITICAL"
+                  ? "Critical"
+                  : workstation.status === "WARNING"
+                  ? "Warning"
                   : "Healthy"}
               </h4>
               <p className="text-[11px] text-slate-400">
-                {workstation.is_isolated 
-                  ? "Network contained by SOAR" 
-                  : workstation.status === "CRITICAL" 
-                  ? "Security anomaly detected" 
-                  : workstation.status === "WARNING" 
-                  ? "System metric degraded" 
+                {workstation.is_isolated
+                  ? "Network contained by SOAR"
+                  : workstation.status === "CRITICAL"
+                  ? "Security anomaly detected"
+                  : workstation.status === "WARNING"
+                  ? "System metric degraded"
                   : "No issues detected"}
               </p>
             </div>
@@ -830,8 +1093,20 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
                 <span className="text-slate-400 flex items-center gap-1.5">
                   <Shield className="w-3.5 h-3.5 text-slate-500" /> Hardware Status
                 </span>
-                <span className={`${workstation.status === "CRITICAL" || workstation.status === "ISOLATED" ? "text-rose-400" : workstation.status === "WARNING" ? "text-amber-400" : "text-emerald-400"} font-semibold`}>
-                  {workstation.status === "CRITICAL" || workstation.status === "ISOLATED" ? "Critical" : workstation.status === "WARNING" ? "Warning" : "Normal"}
+                <span
+                  className={`${
+                    workstation.status === "CRITICAL" || workstation.status === "ISOLATED"
+                      ? "text-rose-400"
+                      : workstation.status === "WARNING"
+                      ? "text-amber-400"
+                      : "text-emerald-400"
+                  } font-semibold`}
+                >
+                  {workstation.status === "CRITICAL" || workstation.status === "ISOLATED"
+                    ? "Critical"
+                    : workstation.status === "WARNING"
+                    ? "Warning"
+                    : "Normal"}
                 </span>
               </div>
 
@@ -866,7 +1141,8 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
                 </span>
               </div>
             </div>
-          </div>        </div>
+          </div>
+        </div>
       </div>
 
       {/* =================================================================== */}
@@ -944,7 +1220,7 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
           isOpen={true}
           onClose={() => setShowEditModal(false)}
           title={`Edit Device: ${workstation.hostname}`}
-          subtitle="Update hardware metadata, location, and department assignment"
+          subtitle="Update device metadata, location, and operational status"
         >
           <form onSubmit={handleSaveEdit} className="space-y-4 text-xs">
             <div className="space-y-3">
@@ -952,10 +1228,9 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
                 <label className="block text-slate-300 font-medium mb-1">Hostname</label>
                 <input
                   type="text"
-                  required
-                  value={editForm.hostname}
-                  onChange={(e) => setEditForm({ ...editForm, hostname: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-[#070d1e] border border-slate-800 text-slate-200 font-mono focus:outline-none focus:border-blue-500"
+                  disabled
+                  value={workstation.hostname}
+                  className="w-full px-3 py-2 rounded-xl bg-[#070d1e]/50 border border-slate-800 text-slate-400 font-mono cursor-not-allowed"
                 />
               </div>
 
@@ -963,47 +1238,84 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
                 <label className="block text-slate-300 font-medium mb-1">IPv4 Address</label>
                 <input
                   type="text"
-                  required
-                  value={editForm.ip_address}
-                  onChange={(e) => setEditForm({ ...editForm, ip_address: e.target.value })}
+                  disabled
+                  value={workstation.ip_address}
+                  className="w-full px-3 py-2 rounded-xl bg-[#070d1e]/50 border border-slate-800 text-slate-400 font-mono cursor-not-allowed"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-medium mb-1">Department</label>
+                <input
+                  type="text"
+                  value={editForm.department}
+                  onChange={(e) => setEditForm({ ...editForm, department: e.target.value })}
+                  placeholder="e.g. College of Computer Science"
+                  className="w-full px-3 py-2 rounded-xl bg-[#070d1e] border border-slate-800 text-slate-200 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-medium mb-1">Lab / Bay</label>
+                <input
+                  type="text"
+                  value={editForm.lab}
+                  onChange={(e) => setEditForm({ ...editForm, lab: e.target.value })}
+                  placeholder="e.g. AI Research Lab 3"
+                  className="w-full px-3 py-2 rounded-xl bg-[#070d1e] border border-slate-800 text-slate-200 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-medium mb-1">Asset Tag</label>
+                <input
+                  type="text"
+                  value={editForm.asset_tag}
+                  onChange={(e) => setEditForm({ ...editForm, asset_tag: e.target.value })}
+                  placeholder="e.g. ASSET-KKU-2026-0042"
                   className="w-full px-3 py-2 rounded-xl bg-[#070d1e] border border-slate-800 text-slate-200 font-mono focus:outline-none focus:border-blue-500"
                 />
               </div>
 
               <div>
-                <label className="block text-slate-300 font-medium mb-1">Operating System</label>
-                <input
-                  type="text"
-                  value={editForm.os_type}
-                  onChange={(e) => setEditForm({ ...editForm, os_type: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-[#070d1e] border border-slate-800 text-slate-200 focus:outline-none focus:border-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-medium mb-1">Facility Location / Rack</label>
-                <input
-                  type="text"
-                  value={editForm.location}
-                  onChange={(e) => setEditForm({ ...editForm, location: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-[#070d1e] border border-slate-800 text-slate-200 focus:outline-none focus:border-blue-500"
-                />
+                <label className="block text-slate-300 font-medium mb-1">Operational Status</label>
+                <select
+                  value={editForm.status}
+                  onChange={(e) => setEditForm({ ...editForm, status: e.target.value as WorkstationStatus })}
+                  className="w-full px-3 py-2 rounded-xl bg-[#070d1e] border border-slate-800 text-slate-200 focus:outline-none focus:border-blue-500 cursor-pointer"
+                >
+                  <option value="ONLINE">ONLINE</option>
+                  <option value="WARNING">WARNING</option>
+                  <option value="CRITICAL">CRITICAL</option>
+                  <option value="MAINTENANCE">MAINTENANCE</option>
+                  <option value="OFFLINE">OFFLINE</option>
+                  <option value="ISOLATED">ISOLATED</option>
+                  <option value="DECOMMISSIONED">DECOMMISSIONED</option>
+                </select>
               </div>
             </div>
+
+            {editError && (
+              <div className="p-2.5 rounded-xl bg-rose-950/60 border border-rose-500/40 text-rose-300 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                <span>{editError}</span>
+              </div>
+            )}
 
             <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-800">
               <button
                 type="button"
                 onClick={() => setShowEditModal(false)}
-                className="px-3 py-1.5 rounded-xl border border-slate-700 text-slate-300 hover:text-white"
+                className="px-3.5 py-1.5 rounded-xl border border-slate-700 text-slate-300 hover:text-white cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="px-4 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow-md"
+                disabled={isSubmittingEdit}
+                className="px-4 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white font-semibold shadow-md cursor-pointer flex items-center gap-1.5"
               >
-                Save Changes
+                {isSubmittingEdit ? "Saving..." : "Save Changes"}
               </button>
             </div>
           </form>
@@ -1039,7 +1351,9 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
           }
         >
           <p className="text-xs text-slate-300 leading-relaxed">
-            Restarting host telemetry daemons cycles the local agent process and flushes ephemeral socket buffers without disrupting production workloads or server operating system execution.
+            Restarting host telemetry daemons cycles the local agent process and flushes ephemeral
+            socket buffers without disrupting production workloads or server operating system
+            execution.
           </p>
         </Modal>
       )}

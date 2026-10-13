@@ -14,7 +14,7 @@ import {
   Moon,
   Ticket,
 } from "lucide-react";
-import { MOCK_ALERTS } from "@/lib/api";
+import { useAlerts } from "@/context/AlertContext";
 
 const ROUTE_TITLES: Record<string, { title: string; subtitle: string }> = {
   "/": { title: "Dashboard", subtitle: "Overview of your infrastructure and security status" },
@@ -32,6 +32,7 @@ const ROUTE_TITLES: Record<string, { title: string; subtitle: string }> = {
 
 export const TopNavbar: React.FC = () => {
   const pathname = usePathname();
+  const { openAlertsCount, recentAlerts } = useAlerts();
   const [currentTime, setCurrentTime] = useState<string>("");
   const [showNotifications, setShowNotifications] = useState(false);
 
@@ -120,9 +121,11 @@ export const TopNavbar: React.FC = () => {
             aria-label="Notifications"
           >
             <Bell className="w-4 h-4" />
-            <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-rose-500 text-white font-mono text-[9px] font-bold flex items-center justify-center animate-pulse">
-              5
-            </span>
+            {openAlertsCount > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-rose-500 text-white font-mono text-[9px] font-bold flex items-center justify-center animate-pulse">
+                {openAlertsCount}
+              </span>
+            )}
           </button>
 
           {/* Notifications Drawer */}
@@ -132,35 +135,51 @@ export const TopNavbar: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <Flame className="w-4 h-4 text-rose-400" />
                   <span className="text-xs font-bold text-white uppercase tracking-wider">
-                    Recent Critical Alerts
+                    Recent Open Alerts
                   </span>
                 </div>
-                <span className="text-[10px] text-slate-400 font-mono">3 Unacknowledged</span>
+                <span className="text-[10px] text-slate-400 font-mono">
+                  {openAlertsCount > 0 ? `${openAlertsCount} Unacknowledged` : "All Clear"}
+                </span>
               </div>
 
               <div className="py-2 space-y-2 max-h-72 overflow-y-auto">
-                {MOCK_ALERTS.slice(0, 3).map((alert) => (
-                  <div
-                    key={alert.id}
-                    className="p-2.5 rounded-xl border border-slate-800/80 bg-slate-900/60 hover:bg-slate-800/50 transition-colors cursor-pointer"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="text-xs font-semibold text-white truncate">
-                        {alert.title}
+                {recentAlerts.length > 0 ? (
+                  recentAlerts.map((alert) => (
+                    <div
+                      key={alert.id}
+                      className="p-2.5 rounded-xl border border-slate-800/80 bg-slate-900/60 hover:bg-slate-800/50 transition-colors cursor-pointer"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-xs font-semibold text-white truncate">
+                          {alert.title}
+                        </p>
+                        <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-400 font-bold border border-rose-500/30">
+                          {alert.severity}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 line-clamp-2 mt-1">
+                        {alert.description}
                       </p>
-                      <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-400 font-bold border border-rose-500/30">
-                        {alert.severity}
-                      </span>
+                      <div className="flex items-center justify-between text-[10px] text-slate-500 mt-2 font-mono">
+                        <span>{alert.workstation_hostname || "Monitored Host"}</span>
+                        <span>
+                          {alert.created_at
+                            ? new Date(alert.created_at).toLocaleTimeString([], {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })
+                            : "Recent"}
+                        </span>
+                      </div>
                     </div>
-                    <p className="text-[11px] text-slate-400 line-clamp-2 mt-1">
-                      {alert.description}
-                    </p>
-                    <div className="flex items-center justify-between text-[10px] text-slate-500 mt-2 font-mono">
-                      <span>{alert.workstation_hostname}</span>
-                      <span>14m ago</span>
-                    </div>
+                  ))
+                ) : (
+                  <div className="py-6 text-center text-xs text-slate-400 space-y-1">
+                    <p className="font-medium text-slate-300">All alerts resolved</p>
+                    <p className="text-[11px] text-slate-500">No open incidents requiring attention.</p>
                   </div>
-                ))}
+                )}
               </div>
 
               <div className="pt-2 border-t border-slate-800 text-center">

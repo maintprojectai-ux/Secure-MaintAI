@@ -439,6 +439,10 @@ export interface DashboardKpis {
   active_threats: number;
   active_alerts: number;
   security_posture: number;
+  system_resilience_score?: number;
+  average_cpu?: number;
+  average_ram?: number;
+  average_disk?: number;
 }
 
 export interface Model01Metrics {

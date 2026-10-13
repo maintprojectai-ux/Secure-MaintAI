@@ -152,9 +152,6 @@ export function DemoController({
             <h2 className="text-base font-bold text-white tracking-tight">
               Live Demonstration Controller
             </h2>
-            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-300 border border-cyan-500/30">
-              Guide 6 / Scene 8
-            </span>
             {targetHostname && (
               <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-300 border border-blue-500/30">
                 Target Device: {targetHostname}
@@ -183,11 +180,10 @@ export function DemoController({
                 type="button"
                 onClick={() => handleTriggerScenario(sc.type)}
                 disabled={isExecuting}
-                className={`p-3 rounded-xl border text-left transition-all duration-200 cursor-pointer relative group flex flex-col justify-between ${
-                  isSelected
+                className={`p-3 rounded-xl border text-left transition-all duration-200 cursor-pointer relative group flex flex-col justify-between ${isSelected
                     ? `${sc.borderColor} bg-slate-800/80 shadow-lg`
                     : "border-slate-800/80 bg-slate-900/60 hover:border-slate-700 hover:bg-slate-800/50"
-                }`}
+                  }`}
               >
                 <div>
                   <div className="flex items-center justify-between mb-1.5">

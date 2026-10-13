@@ -42,6 +42,7 @@ class WorkstationUpdate(BaseModel):
 
     department: str | None = Field(default=None, max_length=128)
     lab: str | None = Field(default=None, max_length=128)
+    asset_tag: str | None = Field(default=None, max_length=60)
     status: WorkstationStatus | None = None
 
 
@@ -104,6 +105,9 @@ class WorkstationResponse(BaseModel):
     last_seen_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+    cpu_usage: float | None = None
+    memory_usage: float | None = None
+    disk_usage: float | None = None
 
     model_config = {"from_attributes": True}
 

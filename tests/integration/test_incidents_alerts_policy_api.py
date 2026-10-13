@@ -94,7 +94,7 @@ async def test_alerts_lifecycle_api(
     """Test alert creation, querying, acknowledgement, and resolution."""
     # 1. Create alert
     payload = {
-        "source_type": "SECURITY_EVENT",
+        "source_type": "CYBERSECURITY_THREAT",
         "severity": "CRITICAL",
         "title": "Ransomware Canary Triggered",
         "description": "Honeytoken file modified in shared drive",
@@ -224,3 +224,43 @@ async def test_kill_switch_api_toggle(
     )
     assert res2.status_code == 200
     assert res2.json()["kill_switch_active"] is False
+
+
+@pytest.mark.asyncio
+async def test_alerts_sse_stream_and_broadcast() -> None:
+    """Test SSE alerts stream subscription and real-time event broadcasting."""
+    from backend.services.alert_broadcaster import alert_broadcaster
+
+    sub_iter = alert_broadcaster.subscribe()
+
+    # First event emitted on connect is ping
+    first_chunk = await anext(sub_iter)
+    assert "event: ping" in first_chunk
+
+    # Broadcast an alert event
+    test_alert = {
+        "id": str(uuid.uuid4()),
+        "title": "SSE Broadcast Test Alert",
+        "severity": "CRITICAL",
+        "status": "OPEN",
+    }
+    await alert_broadcaster.broadcast("ALERT_CREATED", test_alert)
+
+    # Next chunk should be the broadcasted alert
+    event_chunk = await anext(sub_iter)
+    assert "event: alert" in event_chunk
+    assert "SSE Broadcast Test Alert" in event_chunk
+    assert "ALERT_CREATED" in event_chunk
+
+    # Close subscriber stream cleanly
+    await sub_iter.aclose()
+
+
+@pytest.mark.asyncio
+async def test_alerts_stream_endpoint_invalid_token(
+    async_client: AsyncClient,
+) -> None:
+    """Verify invalid token is rejected by the SSE stream endpoint."""
+    res = await async_client.get("/api/v1/alerts/stream?token=invalid.jwt.token")
+    assert res.status_code == 401
+

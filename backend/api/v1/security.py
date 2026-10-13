@@ -97,12 +97,15 @@ async def ingest_security_event(
     # Automatically generate an Alert if high severity
     if item.severity in (SecurityEventSeverity.HIGH, SecurityEventSeverity.CRITICAL):
         alert_record = Alert(
-            source_type="SECURITY_EVENT",
+            source_type="CYBERSECURITY_THREAT",
             source_id=event_record.id,
+            workstation_id=item.workstation_id,
             severity=item.severity.value,
             status="OPEN",
-            title=f"Security Alert: {item.event_type.value}",
+            title=f"Cybersecurity Threat: {item.event_type.value}",
             description=item.description,
+            recommendation="Investigate correlated host processes and verify network tap signatures.",
+            requires_human_intervention=False,
         )
         session.add(alert_record)
 
@@ -180,8 +183,8 @@ async def get_security_events(
     session: Annotated[AsyncSession, Depends(get_async_session)],
     _: Annotated[UserAccount, Depends(get_current_active_user)],
     workstation_id: UUID | None = Query(default=None),
-    severity: SecurityEventSeverity | None = Query(default=None),
-    event_type: SecurityEventType | None = Query(default=None),
+    severity: str | None = Query(default=None),
+    event_type: str | None = Query(default=None),
     source: str | None = Query(default=None),
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
 ) -> list[SecurityEventResponse]:
@@ -191,9 +194,11 @@ async def get_security_events(
     if workstation_id is not None:
         query = query.where(SecurityEvent.workstation_id == workstation_id)
     if severity is not None:
-        query = query.where(SecurityEvent.severity == severity.value)
+        sev_val = severity.value if hasattr(severity, "value") else str(severity)
+        query = query.where(SecurityEvent.severity == sev_val)
     if event_type is not None:
-        query = query.where(SecurityEvent.event_type == event_type.value)
+        type_val = event_type.value if hasattr(event_type, "value") else str(event_type)
+        query = query.where(SecurityEvent.event_type == type_val)
     if source is not None:
         query = query.where(SecurityEvent.source == source)
 

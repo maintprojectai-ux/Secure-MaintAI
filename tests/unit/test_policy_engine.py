@@ -255,3 +255,81 @@ def test_idp_outage_fallback_policy(
     result = policy_engine_instance.evaluate_policy(incident, fallback_user_ctx, ws_ctx)
     assert result.decision == PolicyDecisionType.REQUIRE_HUMAN_APPROVAL
     assert result.requires_human_approval is True
+
+
+def test_choose_playbook(policy_engine_instance: SecurityPolicyEngine) -> None:
+    """
+    Playbook selection: Evaluate role-sensitive response across student, researcher, technical, and emergency contexts.
+    Test Input: Incident category + User Role (Student, Researcher, Hardware Fault, Emergency Kill Switch).
+    Expected Result: Deterministic selection of Playbook 01 to 04 matching security policy rules.
+    """
+    ws_id = uuid.uuid4()
+
+    # 1. Student Cyber Threat -> Playbook 03 (Surgical Host Isolation)
+    student_ctx = IdPIdentityContext(
+        user_id="stu-101",
+        username="student_alex",
+        email="alex@kku.edu.sa",
+        role="STUDENT",
+        department="Computer Engineering",
+    )
+    ws_ctx = IdPWorkstationContext(workstation_id=ws_id, hostname="lab-pc-15", department="Engineering")
+    cyber_incident = CorrelatedIncident(
+        workstation_id=ws_id,
+        incident_category="CRYPTOJACKING",
+        is_threat=True,
+        severity="CRITICAL",
+        confidence=0.95,
+        recommended_action="SURGICAL_ISOLATION",
+        reason="Cryptomining signature detected.",
+    )
+    res_student = policy_engine_instance.evaluate_policy(cyber_incident, student_ctx, ws_ctx)
+    print(f"\n[Playbook Selection] Student Cyber Threat: playbook={res_student.playbook_to_execute}, decision={res_student.decision}")
+    assert res_student.playbook_to_execute == "PLAYBOOK_03_SURGICAL_ISOLATION"
+    # 2. Researcher Cyber Threat with Active HPC Job -> Playbook 02 (Process Containment Preserving Research)
+    active_job = AuthorizedWorkload(
+        job_id="HPC-SIM-500",
+        workload_type=WorkloadType.HPC_SIMULATION,
+        description="Quantum Simulation",
+        workstation_id=ws_id,
+        is_active=True,
+    )
+    researcher_ctx = IdPIdentityContext(
+        user_id="res-202",
+        username="dr_watson",
+        email="watson@kku.edu.sa",
+        role="RESEARCHER",
+        department="Physics",
+    )
+    ws_researcher_ctx = IdPWorkstationContext(
+        workstation_id=ws_id,
+        hostname="hpc-node-08",
+        department="Physics",
+        active_workloads=[active_job],
+    )
+    res_researcher = policy_engine_instance.evaluate_policy(cyber_incident, researcher_ctx, ws_researcher_ctx)
+    print(f"[Playbook Selection] Researcher Cyber Threat: playbook={res_researcher.playbook_to_execute}, preserved={res_researcher.preserve_workloads}")
+    assert res_researcher.playbook_to_execute == "PLAYBOOK_02_PROCESS_CONTAINMENT"
+    assert "HPC-SIM-500" in res_researcher.preserve_workloads
+    # 3. Technical Hardware Degradation -> Playbook 04 (Maintenance Dispatch)
+    tech_incident = CorrelatedIncident(
+        workstation_id=ws_id,
+        incident_category="HARDWARE_DEGRADATION",
+        is_threat=False,
+        severity="MEDIUM",
+        confidence=0.88,
+        recommended_action="SCHEDULE_MAINTENANCE_ADVISORY",
+        reason="Memory bus error detected.",
+    )
+    res_tech = policy_engine_instance.evaluate_policy(tech_incident, student_ctx, ws_ctx)
+    print(f"[Playbook Selection] Technical Degradation: playbook={res_tech.playbook_to_execute}, decision={res_tech.decision}")
+    assert res_tech.playbook_to_execute == "PLAYBOOK_04_MAINTENANCE"
+    # 4. Emergency Kill Switch Active -> Playbook 01 (Alert Only, No Containment)
+    policy_engine_instance.set_emergency_kill_switch(True)
+    try:
+        res_kill_switch = policy_engine_instance.evaluate_policy(cyber_incident, student_ctx, ws_ctx)
+        print(f"[Playbook Selection] Emergency Kill Switch: playbook={res_kill_switch.playbook_to_execute}, human_approval={res_kill_switch.requires_human_approval}")
+        assert res_kill_switch.playbook_to_execute == "PLAYBOOK_01_ALERT_ONLY"
+        assert res_kill_switch.requires_human_approval is True
+    finally:
+        policy_engine_instance.set_emergency_kill_switch(False)

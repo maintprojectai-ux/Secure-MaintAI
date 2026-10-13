@@ -20,11 +20,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.database import get_async_session
 from backend.core.dependencies import get_current_active_user
+from backend.models.alert import Alert
 from backend.models.anomaly import AnomalyDetection
 from backend.models.telemetry import TelemetryMetric
 from backend.models.user import UserAccount
 from backend.models.workstation import Workstation
-from backend.schemas.anomaly import AnomalyResponse
+from backend.schemas.anomaly import AnomalyResponse, AnomalyType
 from backend.schemas.telemetry import (
     TelemetryBatchCreate,
     TelemetryCreate,
@@ -115,6 +116,40 @@ async def ingest_single_telemetry(
             status="DETECTED",
         )
         session.add(anomaly_record)
+        await session.flush()
+
+        evidence_str = "; ".join(eval_res.evidence) if eval_res.evidence else "Anomalous telemetry metric observed."
+        if eval_res.anomaly_type == AnomalyType.TECHNICAL_ANOMALY:
+            is_critical = (
+                item.cpu.usage_percent >= 90.0
+                or item.memory.usage_percent >= 90.0
+                or eval_res.score >= 0.85
+            )
+            alert = Alert(
+                source_type="TECHNICAL_ANOMALY",
+                source_id=anomaly_record.id,
+                workstation_id=item.workstation_id,
+                severity="HIGH" if is_critical else "MEDIUM",
+                status="OPEN",
+                title=f"Technical Anomaly: {eval_res.predicted_fault or 'Hardware Saturation'}",
+                description=evidence_str,
+                recommendation="Review high-utilization processes or schedule hardware inspection.",
+                requires_human_intervention=False,
+            )
+            session.add(alert)
+        elif eval_res.anomaly_type == AnomalyType.SECURITY_ANOMALY:
+            alert = Alert(
+                source_type="CYBERSECURITY_THREAT",
+                source_id=anomaly_record.id,
+                workstation_id=item.workstation_id,
+                severity="CRITICAL" if eval_res.score >= 0.85 else "HIGH",
+                status="OPEN",
+                title="Cyber Threat Detected via ML Telemetry",
+                description=evidence_str,
+                recommendation="Review active socket connections and verify process authenticity.",
+                requires_human_intervention=False,
+            )
+            session.add(alert)
 
     await session.commit()
 
@@ -155,6 +190,7 @@ async def ingest_telemetry_batch(
 
     records = []
     anomalies = []
+    alerts = []
 
     for item in payload.items:
         if item.workstation_id not in hostname_map:
@@ -166,25 +202,59 @@ async def ingest_telemetry_batch(
         # ML anomaly evaluation
         eval_res = ml_pipeline_service.evaluate_telemetry_snapshot(item, workstation_name=hostname)
         if eval_res.is_anomaly:
-            anomalies.append(
-                AnomalyDetection(
-                    workstation_id=item.workstation_id,
-                    timestamp=item.timestamp,
-                    anomaly_type=eval_res.anomaly_type.value,
-                    score=eval_res.score,
-                    confidence=eval_res.confidence,
-                    model_name=eval_res.model_name,
-                    model_version=eval_res.model_version,
-                    features_snapshot=eval_res.features_snapshot,
-                    evidence=eval_res.evidence,
-                    status="DETECTED",
-                )
+            anom = AnomalyDetection(
+                workstation_id=item.workstation_id,
+                timestamp=item.timestamp,
+                anomaly_type=eval_res.anomaly_type.value,
+                score=eval_res.score,
+                confidence=eval_res.confidence,
+                model_name=eval_res.model_name,
+                model_version=eval_res.model_version,
+                features_snapshot=eval_res.features_snapshot,
+                evidence=eval_res.evidence,
+                status="DETECTED",
             )
+            anomalies.append(anom)
+
+            evidence_str = "; ".join(eval_res.evidence) if eval_res.evidence else "Anomalous telemetry metric observed."
+            if eval_res.anomaly_type == AnomalyType.TECHNICAL_ANOMALY:
+                is_critical = (
+                    item.cpu.usage_percent >= 90.0
+                    or item.memory.usage_percent >= 90.0
+                    or eval_res.score >= 0.85
+                )
+                alerts.append(
+                    Alert(
+                        source_type="TECHNICAL_ANOMALY",
+                        workstation_id=item.workstation_id,
+                        severity="HIGH" if is_critical else "MEDIUM",
+                        status="OPEN",
+                        title=f"Technical Anomaly: {eval_res.predicted_fault or 'Hardware Saturation'}",
+                        description=evidence_str,
+                        recommendation="Review high-utilization processes or schedule hardware inspection.",
+                        requires_human_intervention=False,
+                    )
+                )
+            elif eval_res.anomaly_type == AnomalyType.SECURITY_ANOMALY:
+                alerts.append(
+                    Alert(
+                        source_type="CYBERSECURITY_THREAT",
+                        workstation_id=item.workstation_id,
+                        severity="CRITICAL" if eval_res.score >= 0.85 else "HIGH",
+                        status="OPEN",
+                        title="Cyber Threat Detected via ML Telemetry",
+                        description=evidence_str,
+                        recommendation="Review active socket connections and verify process authenticity.",
+                        requires_human_intervention=False,
+                    )
+                )
 
     if records:
         session.add_all(records)
     if anomalies:
         session.add_all(anomalies)
+    if alerts:
+        session.add_all(alerts)
 
     await session.commit()
 

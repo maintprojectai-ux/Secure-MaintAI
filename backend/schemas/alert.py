@@ -33,14 +33,12 @@ class AlertStatus(str, Enum):
 
 
 class AlertSourceType(str, Enum):
-    """Source type that generated the alert."""
+    """Source type that generated the alert, strictly matching the four report categories."""
 
-    ANOMALY_DETECTION = "ANOMALY_DETECTION"
-    SECURITY_EVENT = "SECURITY_EVENT"
-    INCIDENT = "INCIDENT"
-    AGENT_HEALTH = "AGENT_HEALTH"
-    SYSTEM = "SYSTEM"
-    MANUAL = "MANUAL"
+    TECHNICAL_ANOMALY = "TECHNICAL_ANOMALY"
+    CYBERSECURITY_THREAT = "CYBERSECURITY_THREAT"
+    PREDICTIVE_MAINTENANCE = "PREDICTIVE_MAINTENANCE"
+    HUMAN_INTERVENTION_REQUIRED = "HUMAN_INTERVENTION_REQUIRED"
 
 
 class AlertCreate(BaseModel):
@@ -51,21 +49,63 @@ class AlertCreate(BaseModel):
         default=None,
         description="ID of the source record (anomaly, security event, etc.).",
     )
+    workstation_id: UUID | None = Field(
+        default=None,
+        description="ID of the affected workstation.",
+    )
     severity: AlertSeverity
     title: str = Field(..., min_length=1, max_length=256)
     description: str = Field(..., max_length=4096)
+    requires_human_intervention: bool = Field(
+        default=False,
+        description="Whether this alert exceeds autonomous parameters and requires human approval.",
+    )
+    recommendation: str | None = Field(
+        default=None,
+        max_length=4096,
+        description="Actionable operational advice or predictive maintenance guidance.",
+    )
+    playbook_initiated: str | None = Field(
+        default=None,
+        max_length=64,
+        description="Identifier of the SOAR playbook dispatched or queued.",
+    )
+
+
+class AlertResolve(BaseModel):
+    """Optional schema for resolving an alert."""
+
+    notes: str | None = Field(
+        default=None,
+        max_length=1024,
+        description="Resolution notes recorded by operator or SOAR.",
+    )
+
+
+class AlertApprove(BaseModel):
+    """Schema for operator authorizing a held action requiring human intervention."""
+
+    notes: str | None = Field(
+        default=None,
+        max_length=1024,
+        description="Operator approval remarks for audit trail.",
+    )
 
 
 class AlertResponse(BaseModel):
     """Schema for alert data in API responses."""
 
     id: UUID
-    source_type: AlertSourceType
+    source_type: AlertSourceType | str
     source_id: UUID | None = None
+    workstation_id: UUID | None = None
     severity: AlertSeverity
     status: AlertStatus
     title: str
     description: str
+    requires_human_intervention: bool = False
+    recommendation: str | None = None
+    playbook_initiated: str | None = None
     created_at: datetime
     acknowledged_at: datetime | None = None
     resolved_at: datetime | None = None

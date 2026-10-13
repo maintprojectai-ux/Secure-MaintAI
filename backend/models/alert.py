@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text, Uuid
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -24,9 +24,9 @@ class Alert(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "alert"
 
     source_type: Mapped[str] = mapped_column(
-        String(32),
+        String(64),
         nullable=False,
-        comment="ANOMALY_DETECTION, SECURITY_EVENT, AGENT_HEALTH, SYSTEM, MANUAL",
+        comment="TECHNICAL_ANOMALY, CYBERSECURITY_THREAT, PREDICTIVE_MAINTENANCE, HUMAN_INTERVENTION_REQUIRED, etc.",
     )
     source_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid,
@@ -54,6 +54,15 @@ class Alert(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     title: Mapped[str] = mapped_column(String(256), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
+    requires_human_intervention: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, comment="Whether human authorization is required"
+    )
+    recommendation: Mapped[str | None] = mapped_column(
+        Text, nullable=True, comment="Predictive maintenance or operational advice"
+    )
+    playbook_initiated: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, comment="Initiated or queued SOAR playbook"
+    )
     acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

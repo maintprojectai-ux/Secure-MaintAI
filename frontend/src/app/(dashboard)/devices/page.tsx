@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import {
   Server,
@@ -8,28 +8,23 @@ import {
   Network,
   HardDrive,
   Download,
-  Plus,
   Search,
   SlidersHorizontal,
   RotateCw,
   Eye,
+  Edit,
   Shield,
   RotateCcw,
-  MoreVertical,
   CheckCircle2,
   AlertTriangle,
   AlertCircle,
   Power,
   ChevronDown,
-  Copy,
-  Check,
-  Terminal,
-  Key,
 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import {
-  MOCK_DASHBOARD_KPI,
   getWorkstations,
+  updateWorkstation,
   isolateWorkstation,
   rollbackWorkstationIsolation,
 } from "@/lib/api";
@@ -41,9 +36,12 @@ interface DeviceItem {
   category: "server" | "desktop" | "switch" | "storage";
   ip: string;
   type: string;
+  department: string;
+  lab: string;
   location: string;
   rack: string;
-  status: "Online" | "Warning" | "Critical" | "Offline";
+  status: "Online" | "Warning" | "Critical" | "Offline" | "Maintenance" | "Decommissioned";
+  rawStatus: string;
   cpu: number | null;
   memory: number | null;
   disk: number | null;
@@ -51,208 +49,167 @@ interface DeviceItem {
   is_isolated?: boolean;
   mac_address?: string | null;
   asset_tag?: string | null;
-  hardware_specs?: any;
+  hardware_specs?: Record<string, unknown> | null;
 }
 
-const INITIAL_DEVICES: DeviceItem[] = [
-  {
-    id: "ws-srv-01",
-    name: "SRV-ACA-01",
-    model: "Dell PowerEdge R740",
-    category: "server",
-    ip: "10.10.1.10",
-    type: "Server",
-    location: "Main Data Center",
-    rack: "Rack 01",
-    status: "Online",
-    cpu: 42,
-    memory: 68,
-    disk: 54,
-    lastSeen: "2 min ago",
-  },
-  {
-    id: "ws-lab-17",
-    name: "LAB-PC-17",
-    model: "HP EliteDesk 800",
-    category: "desktop",
-    ip: "10.10.2.17",
-    type: "Desktop",
-    location: "Computer Lab 2",
-    rack: "Room 204",
-    status: "Warning",
-    cpu: 78,
-    memory: 83,
-    disk: 71,
-    lastSeen: "1 min ago",
-  },
-  {
-    id: "ws-srv-db02",
-    name: "SRV-DB-02",
-    model: "Dell PowerEdge R740",
-    category: "server",
-    ip: "10.10.1.20",
-    type: "Database Server",
-    location: "Main Data Center",
-    rack: "Rack 02",
-    status: "Critical",
-    cpu: 92,
-    memory: 91,
-    disk: 89,
-    lastSeen: "30 sec ago",
-  },
-  {
-    id: "ws-lab-09",
-    name: "LAB-PC-09",
-    model: "Lenovo ThinkCentre",
-    category: "desktop",
-    ip: "10.10.2.9",
-    type: "Desktop",
-    location: "Computer Lab 1",
-    rack: "Room 101",
-    status: "Online",
-    cpu: 45,
-    memory: 50,
-    disk: 40,
-    lastSeen: "1 min ago",
-  },
-  {
-    id: "ws-sw-core01",
-    name: "SW-CORE-01",
-    model: "Cisco Catalyst 9300",
-    category: "switch",
-    ip: "10.10.1.1",
-    type: "Network Switch",
-    location: "Main Data Center",
-    rack: "Rack 01",
-    status: "Online",
-    cpu: null,
-    memory: null,
-    disk: null,
-    lastSeen: "10 sec ago",
-  },
-  {
-    id: "ws-storage-01",
-    name: "STORAGE-01",
-    model: "Dell EMC Unity XT",
-    category: "storage",
-    ip: "10.10.1.50",
-    type: "Storage",
-    location: "Main Data Center",
-    rack: "Rack 03",
-    status: "Warning",
-    cpu: 63,
-    memory: 72,
-    disk: 81,
-    lastSeen: "2 min ago",
-  },
-  {
-    id: "ws-admin-01",
-    name: "ADMIN-PC-01",
-    model: "HP ProDesk 600",
-    category: "desktop",
-    ip: "10.10.3.5",
-    type: "Desktop",
-    location: "IT Office",
-    rack: "Room 301",
-    status: "Online",
-    cpu: 35,
-    memory: 48,
-    disk: 34,
-    lastSeen: "1 min ago",
-  },
-  {
-    id: "ws-srv-web01",
-    name: "SRV-WEB-01",
-    model: "Dell PowerEdge R740",
-    category: "server",
-    ip: "10.10.1.15",
-    type: "Web Server",
-    location: "Main Data Center",
-    rack: "Rack 02",
-    status: "Offline",
-    cpu: null,
-    memory: null,
-    disk: null,
-    lastSeen: "15 min ago",
-  },
-  {
-    id: "ws-stu-23",
-    name: "STUDENT-PC-23",
-    model: "HP EliteDesk 800",
-    category: "desktop",
-    ip: "10.10.2.23",
-    type: "Desktop",
-    location: "Computer Lab 3",
-    rack: "Room 303",
-    status: "Offline",
-    cpu: null,
-    memory: null,
-    disk: null,
-    lastSeen: "20 min ago",
-  },
-  {
-    id: "ws-srv-bkp01",
-    name: "SRV-BACKUP-01",
-    model: "Dell PowerEdge R740",
-    category: "server",
-    ip: "10.10.1.30",
-    type: "Backup Server",
-    location: "Main Data Center",
-    rack: "Rack 04",
-    status: "Online",
-    cpu: 28,
-    memory: 32,
-    disk: 45,
-    lastSeen: "30 sec ago",
-  },
-];
+interface EditFormState {
+  id: string;
+  name: string;
+  ip: string;
+  type: string;
+  department: string;
+  lab: string;
+  asset_tag: string;
+  status: string;
+}
 
 export default function DevicesPage() {
-  const [devices, setDevices] = useState<DeviceItem[]>(INITIAL_DEVICES);
-  const [isLiveFleet, setIsLiveFleet] = useState(false);
+  const [devices, setDevices] = useState<DeviceItem[]>([]);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [isLoadingFleet, setIsLoadingFleet] = useState(false);
   const [refreshIndex, setRefreshIndex] = useState(0);
+  const [totalDevicesCount, setTotalDevicesCount] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  // Search & Filter State
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedStatus, setSelectedStatus] = useState("ALL");
   const [selectedType, setSelectedType] = useState("ALL");
   const [selectedLocation, setSelectedLocation] = useState("ALL");
   const [selectedDevices, setSelectedDevices] = useState<string[]>([]);
+
+  // Action & Modal States
   const [isolationTarget, setIsolationTarget] = useState<DeviceItem | null>(null);
+  const [isIsolating, setIsIsolating] = useState(false);
   const [actionSuccessMessage, setActionSuccessMessage] = useState<string | null>(null);
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [agentOsTab, setAgentOsTab] = useState<"linux" | "windows">("linux");
-  const [copiedCommand, setCopiedCommand] = useState(false);
-  const [copiedToken, setCopiedToken] = useState(false);
-  const [newDeviceForm, setNewDeviceForm] = useState({
-    name: "",
-    model: "Dell Precision 5820",
-    category: "desktop" as "desktop" | "server" | "switch" | "storage",
-    type: "Desktop Workstation",
-    ip: "",
-    location: "Computer Lab 1",
-    rack: "Room 101",
-    department: "College of Computer Science",
-    os: "Ubuntu 22.04 LTS",
-  });
 
-  // Dynamic values directly from the current active `devices` state
-  const total = devices.length;
-  const onlineCount = devices.filter((d) => d.status === "Online").length;
-  const warningCount = devices.filter((d) => d.status === "Warning").length;
-  const criticalCount = devices.filter((d) => d.status === "Critical").length;
-  const offlineCount = devices.filter((d) => d.status === "Offline").length;
+  // Edit Modal State
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editingDevice, setEditingDevice] = useState<EditFormState | null>(null);
+  const [isSubmittingEdit, setIsSubmittingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
-  const onlinePct = total > 0 ? ((onlineCount / total) * 100).toFixed(1) : "0.0";
-  const warningPct = total > 0 ? ((warningCount / total) * 100).toFixed(1) : "0.0";
-  const criticalPct = total > 0 ? ((criticalCount / total) * 100).toFixed(1) : "0.0";
-  const offlinePct = total > 0 ? ((offlineCount / total) * 100).toFixed(1) : "0.0";
 
-  // KPI cards definition
+  // Live fleet synchronization from FastAPI backend
+  useEffect(() => {
+    let active = true;
+
+    async function loadLiveWorkstations() {
+      setIsLoadingFleet(true);
+      try {
+        const res = await getWorkstations({
+          page: currentPage,
+          pageSize,
+          search: searchQuery.trim() || undefined,
+          status: selectedStatus !== "ALL" ? selectedStatus : undefined,
+        });
+
+        if (!active) return;
+
+        if (res && res.items) {
+          const mapped: DeviceItem[] = res.items.map((w) => {
+            const isServer =
+              (w.operating_system || "").toLowerCase().includes("server") ||
+              (w.hostname || "").toLowerCase().includes("srv") ||
+              (w.hostname || "").toLowerCase().includes("hpc");
+
+            const statusMap: Record<
+              string,
+              "Online" | "Warning" | "Critical" | "Offline" | "Maintenance" | "Decommissioned"
+            > = {
+              ONLINE: "Online",
+              OFFLINE: "Offline",
+              WARNING: "Warning",
+              CRITICAL: "Critical",
+              ISOLATED: "Critical",
+              MAINTENANCE: "Maintenance",
+              DECOMMISSIONED: "Decommissioned",
+            };
+            const mappedStatus = statusMap[w.status] || "Online";
+
+            let lastSeenStr = "Active";
+            if (w.last_seen_at) {
+              const diffMs = Date.now() - new Date(w.last_seen_at).getTime();
+              const diffSec = Math.floor(diffMs / 1000);
+              if (diffSec < 60) lastSeenStr = `${diffSec}s ago`;
+              else if (diffSec < 3600) lastSeenStr = `${Math.floor(diffSec / 60)}m ago`;
+              else if (diffSec < 86400) lastSeenStr = `${Math.floor(diffSec / 3600)}h ago`;
+              else lastSeenStr = `${Math.floor(diffSec / 86400)}d ago`;
+            }
+
+            const dept = w.department || "Academic Infrastructure";
+            const lab = w.lab || "Main Bay";
+            const loc = `${dept} • ${lab}`;
+
+            return {
+              id: w.id,
+              name: w.hostname,
+              model:
+                (w.hardware_specs?.processor as string) ||
+                (isServer ? "HPC / Compute Node" : "Standard Workstation"),
+              category: isServer ? "server" : "desktop",
+              ip: w.ip_address,
+              type: w.operating_system || "Linux Workstation",
+              department: w.department || "",
+              lab: w.lab || "",
+              location: loc,
+              rack: w.asset_tag || "Fleet Asset",
+              status: mappedStatus,
+              rawStatus: w.status,
+              cpu: w.cpu_usage ?? (w.status === "ONLINE" ? 34 : null),
+              memory: w.memory_usage ?? (w.status === "ONLINE" ? 48 : null),
+              disk: w.disk_usage ?? (w.status === "ONLINE" ? 52 : null),
+              lastSeen: lastSeenStr,
+              is_isolated: w.status === "ISOLATED",
+              mac_address: w.mac_address,
+              asset_tag: w.asset_tag,
+              hardware_specs: w.hardware_specs as Record<string, unknown> | null,
+            };
+          });
+
+          setDevices(mapped);
+          setTotalDevicesCount(res.total);
+          setTotalPages(res.total_pages || 1);
+        }
+      } catch (err) {
+        console.error("Failed to load workstations from backend:", err);
+      } finally {
+        if (active) {
+          setIsLoadingFleet(false);
+          setInitialLoading(false);
+        }
+      }
+    }
+
+    loadLiveWorkstations();
+    return () => {
+      active = false;
+    };
+  }, [refreshIndex, currentPage, pageSize, selectedStatus, searchQuery]);
+
+  // Dynamic KPI Metrics derived directly from live fleet data
+  const total = totalDevicesCount || devices.length;
+  const onlineCount = devices.filter((d) => d.rawStatus === "ONLINE").length;
+  const warningCount = devices.filter((d) => d.rawStatus === "WARNING").length;
+  const criticalCount = devices.filter(
+    (d) => d.rawStatus === "CRITICAL" || d.rawStatus === "ISOLATED" || d.rawStatus === "COMPROMISED"
+  ).length;
+  const offlineCount = devices.filter(
+    (d) => d.rawStatus === "OFFLINE" || d.rawStatus === "MAINTENANCE" || d.rawStatus === "DECOMMISSIONED"
+  ).length;
+
+  const onlinePct = devices.length > 0 ? ((onlineCount / devices.length) * 100).toFixed(1) : "0.0";
+  const warningPct = devices.length > 0 ? ((warningCount / devices.length) * 100).toFixed(1) : "0.0";
+  const criticalPct = devices.length > 0 ? ((criticalCount / devices.length) * 100).toFixed(1) : "0.0";
+  const offlinePct = devices.length > 0 ? ((offlineCount / devices.length) * 100).toFixed(1) : "0.0";
+
   const kpiCards = [
     {
       title: "Total Devices",
       value: total,
-      delta: "↑ 12 from yesterday",
+      delta: `${devices.length} visible in page`,
       deltaColor: "text-blue-400",
       icon: <Monitor className="w-5 h-5 text-blue-400" />,
       iconBg: "bg-blue-600/20 border-blue-500/30",
@@ -260,11 +217,11 @@ export default function DevicesPage() {
     {
       title: "Online",
       value: onlineCount,
-      delta: `${onlinePct}% of total`,
+      delta: `${onlinePct}% of active batch`,
       deltaColor: "text-emerald-400",
       icon: (
         <div className="relative flex items-center justify-center">
-          <span className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
+          <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
         </div>
       ),
       iconBg: "bg-emerald-600/20 border-emerald-500/30",
@@ -272,50 +229,56 @@ export default function DevicesPage() {
     {
       title: "Warning",
       value: warningCount,
-      delta: `${warningPct}% of total`,
+      delta: `${warningPct}% of active batch`,
       deltaColor: "text-amber-400",
       icon: <AlertTriangle className="w-5 h-5 text-amber-400" />,
       iconBg: "bg-amber-600/20 border-amber-500/30",
     },
     {
-      title: "Critical",
+      title: "Critical / Isolated",
       value: criticalCount,
-      delta: `${criticalPct}% of total`,
+      delta: `${criticalPct}% of active batch`,
       deltaColor: "text-rose-400",
       icon: <AlertCircle className="w-5 h-5 text-rose-400" />,
       iconBg: "bg-rose-600/20 border-rose-500/30",
     },
     {
-      title: "Offline",
+      title: "Offline / Maint",
       value: offlineCount,
-      delta: `${offlinePct}% of total`,
+      delta: `${offlinePct}% of active batch`,
       deltaColor: "text-slate-400",
       icon: <Power className="w-5 h-5 text-slate-400" />,
       iconBg: "bg-slate-700/30 border-slate-600/40",
     },
   ];
 
-  // Filtering logic
-  const filteredDevices = devices.filter((d) => {
-    if (selectedStatus !== "ALL" && d.status.toUpperCase() !== selectedStatus.toUpperCase()) {
-      return false;
-    }
-    if (selectedType !== "ALL" && d.type.toLowerCase() !== selectedType.toLowerCase()) {
-      return false;
-    }
-    if (selectedLocation !== "ALL" && !d.location.toLowerCase().includes(selectedLocation.toLowerCase())) {
-      return false;
-    }
-    if (searchQuery.trim() !== "") {
-      const q = searchQuery.toLowerCase();
-      const matchesName = d.name.toLowerCase().includes(q);
-      const matchesModel = d.model.toLowerCase().includes(q);
-      const matchesIp = d.ip.toLowerCase().includes(q);
-      const matchesType = d.type.toLowerCase().includes(q);
-      if (!matchesName && !matchesModel && !matchesIp && !matchesType) return false;
-    }
-    return true;
-  });
+  // Dynamic filter options based on available devices
+  const availableLocations = useMemo(() => {
+    const locs = new Set<string>();
+    devices.forEach((d) => {
+      if (d.department) locs.add(d.department);
+      if (d.lab) locs.add(d.lab);
+    });
+    return Array.from(locs);
+  }, [devices]);
+
+  // Client-side refined filtering (for location and type)
+  const filteredDevices = useMemo(() => {
+    return devices.filter((d) => {
+      if (selectedType !== "ALL" && !d.type.toLowerCase().includes(selectedType.toLowerCase())) {
+        return false;
+      }
+      if (
+        selectedLocation !== "ALL" &&
+        !d.location.toLowerCase().includes(selectedLocation.toLowerCase()) &&
+        !d.department.toLowerCase().includes(selectedLocation.toLowerCase()) &&
+        !d.lab.toLowerCase().includes(selectedLocation.toLowerCase())
+      ) {
+        return false;
+      }
+      return true;
+    });
+  }, [devices, selectedType, selectedLocation]);
 
   const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.checked) {
@@ -331,81 +294,65 @@ export default function DevicesPage() {
     );
   };
 
-  // Live fleet synchronization from FastAPI backend
-  useEffect(() => {
-    let active = true;
-    async function loadLiveWorkstations() {
-      setIsLoadingFleet(true);
-      try {
-        const res = await getWorkstations({ pageSize: 50 });
-        if (active && res && res.items && res.items.length > 0) {
-          const mapped: DeviceItem[] = res.items.map((w) => {
-            const isServer =
-              (w.operating_system || "").toLowerCase().includes("server") ||
-              (w.hostname || "").toLowerCase().includes("srv") ||
-              (w.hostname || "").toLowerCase().includes("hpc");
-            const statusMap: Record<string, "Online" | "Warning" | "Critical" | "Offline"> = {
-              ONLINE: "Online",
-              OFFLINE: "Offline",
-              WARNING: "Warning",
-              CRITICAL: "Critical",
-              ISOLATED: "Critical",
-            };
-            const mappedStatus = statusMap[w.status] || "Online";
+  // Open Edit Workstation Modal
+  const handleOpenEditModal = (device: DeviceItem) => {
+    setEditingDevice({
+      id: device.id,
+      name: device.name,
+      ip: device.ip,
+      type: device.type,
+      department: device.department,
+      lab: device.lab,
+      asset_tag: device.asset_tag || "",
+      status: device.rawStatus || "ONLINE",
+    });
+    setEditError(null);
+    setIsEditModalOpen(true);
+  };
 
-            let lastSeenStr = "Active";
-            if (w.last_seen_at) {
-              const diffMs = Date.now() - new Date(w.last_seen_at).getTime();
-              const diffSec = Math.floor(diffMs / 1000);
-              if (diffSec < 60) lastSeenStr = `${diffSec}s ago`;
-              else if (diffSec < 3600) lastSeenStr = `${Math.floor(diffSec / 60)} min ago`;
-              else lastSeenStr = `${Math.floor(diffSec / 3600)}h ago`;
-            }
+  // Submit Edit Workstation
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingDevice) return;
 
-            return {
-              id: w.id,
-              name: w.hostname,
-              model:
-                (w.hardware_specs?.processor as string) ||
-                (isServer ? "HPC / Server Node" : "Standard Workstation"),
-              category: isServer ? "server" : "desktop",
-              ip: w.ip_address,
-              type: w.operating_system || "Linux / Windows",
-              location: w.lab
-                ? `${w.department || "Academic"} - ${w.lab}`
-                : w.department || "Main Campus",
-              rack: w.asset_tag || "Fleet Asset",
-              status: mappedStatus,
-              cpu: w.cpu_usage ?? (w.status === "ONLINE" ? 34 : null),
-              memory: w.memory_usage ?? (w.status === "ONLINE" ? 48 : null),
-              disk: w.disk_usage ?? (w.status === "ONLINE" ? 52 : null),
-              lastSeen: lastSeenStr,
-              is_isolated: w.status === "ISOLATED",
-              mac_address: w.mac_address,
-              asset_tag: w.asset_tag,
-              hardware_specs: w.hardware_specs,
-            };
-          });
-          setDevices(mapped);
-          setIsLiveFleet(true);
-        }
-      } catch (err) {
-        console.debug("Backend workstations API unavailable, using offline fallback fleet:", err);
-      } finally {
-        if (active) setIsLoadingFleet(false);
-      }
+    setIsSubmittingEdit(true);
+    setEditError(null);
+
+    try {
+      await updateWorkstation(editingDevice.id, {
+        department: editingDevice.department || null,
+        lab: editingDevice.lab || null,
+        asset_tag: editingDevice.asset_tag || null,
+        status: editingDevice.status || null,
+      });
+
+      setActionSuccessMessage(
+        `Workstation ${editingDevice.name} configuration updated successfully!`
+      );
+      setIsEditModalOpen(false);
+      setEditingDevice(null);
+      setRefreshIndex((p) => p + 1);
+
+      setTimeout(() => {
+        setActionSuccessMessage(null);
+      }, 6000);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to update workstation configuration";
+      setEditError(msg);
+    } finally {
+      setIsSubmittingEdit(false);
     }
-    loadLiveWorkstations();
-    return () => {
-      active = false;
-    };
-  }, [refreshIndex]);
+  };
 
+  // Live Surgical Network Isolation & Rollback
   const confirmIsolation = async () => {
     if (!isolationTarget) return;
 
+    setIsIsolating(true);
     try {
-      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(isolationTarget.id);
+      const isUuid =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(isolationTarget.id);
+
       if (isUuid) {
         if (isolationTarget.is_isolated) {
           await rollbackWorkstationIsolation(isolationTarget.id);
@@ -413,94 +360,57 @@ export default function DevicesPage() {
           await isolateWorkstation(isolationTarget.id);
         }
       }
-    } catch (err) {
-      console.warn("Could not reach SOAR endpoint, applying local mock isolation:", err);
-    }
 
-    setDevices((prev) =>
-      prev.map((d) =>
-        d.id === isolationTarget.id
-          ? {
-            ...d,
-            is_isolated: !d.is_isolated,
-            status: !d.is_isolated ? "Critical" : "Online",
-          }
-          : d
-      )
-    );
+      setDevices((prev) =>
+        prev.map((d) =>
+          d.id === isolationTarget.id
+            ? {
+                ...d,
+                is_isolated: !d.is_isolated,
+                status: !d.is_isolated ? "Critical" : "Online",
+                rawStatus: !d.is_isolated ? "ISOLATED" : "ONLINE",
+              }
+            : d
+        )
+      );
 
-    const actionText = isolationTarget.is_isolated
-      ? `Surgical network isolation rolled back for ${isolationTarget.name}`
-      : `Surgical network containment enforced on ${isolationTarget.name}. Host OS kept running; unauthorized C2 sockets severed.`;
+      const actionText = isolationTarget.is_isolated
+        ? `Surgical network isolation rolled back for ${isolationTarget.name}. Normal telemetry restored.`
+        : `Surgical network containment enforced on ${isolationTarget.name}. Host OS kept running; unauthorized C2 sockets severed.`;
 
-    setActionSuccessMessage(actionText);
-    setIsolationTarget(null);
+      setActionSuccessMessage(actionText);
+      setIsolationTarget(null);
 
-    setTimeout(() => {
-      setActionSuccessMessage(null);
-    }, 6000);
-  };
-
-  const enrollmentToken = "sm-agt-8f7a912e-kku-fleet";
-  const linuxInstallCmd = `curl -sSL https://secure-maint.kku.edu.sa/agent/install.sh | sudo bash -s -- --token ${enrollmentToken} --server https://telemetry.kku.edu.sa`;
-  const windowsInstallCmd = `irm https://secure-maint.kku.edu.sa/agent/install.ps1 | iex; Install-SecureMaintAgent -Token "${enrollmentToken}" -Server "https://telemetry.kku.edu.sa"`;
-
-  const copyToClipboard = (text: string, isToken = false) => {
-    if (typeof navigator !== "undefined" && navigator.clipboard) {
-      navigator.clipboard.writeText(text);
-      if (isToken) {
-        setCopiedToken(true);
-        setTimeout(() => setCopiedToken(false), 2000);
-      } else {
-        setCopiedCommand(true);
-        setTimeout(() => setCopiedCommand(false), 2000);
-      }
+      setTimeout(() => {
+        setActionSuccessMessage(null);
+      }, 6000);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Network error";
+      setActionSuccessMessage(`Isolation action failed: ${msg}`);
+      setTimeout(() => {
+        setActionSuccessMessage(null);
+      }, 6000);
+    } finally {
+      setIsIsolating(false);
     }
   };
 
-  const handleEnrollDevice = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newDeviceForm.name.trim() || !newDeviceForm.ip.trim()) return;
-
-    const newId = `ws-${newDeviceForm.name.toLowerCase().replace(/[^a-z0-9]/g, "-")}-${Date.now().toString().slice(-4)}`;
-    const created: DeviceItem = {
-      id: newId,
-      name: newDeviceForm.name.toUpperCase().trim(),
-      model: newDeviceForm.model || "Workstation",
-      category: newDeviceForm.category,
-      ip: newDeviceForm.ip.trim(),
-      type: newDeviceForm.type,
-      location: newDeviceForm.location,
-      rack: newDeviceForm.rack || "Default Bay",
-      status: "Online",
-      cpu: Math.floor(Math.random() * 20) + 20,
-      memory: Math.floor(Math.random() * 25) + 30,
-      disk: Math.floor(Math.random() * 20) + 35,
-      lastSeen: "Just now",
-    };
-
-    setDevices((prev) => [created, ...prev]);
-    setActionSuccessMessage(`Device ${created.name} successfully enrolled! Telemetry agent heartbeat stream established.`);
-    setIsAddModalOpen(false);
-    setNewDeviceForm({
-      name: "",
-      model: "Dell Precision 5820",
-      category: "desktop",
-      type: "Desktop Workstation",
-      ip: "",
-      location: "Computer Lab 1",
-      rack: "Room 101",
-      department: "College of Computer Science",
-      os: "Ubuntu 22.04 LTS",
-    });
-
-    setTimeout(() => {
-      setActionSuccessMessage(null);
-    }, 6000);
-  };
 
   const handleExportCsv = () => {
-    const headers = ["ID", "Name", "Model", "Type", "IP Address", "Location", "Rack", "Status", "CPU", "Memory", "Disk"];
+    const headers = [
+      "ID",
+      "Name",
+      "Model",
+      "Type",
+      "IP Address",
+      "Location",
+      "Asset Tag",
+      "Status",
+      "CPU",
+      "Memory",
+      "Disk",
+      "Last Seen",
+    ];
     const rows = filteredDevices.map((d) => [
       d.id,
       d.name,
@@ -513,12 +423,17 @@ export default function DevicesPage() {
       d.cpu ?? "N/A",
       d.memory ?? "N/A",
       d.disk ?? "N/A",
+      d.lastSeen,
     ]);
-    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const csvContent =
+      "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `secure_maint_devices_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute(
+      "download",
+      `secure_maint_devices_${new Date().toISOString().slice(0, 10)}.csv`
+    );
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -556,11 +471,79 @@ export default function DevicesPage() {
     );
   };
 
+  // Initial Shimmer Loading Skeleton Screen
+  if (initialLoading) {
+    return (
+      <div className="space-y-6 font-sans">
+        {/* Skeleton Top Action Bar */}
+        <div className="flex items-center justify-end gap-2.5">
+          <div className="w-24 h-9 rounded-xl bg-slate-800/40 animate-pulse border border-slate-700/50" />
+          <div className="w-32 h-9 rounded-xl bg-slate-800/40 animate-pulse border border-slate-700/50" />
+        </div>
+
+        {/* Skeleton KPI Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+          {[1, 2, 3, 4, 5].map((i) => (
+            <div
+              key={i}
+              className="p-4 rounded-2xl border border-slate-800/80 bg-[#091124]/90 flex items-center justify-between shadow-lg"
+            >
+              <div className="space-y-2">
+                <div className="w-20 h-3 bg-slate-800/80 rounded animate-pulse" />
+                <div className="w-12 h-7 bg-slate-800/80 rounded animate-pulse" />
+                <div className="w-24 h-2.5 bg-slate-800/60 rounded animate-pulse" />
+              </div>
+              <div className="w-11 h-11 rounded-xl bg-slate-800/60 border border-slate-700/40 animate-pulse" />
+            </div>
+          ))}
+        </div>
+
+        {/* Skeleton Toolbar */}
+        <div className="p-3.5 rounded-2xl border border-slate-800/80 bg-[#091124]/90 flex flex-col lg:flex-row items-center justify-between gap-3 shadow-lg">
+          <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto">
+            <div className="w-64 h-8 bg-slate-800/70 rounded-xl animate-pulse" />
+            <div className="w-28 h-8 bg-slate-800/70 rounded-xl animate-pulse" />
+            <div className="w-28 h-8 bg-slate-800/70 rounded-xl animate-pulse" />
+            <div className="w-32 h-8 bg-slate-800/70 rounded-xl animate-pulse" />
+          </div>
+          <div className="w-36 h-8 bg-slate-800/70 rounded-xl animate-pulse" />
+        </div>
+
+        {/* Skeleton Table */}
+        <div className="rounded-2xl border border-slate-800/80 bg-[#091124]/90 overflow-hidden p-4 space-y-4 shadow-lg">
+          {[...Array(10)].map((_, i) => (
+            <div
+              key={i}
+              className="flex items-center justify-between gap-4 py-3 border-b border-slate-800/50"
+            >
+              <div className="flex items-center gap-3 w-1/4">
+                <div className="w-8 h-8 rounded-lg bg-slate-800/80 animate-pulse flex-shrink-0" />
+                <div className="space-y-1.5 flex-1">
+                  <div className="w-28 h-3.5 bg-slate-800/80 rounded animate-pulse" />
+                  <div className="w-20 h-2.5 bg-slate-800/60 rounded animate-pulse" />
+                </div>
+              </div>
+              <div className="w-24 h-3 bg-slate-800/70 rounded animate-pulse" />
+              <div className="w-24 h-3 bg-slate-800/70 rounded animate-pulse" />
+              <div className="w-24 h-3 bg-slate-800/70 rounded animate-pulse" />
+              <div className="w-16 h-5 bg-slate-800/70 rounded-full animate-pulse" />
+              <div className="w-16 h-2 bg-slate-800/70 rounded animate-pulse" />
+              <div className="w-16 h-2 bg-slate-800/70 rounded animate-pulse" />
+              <div className="w-16 h-2 bg-slate-800/70 rounded animate-pulse" />
+              <div className="w-16 h-3 bg-slate-800/70 rounded animate-pulse" />
+              <div className="w-20 h-7 bg-slate-800/70 rounded-lg animate-pulse" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6 font-sans">
       {/* Action Notification Banner */}
       {actionSuccessMessage && (
-        <div className="p-3.5 rounded-xl bg-emerald-950/70 border border-emerald-500/40 text-emerald-300 text-xs flex items-center gap-2.5 shadow-lg shadow-emerald-950/40">
+        <div className="p-3.5 rounded-xl bg-emerald-950/70 border border-emerald-500/40 text-emerald-300 text-xs flex items-center gap-2.5 shadow-lg shadow-emerald-950/40 animate-in fade-in slide-in-from-top-2">
           <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
           <span>{actionSuccessMessage}</span>
         </div>
@@ -575,16 +558,7 @@ export default function DevicesPage() {
           title="Export devices list to CSV"
         >
           <Download className="w-3.5 h-3.5 text-slate-400" />
-          <span>Export</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setIsAddModalOpen(true)}
-          className="px-4 py-2 rounded-xl bg-[#1d68ff] hover:bg-[#185adb] text-white text-xs font-semibold flex items-center gap-2 shadow-lg shadow-blue-600/30 transition-colors cursor-pointer"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Add Device</span>
+          <span>Export CSV</span>
         </button>
       </div>
 
@@ -597,10 +571,14 @@ export default function DevicesPage() {
           >
             <div>
               <p className="text-xs font-medium text-slate-400 tracking-wide">{card.title}</p>
-              <h3 className="text-2xl font-bold text-white mt-1 font-sans tracking-tight">{card.value}</h3>
+              <h3 className="text-2xl font-bold text-white mt-1 font-sans tracking-tight">
+                {card.value}
+              </h3>
               <p className={`text-[11px] font-medium mt-1 ${card.deltaColor}`}>{card.delta}</p>
             </div>
-            <div className={`w-11 h-11 rounded-xl border flex items-center justify-center flex-shrink-0 ${card.iconBg}`}>
+            <div
+              className={`w-11 h-11 rounded-xl border flex items-center justify-center flex-shrink-0 ${card.iconBg}`}
+            >
               {card.icon}
             </div>
           </div>
@@ -617,7 +595,7 @@ export default function DevicesPage() {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by name, IP, or type..."
+              placeholder="Search hostname or IP..."
               className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-900/90 border border-slate-700/80 rounded-xl text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors font-sans"
             />
           </div>
@@ -632,7 +610,10 @@ export default function DevicesPage() {
             <option value="ONLINE">Online</option>
             <option value="WARNING">Warning</option>
             <option value="CRITICAL">Critical</option>
+            <option value="ISOLATED">Isolated</option>
             <option value="OFFLINE">Offline</option>
+            <option value="MAINTENANCE">Maintenance</option>
+            <option value="DECOMMISSIONED">Decommissioned</option>
           </select>
 
           {/* Types Filter */}
@@ -641,14 +622,11 @@ export default function DevicesPage() {
             onChange={(e) => setSelectedType(e.target.value)}
             className="text-xs bg-slate-900/90 border border-slate-700/80 rounded-xl px-3 py-1.5 text-slate-300 focus:outline-none focus:border-blue-500 cursor-pointer"
           >
-            <option value="ALL">All Types</option>
+            <option value="ALL">All OS / Types</option>
+            <option value="Linux">Linux</option>
+            <option value="Windows">Windows</option>
+            <option value="Ubuntu">Ubuntu</option>
             <option value="Server">Server</option>
-            <option value="Desktop">Desktop</option>
-            <option value="Database Server">Database Server</option>
-            <option value="Network Switch">Network Switch</option>
-            <option value="Storage">Storage</option>
-            <option value="Web Server">Web Server</option>
-            <option value="Backup Server">Backup Server</option>
           </select>
 
           {/* Locations Filter */}
@@ -658,37 +636,20 @@ export default function DevicesPage() {
             className="text-xs bg-slate-900/90 border border-slate-700/80 rounded-xl px-3 py-1.5 text-slate-300 focus:outline-none focus:border-blue-500 cursor-pointer"
           >
             <option value="ALL">All Locations</option>
-            <option value="Main Data Center">Main Data Center</option>
-            <option value="Computer Lab 1">Computer Lab 1</option>
-            <option value="Computer Lab 2">Computer Lab 2</option>
-            <option value="Computer Lab 3">Computer Lab 3</option>
-            <option value="IT Office">IT Office</option>
+            {availableLocations.map((loc) => (
+              <option key={loc} value={loc}>
+                {loc}
+              </option>
+            ))}
           </select>
-
-          {/* More Filters button */}
-          <button
-            type="button"
-            className="px-3 py-1.5 rounded-xl border border-slate-700/80 bg-slate-900/60 hover:bg-slate-800 text-xs font-medium text-slate-300 flex items-center gap-1.5 transition-colors cursor-pointer"
-          >
-            <SlidersHorizontal className="w-3.5 h-3.5 text-slate-400" />
-            <span>More Filters</span>
-            <ChevronDown className="w-3 h-3 text-slate-400" />
-          </button>
         </div>
 
         {/* Right side: Live indicator and Refresh */}
         <div className="flex items-center gap-2.5 self-end lg:self-auto">
-          {isLiveFleet ? (
-            <span className="text-[11px] font-mono text-emerald-400 bg-emerald-950/50 border border-emerald-500/30 px-2.5 py-1 rounded-xl flex items-center gap-1.5 shadow-sm">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              Live Fleet ({devices.length} Devices)
-            </span>
-          ) : (
-            <span className="text-[11px] font-mono text-slate-400 bg-slate-900/60 border border-slate-700/60 px-2.5 py-1 rounded-xl flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
-              Fleet ({devices.length} Devices)
-            </span>
-          )}
+          <span className="text-[11px] font-mono text-emerald-400 bg-emerald-950/50 border border-emerald-500/30 px-2.5 py-1 rounded-xl flex items-center gap-1.5 shadow-sm">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            Live Fleet ({total} Enrolled)
+          </span>
 
           {/* Refresh button */}
           <button
@@ -697,7 +658,9 @@ export default function DevicesPage() {
             disabled={isLoadingFleet}
             className="px-3 py-1.5 rounded-xl border border-slate-700/80 bg-slate-900/60 hover:bg-slate-800 text-xs font-medium text-slate-300 flex items-center gap-1.5 transition-colors cursor-pointer"
           >
-            <RotateCw className={`w-3.5 h-3.5 text-slate-400 ${isLoadingFleet ? "animate-spin text-blue-400" : ""}`} />
+            <RotateCw
+              className={`w-3.5 h-3.5 text-slate-400 ${isLoadingFleet ? "animate-spin text-blue-400" : ""}`}
+            />
             <span>{isLoadingFleet ? "Syncing..." : "Refresh"}</span>
           </button>
         </div>
@@ -720,10 +683,10 @@ export default function DevicesPage() {
                     className="w-3.5 h-3.5 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-0 cursor-pointer"
                   />
                 </th>
-                <th className="py-3 px-3 font-semibold text-slate-300">Device Name</th>
+                <th className="py-3 px-3 font-semibold text-slate-300">Device Hostname</th>
                 <th className="py-3 px-3 font-semibold text-slate-300">IP Address</th>
-                <th className="py-3 px-3 font-semibold text-slate-300">Type</th>
-                <th className="py-3 px-3 font-semibold text-slate-300">Location</th>
+                <th className="py-3 px-3 font-semibold text-slate-300">OS / Specs</th>
+                <th className="py-3 px-3 font-semibold text-slate-300">Department &amp; Lab</th>
                 <th className="py-3 px-3 font-semibold text-slate-300">Status</th>
                 <th className="py-3 px-3 font-semibold text-slate-300">CPU Usage</th>
                 <th className="py-3 px-3 font-semibold text-slate-300">Memory Usage</th>
@@ -738,8 +701,9 @@ export default function DevicesPage() {
                 return (
                   <tr
                     key={device.id}
-                    className={`hover:bg-slate-800/30 transition-colors ${isSelected ? "bg-blue-600/5" : ""
-                      }`}
+                    className={`hover:bg-slate-800/30 transition-colors ${
+                      isSelected ? "bg-blue-600/5" : ""
+                    }`}
                   >
                     {/* Checkbox */}
                     <td className="py-3 px-3">
@@ -791,21 +755,24 @@ export default function DevicesPage() {
                     {/* Location */}
                     <td className="py-3 px-3 whitespace-nowrap">
                       <div className="text-xs text-slate-200 font-medium">{device.location}</div>
-                      <div className="text-[11px] text-slate-400">{device.rack}</div>
+                      <div className="text-[11px] text-slate-400 font-mono">{device.rack}</div>
                     </td>
 
                     {/* Status */}
                     <td className="py-3 px-3 whitespace-nowrap">
                       <span className="inline-flex items-center gap-1.5 text-xs font-medium">
                         <span
-                          className={`w-2 h-2 rounded-full ${device.status === "Online"
+                          className={`w-2 h-2 rounded-full ${
+                            device.status === "Online"
                               ? "bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.5)]"
                               : device.status === "Warning"
                                 ? "bg-amber-400 shadow-[0_0_8px_rgba(245,158,11,0.5)]"
                                 : device.status === "Critical"
                                   ? "bg-rose-400 shadow-[0_0_8px_rgba(239,68,68,0.5)]"
-                                  : "bg-slate-500"
-                            }`}
+                                  : device.status === "Maintenance"
+                                    ? "bg-purple-400 shadow-[0_0_8px_rgba(168,85,247,0.5)]"
+                                    : "bg-slate-500"
+                          }`}
                         />
                         <span
                           className={
@@ -815,7 +782,9 @@ export default function DevicesPage() {
                                 ? "text-amber-400"
                                 : device.status === "Critical"
                                   ? "text-rose-400"
-                                  : "text-slate-400"
+                                  : device.status === "Maintenance"
+                                    ? "text-purple-400"
+                                    : "text-slate-400"
                           }
                         >
                           {device.status}
@@ -827,7 +796,11 @@ export default function DevicesPage() {
                     <td className="py-3 px-3 whitespace-nowrap">
                       {renderProgressBar(
                         device.cpu,
-                        device.status === "Critical" ? "rose" : device.status === "Warning" ? "amber" : undefined
+                        device.status === "Critical"
+                          ? "rose"
+                          : device.status === "Warning"
+                            ? "amber"
+                            : undefined
                       )}
                     </td>
 
@@ -835,7 +808,11 @@ export default function DevicesPage() {
                     <td className="py-3 px-3 whitespace-nowrap">
                       {renderProgressBar(
                         device.memory,
-                        device.status === "Critical" ? "rose" : device.status === "Warning" ? "amber" : undefined
+                        device.status === "Critical"
+                          ? "rose"
+                          : device.status === "Warning"
+                            ? "amber"
+                            : undefined
                       )}
                     </td>
 
@@ -843,50 +820,61 @@ export default function DevicesPage() {
                     <td className="py-3 px-3 whitespace-nowrap">
                       {renderProgressBar(
                         device.disk,
-                        device.status === "Critical" ? "rose" : device.status === "Warning" ? "amber" : undefined
+                        device.status === "Critical"
+                          ? "rose"
+                          : device.status === "Warning"
+                            ? "amber"
+                            : undefined
                       )}
                     </td>
 
                     {/* Last Seen */}
-                    <td className="py-3 px-3 text-[11px] text-slate-400 whitespace-nowrap">
+                    <td className="py-3 px-3 text-[11px] text-slate-400 whitespace-nowrap font-mono">
                       {device.lastSeen}
                     </td>
 
                     {/* Actions */}
                     <td className="py-3 px-3 whitespace-nowrap">
-                      <div className="flex items-center justify-center gap-2">
+                      <div className="flex items-center justify-center gap-1.5">
                         {/* Eye details icon */}
                         <Link
                           href={`/devices/${device.id}`}
-                          title="View Device Details"
+                          title="View Device Telemetry & Specs"
                           className="p-1.5 rounded-lg border border-slate-700/80 bg-slate-900/60 hover:bg-slate-800 text-slate-400 hover:text-blue-400 transition-colors"
                         >
                           <Eye className="w-3.5 h-3.5" />
                         </Link>
 
+                        {/* Edit Workstation Configuration */}
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditModal(device)}
+                          title="Edit Workstation Configuration"
+                          className="p-1.5 rounded-lg border border-slate-700/80 bg-slate-900/60 hover:bg-slate-800 text-slate-400 hover:text-cyan-400 transition-colors cursor-pointer"
+                        >
+                          <Edit className="w-3.5 h-3.5" />
+                        </button>
+
                         {/* Surgical Isolation SOAR Trigger */}
                         <button
                           type="button"
                           onClick={() => setIsolationTarget(device)}
-                          title={device.is_isolated ? "Rollback Surgical Isolation" : "Execute Surgical Isolation"}
-                          className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${device.is_isolated
+                          title={
+                            device.is_isolated
+                              ? "Rollback Surgical Isolation"
+                              : "Execute Surgical Containment"
+                          }
+                          className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${
+                            device.is_isolated
                               ? "border-emerald-500/40 bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/30"
                               : "border-slate-700/80 bg-slate-900/60 text-slate-400 hover:text-rose-400 hover:border-rose-500/40"
-                            }`}
+                          }`}
                         >
                           {device.is_isolated ? (
                             <RotateCcw className="w-3.5 h-3.5" />
                           ) : (
                             <Shield className="w-3.5 h-3.5" />
                           )}
-                        </button>
-
-                        {/* More action dots */}
-                        <button
-                          type="button"
-                          className="p-1.5 rounded-lg border border-slate-700/80 bg-slate-900/60 hover:bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
-                        >
-                          <MoreVertical className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     </td>
@@ -897,61 +885,230 @@ export default function DevicesPage() {
           </table>
         </div>
 
+        {/* Empty State */}
+        {filteredDevices.length === 0 && (
+          <div className="text-center py-16 px-4">
+            <div className="w-12 h-12 rounded-2xl bg-slate-800/70 border border-slate-700/60 flex items-center justify-center mx-auto mb-3 text-slate-400">
+              <Monitor className="w-6 h-6" />
+            </div>
+            <h3 className="text-sm font-semibold text-white">No workstations found</h3>
+            <p className="text-xs text-slate-400 max-w-sm mx-auto mt-1">
+              {searchQuery || selectedStatus !== "ALL" || selectedLocation !== "ALL"
+                ? "No devices match the selected filters or search criteria. Try resetting filters."
+                : "No workstations are enrolled in the platform yet. Deploy monitoring agents to begin streaming telemetry."}
+            </p>
+            {(searchQuery || selectedStatus !== "ALL" || selectedLocation !== "ALL") && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchQuery("");
+                  setSelectedStatus("ALL");
+                  setSelectedLocation("ALL");
+                  setSelectedType("ALL");
+                }}
+                className="mt-4 px-3.5 py-1.5 rounded-xl border border-slate-700 bg-slate-800 text-xs text-slate-300 hover:text-white transition-colors cursor-pointer"
+              >
+                Clear Filters
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Table Footer / Pagination */}
         <div className="p-3.5 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400 select-none">
-          <div>
-            Showing 1 to {filteredDevices.length} of {total} devices
+          <div className="flex items-center gap-3">
+            <span>
+              Showing {filteredDevices.length > 0 ? (currentPage - 1) * pageSize + 1 : 0} to{" "}
+              {Math.min(currentPage * pageSize, totalDevicesCount)} of {totalDevicesCount} devices
+            </span>
+
+            <div className="flex items-center gap-1.5 ml-2">
+              <span className="text-[11px] text-slate-500">Page size:</span>
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value));
+                  setCurrentPage(1);
+                }}
+                className="text-[11px] bg-slate-900 border border-slate-800 rounded-lg px-2 py-0.5 text-slate-300 focus:outline-none focus:border-blue-500 cursor-pointer"
+              >
+                <option value={10}>10 per page</option>
+                <option value={20}>20 per page</option>
+                <option value={50}>50 per page</option>
+              </select>
+            </div>
           </div>
 
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              className="px-2 py-1 rounded-lg border border-slate-800 bg-slate-900/60 text-slate-500 hover:text-slate-300 disabled:opacity-50"
-            >
-              &lt;
-            </button>
-            <button
-              type="button"
-              className="px-2.5 py-1 rounded-lg bg-blue-600 text-white font-bold text-xs"
-            >
-              1
-            </button>
-            <button
-              type="button"
-              className="px-2.5 py-1 rounded-lg border border-slate-800 bg-slate-900/60 text-slate-400 hover:text-white"
-            >
-              2
-            </button>
-            <button
-              type="button"
-              className="px-2.5 py-1 rounded-lg border border-slate-800 bg-slate-900/60 text-slate-400 hover:text-white"
-            >
-              3
-            </button>
-            <button
-              type="button"
-              className="px-2.5 py-1 rounded-lg border border-slate-800 bg-slate-900/60 text-slate-400 hover:text-white"
-            >
-              4
-            </button>
-            <span className="px-1 text-slate-600">...</span>
-            <button
-              type="button"
-              className="px-2.5 py-1 rounded-lg border border-slate-800 bg-slate-900/60 text-slate-400 hover:text-white"
-            >
-              15
-            </button>
-            <button
-              type="button"
-              className="px-2 py-1 rounded-lg border border-slate-800 bg-slate-900/60 text-slate-400 hover:text-white"
-            >
-              &gt;
-            </button>
-          </div>
+          {totalPages > 1 && (
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                disabled={currentPage <= 1}
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                className="px-2.5 py-1 rounded-lg border border-slate-800 bg-slate-900/60 text-slate-400 hover:text-white disabled:opacity-40 cursor-pointer"
+              >
+                &lt;
+              </button>
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setCurrentPage(p)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold cursor-pointer ${
+                    p === currentPage
+                      ? "bg-blue-600 text-white"
+                      : "border border-slate-800 bg-slate-900/60 text-slate-400 hover:text-white"
+                  }`}
+                >
+                  {p}
+                </button>
+              ))}
+              <button
+                type="button"
+                disabled={currentPage >= totalPages}
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                className="px-2.5 py-1 rounded-lg border border-slate-800 bg-slate-900/60 text-slate-400 hover:text-white disabled:opacity-40 cursor-pointer"
+              >
+                &gt;
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Surgical Isolation Confirmation Modal (Preserved per Rule 19 & 20) */}
+      {/* Edit Workstation Modal */}
+      {isEditModalOpen && editingDevice && (
+        <Modal
+          isOpen={isEditModalOpen}
+          onClose={() => {
+            setIsEditModalOpen(false);
+            setEditingDevice(null);
+          }}
+          title={`Edit Configuration: ${editingDevice.name}`}
+          subtitle={`Update department routing, lab placement, asset identification, and operational state`}
+          maxWidth="lg"
+        >
+          <form onSubmit={handleSaveEdit} className="space-y-4 text-xs">
+            {editError && (
+              <div className="p-3 rounded-xl bg-rose-950/60 border border-rose-500/40 text-rose-300 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0" />
+                <span>{editError}</span>
+              </div>
+            )}
+
+            {/* Read-only Hardware Specs Banner */}
+            <div className="p-3 rounded-xl border border-slate-800 bg-slate-900/60 flex items-center justify-between text-slate-400 font-mono text-[11px]">
+              <div>
+                <span className="text-slate-500">IP: </span>
+                <span className="text-white">{editingDevice.ip}</span>
+              </div>
+              <div>
+                <span className="text-slate-500">OS: </span>
+                <span className="text-white">{editingDevice.type}</span>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-slate-300 font-medium mb-1">
+                  Department Assignment
+                </label>
+                <input
+                  type="text"
+                  list="department-options"
+                  value={editingDevice.department}
+                  onChange={(e) =>
+                    setEditingDevice({ ...editingDevice, department: e.target.value })
+                  }
+                  placeholder="e.g. College of Computer Science"
+                  className="w-full px-3 py-2 rounded-xl bg-[#091124] border border-slate-800 text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-blue-500 font-sans"
+                />
+                <datalist id="department-options">
+                  <option value="College of Computer Science" />
+                  <option value="College of Engineering" />
+                  <option value="College of Science" />
+                  <option value="Central IT Administration" />
+                  <option value="University Data Center" />
+                </datalist>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-medium mb-1">
+                  Lab / Room Location
+                </label>
+                <input
+                  type="text"
+                  value={editingDevice.lab}
+                  onChange={(e) =>
+                    setEditingDevice({ ...editingDevice, lab: e.target.value })
+                  }
+                  placeholder="e.g. AI Lab 3 or Room 204"
+                  className="w-full px-3 py-2 rounded-xl bg-[#091124] border border-slate-800 text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-blue-500 font-sans"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-medium mb-1">
+                  Asset Tag (University Inventory)
+                </label>
+                <input
+                  type="text"
+                  value={editingDevice.asset_tag}
+                  onChange={(e) =>
+                    setEditingDevice({ ...editingDevice, asset_tag: e.target.value })
+                  }
+                  placeholder="e.g. KKU-ASSET-2026-042"
+                  className="w-full px-3 py-2 rounded-xl bg-[#091124] border border-slate-800 text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-blue-500 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-medium mb-1">
+                  Operational Status
+                </label>
+                <select
+                  value={editingDevice.status}
+                  onChange={(e) =>
+                    setEditingDevice({ ...editingDevice, status: e.target.value })
+                  }
+                  className="w-full px-3 py-2 rounded-xl bg-[#091124] border border-slate-800 text-slate-200 focus:outline-none focus:border-blue-500 cursor-pointer"
+                >
+                  <option value="ONLINE">ONLINE (Active Telemetry)</option>
+                  <option value="WARNING">WARNING (Telemetry threshold warning)</option>
+                  <option value="CRITICAL">CRITICAL (System or security distress)</option>
+                  <option value="OFFLINE">OFFLINE (Unreachable)</option>
+                  <option value="MAINTENANCE">MAINTENANCE (Scheduled service)</option>
+                  <option value="DECOMMISSIONED">DECOMMISSIONED (Retired hardware)</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsEditModalOpen(false);
+                  setEditingDevice(null);
+                }}
+                disabled={isSubmittingEdit}
+                className="px-3.5 py-2 rounded-xl border border-slate-700/80 bg-[#091124] hover:bg-slate-800 text-xs font-medium text-slate-300 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isSubmittingEdit}
+                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center gap-2 shadow-lg shadow-blue-600/30 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {isSubmittingEdit && <RotateCw className="w-3.5 h-3.5 animate-spin" />}
+                <span>{isSubmittingEdit ? "Saving Changes..." : "Save Configuration"}</span>
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* Surgical Isolation Confirmation Modal (Rule 19 & 20) */}
       {isolationTarget && (
         <Modal
           isOpen={true}
@@ -967,19 +1124,27 @@ export default function DevicesPage() {
               <button
                 type="button"
                 onClick={() => setIsolationTarget(null)}
-                className="px-3 py-1.5 rounded-lg border border-slate-700 text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800 cursor-pointer"
+                disabled={isIsolating}
+                className="px-3 py-1.5 rounded-lg border border-slate-700 text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800 cursor-pointer disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={confirmIsolation}
-                className={`px-4 py-1.5 rounded-lg text-xs font-semibold text-white shadow-lg cursor-pointer ${isolationTarget.is_isolated
+                disabled={isIsolating}
+                className={`px-4 py-1.5 rounded-lg text-xs font-semibold text-white shadow-lg cursor-pointer flex items-center gap-2 disabled:opacity-50 ${
+                  isolationTarget.is_isolated
                     ? "bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/20"
                     : "bg-rose-600 hover:bg-rose-500 shadow-rose-600/20"
-                  }`}
+                }`}
               >
-                {isolationTarget.is_isolated ? "Rollback Isolation" : "Execute Surgical Containment"}
+                {isIsolating && <RotateCw className="w-3.5 h-3.5 animate-spin" />}
+                <span>
+                  {isolationTarget.is_isolated
+                    ? "Rollback Isolation"
+                    : "Execute Surgical Containment"}
+                </span>
               </button>
             </>
           }
@@ -1011,234 +1176,6 @@ export default function DevicesPage() {
         </Modal>
       )}
 
-      {/* Enroll New Device Modal */}
-      {isAddModalOpen && (
-        <Modal
-          isOpen={isAddModalOpen}
-          onClose={() => setIsAddModalOpen(false)}
-          title="Enroll University Infrastructure Device"
-          subtitle="Register hardware specifications and deploy the lightweight telemetry agent"
-          maxWidth="2xl"
-        >
-          <form onSubmit={handleEnrollDevice} className="space-y-4 text-xs">
-            {/* 2-column Grid for Device Details */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-              <div>
-                <label className="block text-slate-300 font-medium mb-1">
-                  Device Hostname / Name <span className="text-rose-400">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. LAB-PC-25 or SRV-AI-03"
-                  value={newDeviceForm.name}
-                  onChange={(e) => setNewDeviceForm({ ...newDeviceForm, name: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-[#091124] border border-slate-800 text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-blue-500 font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-medium mb-1">
-                  IPv4 Address <span className="text-rose-400">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. 10.10.2.88"
-                  value={newDeviceForm.ip}
-                  onChange={(e) => setNewDeviceForm({ ...newDeviceForm, ip: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-[#091124] border border-slate-800 text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-blue-500 font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-medium mb-1">Device Category</label>
-                <select
-                  value={newDeviceForm.category}
-                  onChange={(e) => {
-                    const cat = e.target.value as "desktop" | "server" | "switch" | "storage";
-                    const defaultType =
-                      cat === "desktop"
-                        ? "Desktop Workstation"
-                        : cat === "server"
-                          ? "Compute / DB Server"
-                          : cat === "switch"
-                            ? "Network Switch"
-                            : "Storage Node";
-                    setNewDeviceForm({ ...newDeviceForm, category: cat, type: defaultType });
-                  }}
-                  className="w-full px-3 py-2 rounded-xl bg-[#091124] border border-slate-800 text-slate-200 focus:outline-none focus:border-blue-500"
-                >
-                  <option value="desktop">Desktop / Workstation</option>
-                  <option value="server">Compute / Database Server</option>
-                  <option value="switch">Network Switch / Router</option>
-                  <option value="storage">Storage Node / SAN</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-medium mb-1">Hardware Model</label>
-                <input
-                  type="text"
-                  placeholder="e.g. HP EliteDesk 800 G8"
-                  value={newDeviceForm.model}
-                  onChange={(e) => setNewDeviceForm({ ...newDeviceForm, model: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-[#091124] border border-slate-800 text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-medium mb-1">Department</label>
-                <select
-                  value={newDeviceForm.department}
-                  onChange={(e) => setNewDeviceForm({ ...newDeviceForm, department: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-[#091124] border border-slate-800 text-slate-200 focus:outline-none focus:border-blue-500"
-                >
-                  <option value="College of Computer Science">College of Computer Science</option>
-                  <option value="College of Engineering">College of Engineering</option>
-                  <option value="College of Science">College of Science</option>
-                  <option value="Central IT Administration">Central IT Administration</option>
-                  <option value="University Data Center">University Data Center</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-medium mb-1">Operating System</label>
-                <select
-                  value={newDeviceForm.os}
-                  onChange={(e) => setNewDeviceForm({ ...newDeviceForm, os: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-[#091124] border border-slate-800 text-slate-200 focus:outline-none focus:border-blue-500"
-                >
-                  <option value="Ubuntu 22.04 LTS">Ubuntu 22.04 LTS</option>
-                  <option value="Ubuntu 24.04 LTS">Ubuntu 24.04 LTS</option>
-                  <option value="Red Hat Enterprise Linux 9">Red Hat Enterprise Linux 9</option>
-                  <option value="Windows 11 Enterprise">Windows 11 Enterprise</option>
-                  <option value="Windows Server 2022">Windows Server 2022</option>
-                  <option value="Cisco IOS XE">Cisco IOS XE (Switch)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-medium mb-1">Location / Lab</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Computer Lab 3 or Data Center"
-                  value={newDeviceForm.location}
-                  onChange={(e) => setNewDeviceForm({ ...newDeviceForm, location: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-[#091124] border border-slate-800 text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-medium mb-1">Rack / Room</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Room 302 or Rack 04"
-                  value={newDeviceForm.rack}
-                  onChange={(e) => setNewDeviceForm({ ...newDeviceForm, rack: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-[#091124] border border-slate-800 text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-blue-500"
-                />
-              </div>
-            </div>
-
-            {/* Agent Deployment One-Liner Box */}
-            <div className="mt-4 p-3.5 rounded-xl border border-slate-800 bg-[#070d1e] space-y-2.5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-slate-300 font-medium">
-                  <Terminal className="w-4 h-4 text-blue-400" />
-                  <span>Agent Deployment Command</span>
-                </div>
-                <div className="flex items-center bg-slate-900/80 p-0.5 rounded-lg border border-slate-800">
-                  <button
-                    type="button"
-                    onClick={() => setAgentOsTab("linux")}
-                    className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer ${agentOsTab === "linux"
-                        ? "bg-blue-600 text-white"
-                        : "text-slate-400 hover:text-slate-200"
-                      }`}
-                  >
-                    Linux / macOS
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setAgentOsTab("windows")}
-                    className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer ${agentOsTab === "windows"
-                        ? "bg-blue-600 text-white"
-                        : "text-slate-400 hover:text-slate-200"
-                      }`}
-                  >
-                    Windows PowerShell
-                  </button>
-                </div>
-              </div>
-
-              <div className="relative group">
-                <pre className="p-3 rounded-lg bg-black/60 border border-slate-800/80 text-[11px] font-mono text-cyan-300 overflow-x-auto whitespace-pre-wrap break-all pr-16">
-                  {agentOsTab === "linux" ? linuxInstallCmd : windowsInstallCmd}
-                </pre>
-                <button
-                  type="button"
-                  onClick={() =>
-                    copyToClipboard(agentOsTab === "linux" ? linuxInstallCmd : windowsInstallCmd)
-                  }
-                  className="absolute right-2 top-2.5 px-2 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] flex items-center gap-1 border border-slate-700 transition-colors cursor-pointer"
-                  title="Copy command"
-                >
-                  {copiedCommand ? (
-                    <>
-                      <Check className="w-3 h-3 text-emerald-400" />
-                      <span className="text-emerald-400">Copied</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-3 h-3 text-slate-400" />
-                      <span>Copy</span>
-                    </>
-                  )}
-                </button>
-              </div>
-
-              <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1">
-                <span>
-                  Enrollment Token:{" "}
-                  <code className="px-1.5 py-0.5 rounded bg-slate-900 text-amber-300 font-mono text-[10px]">
-                    {enrollmentToken}
-                  </code>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => copyToClipboard(enrollmentToken, true)}
-                  className="text-blue-400 hover:underline flex items-center gap-1 cursor-pointer"
-                >
-                  {copiedToken ? "Token Copied!" : "Copy Token"}
-                </button>
-              </div>
-
-              <p className="text-[10px] text-slate-500 leading-relaxed border-t border-slate-800/60 pt-2">
-                * Agent gathers continuous CPU, RAM, disk, network, and process metadata non-intrusively per Rule 9. No private files or communications are inspected.
-              </p>
-            </div>
-
-            {/* Modal Actions */}
-            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-800">
-              <button
-                type="button"
-                onClick={() => setIsAddModalOpen(false)}
-                className="px-3.5 py-2 rounded-xl border border-slate-700/80 bg-[#091124] hover:bg-slate-800 text-xs font-medium text-slate-300 transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="px-4 py-2 rounded-xl bg-[#1d68ff] hover:bg-[#185adb] text-white text-xs font-semibold flex items-center gap-2 shadow-lg shadow-blue-600/30 transition-colors cursor-pointer"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Enroll Device &amp; Start Telemetry</span>
-              </button>
-            </div>
-          </form>
-        </Modal>
-      )}
     </div>
   );
 }

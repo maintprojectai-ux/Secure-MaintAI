@@ -25,10 +25,29 @@ from backend.models.alert import Alert
 from backend.models.incident import Incident
 from backend.models.user import UserAccount
 from backend.models.workstation import Workstation
+from backend.services.alert_broadcaster import alert_broadcaster
 from backend.services.audit import AuditService
 from security.policy_engine import PolicyEvaluationResult
 
 logger = get_logger("soar_service")
+
+
+async def _broadcast_soar_alert(alert: Alert) -> None:
+    """Safely notify SSE clients of newly dispatched SOAR alert."""
+    try:
+        await alert_broadcaster.broadcast(
+            "ALERT_CREATED",
+            {
+                "id": str(alert.id),
+                "title": alert.title,
+                "severity": alert.severity,
+                "status": alert.status,
+                "workstation_id": str(alert.workstation_id) if alert.workstation_id else None,
+                "created_at": alert.created_at.isoformat() if alert.created_at else None,
+            },
+        )
+    except Exception as exc:
+        logger.warning("sse_alert_broadcast_failed", error=str(exc))
 
 
 class PlaybookExecutionResult(BaseModel):
@@ -110,13 +129,38 @@ class SOARService:
         self._session.add(inc)
         await self._session.flush()
 
+        is_human_intervention = eval_res.requires_human_approval or bool(suppression_reason)
+        source_type = (
+            "HUMAN_INTERVENTION_REQUIRED"
+            if is_human_intervention
+            else "CYBERSECURITY_THREAT"
+            if eval_res.correlated_incident.is_threat
+            else "TECHNICAL_ANOMALY"
+        )
+        title = (
+            f"Human Intervention Required: {eval_res.correlated_incident.incident_category}"
+            if is_human_intervention
+            else f"Cybersecurity Threat: {eval_res.correlated_incident.incident_category}"
+            if eval_res.correlated_incident.is_threat
+            else f"Technical Anomaly: {eval_res.correlated_incident.incident_category}"
+        )
+        recommendation = (
+            "Action halted: Requires manual SOC authorization to execute containment."
+            if is_human_intervention
+            else "Investigate threat telemetry and monitor endpoint activity."
+        )
+
         alert = Alert(
-            source_type="ANOMALY_DETECTION",
+            source_type=source_type,
             source_id=inc.id,
+            workstation_id=eval_res.workstation_id,
             severity=eval_res.correlated_incident.severity,
             status="OPEN",
-            title=f"Security Alert: {eval_res.correlated_incident.incident_category}",
+            title=title,
             description=eval_res.reason,
+            requires_human_intervention=is_human_intervention,
+            recommendation=recommendation,
+            playbook_initiated="PLAYBOOK_01_ALERT_ONLY",
         )
         self._session.add(alert)
         await self._session.flush()
@@ -133,6 +177,7 @@ class SOARService:
             },
         )
         await self._session.commit()
+        await _broadcast_soar_alert(alert)
 
         return PlaybookExecutionResult(
             playbook_name="PLAYBOOK_01_ALERT_ONLY",
@@ -172,6 +217,21 @@ class SOARService:
         self._session.add(inc)
         await self._session.flush()
 
+        alert = Alert(
+            source_type="CYBERSECURITY_THREAT",
+            source_id=inc.id,
+            workstation_id=eval_res.workstation_id,
+            severity=eval_res.correlated_incident.severity,
+            status="OPEN",
+            title=f"Surgical Process Containment: {eval_res.correlated_incident.incident_category}",
+            description=eval_res.reason,
+            requires_human_intervention=False,
+            recommendation=f"Offending sockets/pids contained. Research workloads {eval_res.preserve_workloads} preserved.",
+            playbook_initiated="PLAYBOOK_02_PROCESS_CONTAINMENT",
+        )
+        self._session.add(alert)
+        await self._session.flush()
+
         audit_entry = await self._audit.log(
             actor=operator,
             action="soar.playbook.process_containment",
@@ -186,6 +246,7 @@ class SOARService:
             },
         )
         await self._session.commit()
+        await _broadcast_soar_alert(alert)
 
         return PlaybookExecutionResult(
             playbook_name="PLAYBOOK_02_PROCESS_CONTAINMENT",
@@ -236,12 +297,16 @@ class SOARService:
         await self._session.flush()
 
         alert = Alert(
-            source_type="INCIDENT",
+            source_type="CYBERSECURITY_THREAT",
             source_id=inc.id,
+            workstation_id=eval_res.workstation_id,
             severity=eval_res.correlated_incident.severity,
             status="OPEN",
             title=f"Host Surgical Isolation: {eval_res.correlated_incident.incident_category}",
             description=eval_res.reason,
+            requires_human_intervention=False,
+            recommendation="Host network isolated. Review telemetry and perform malware eradication before reconnecting.",
+            playbook_initiated="PLAYBOOK_03_SURGICAL_ISOLATION",
         )
         self._session.add(alert)
         await self._session.flush()
@@ -261,6 +326,7 @@ class SOARService:
             },
         )
         await self._session.commit()
+        await _broadcast_soar_alert(alert)
 
         return PlaybookExecutionResult(
             playbook_name="PLAYBOOK_03_SURGICAL_ISOLATION",
@@ -297,6 +363,21 @@ class SOARService:
         self._session.add(inc)
         await self._session.flush()
 
+        alert = Alert(
+            source_type="PREDICTIVE_MAINTENANCE",
+            source_id=inc.id,
+            workstation_id=eval_res.workstation_id,
+            severity=eval_res.correlated_incident.severity,
+            status="OPEN",
+            title=f"Predictive Maintenance: {eval_res.correlated_incident.incident_category}",
+            description=eval_res.reason,
+            requires_human_intervention=False,
+            recommendation="Hardware degradation or technical fault diagnosed. Technician inspection and maintenance servicing recommended.",
+            playbook_initiated="PLAYBOOK_04_MAINTENANCE",
+        )
+        self._session.add(alert)
+        await self._session.flush()
+
         audit_entry = await self._audit.log(
             actor=operator,
             action="soar.playbook.maintenance_advisory",
@@ -309,6 +390,7 @@ class SOARService:
             },
         )
         await self._session.commit()
+        await _broadcast_soar_alert(alert)
 
         return PlaybookExecutionResult(
             playbook_name="PLAYBOOK_04_MAINTENANCE",
@@ -317,6 +399,7 @@ class SOARService:
             status="SUCCESS",
             action_taken="Logged maintenance ticket. Active compute workloads preserved without containment.",
             incident_id=inc.id,
+            alert_id=alert.id,
             audit_id=audit_entry.id,
             can_rollback=False,
         )
@@ -354,6 +437,21 @@ class SOARService:
         self._session.add(inc)
         await self._session.flush()
 
+        alert = Alert(
+            source_type="CYBERSECURITY_THREAT",
+            source_id=inc.id,
+            workstation_id=eval_res.workstation_id,
+            severity=eval_res.correlated_incident.severity,
+            status="OPEN",
+            title=f"Account Response: {eval_res.user_context.username}",
+            description=eval_res.reason,
+            requires_human_intervention=False,
+            recommendation="User credentials locked. Reset user password and verify session integrity.",
+            playbook_initiated="PLAYBOOK_05_ACCOUNT_RESPONSE",
+        )
+        self._session.add(alert)
+        await self._session.flush()
+
         audit_entry = await self._audit.log(
             actor=operator,
             action="soar.playbook.account_response",
@@ -366,6 +464,7 @@ class SOARService:
             },
         )
         await self._session.commit()
+        await _broadcast_soar_alert(alert)
 
         return PlaybookExecutionResult(
             playbook_name="PLAYBOOK_05_ACCOUNT_RESPONSE",

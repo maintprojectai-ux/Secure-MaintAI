@@ -69,8 +69,6 @@ export default function PredictionsPage() {
       }
     }
     loadValidationAndAnomalies();
-    const interval = setInterval(loadValidationAndAnomalies, 5000);
-    return () => clearInterval(interval);
   }, []);
 
   // What-If Simulator State

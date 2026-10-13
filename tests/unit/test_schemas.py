@@ -233,7 +233,7 @@ class TestAlertCreate:
 
     def test_valid_alert(self) -> None:
         alert = AlertCreate(
-            source_type=AlertSourceType.ANOMALY_DETECTION,
+            source_type=AlertSourceType.TECHNICAL_ANOMALY,
             severity=AlertSeverity.HIGH,
             title="High CPU anomaly detected",
             description="Workstation WS-001 shows sustained high CPU usage.",
@@ -244,7 +244,7 @@ class TestAlertCreate:
     def test_empty_title_rejected(self) -> None:
         with pytest.raises(ValidationError):
             AlertCreate(
-                source_type=AlertSourceType.SYSTEM,
+                source_type=AlertSourceType.TECHNICAL_ANOMALY,
                 severity=AlertSeverity.LOW,
                 title="",  # min_length=1
                 description="test",

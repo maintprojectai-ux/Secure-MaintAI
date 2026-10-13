@@ -36,13 +36,13 @@ interface StepDefinition {
 }
 
 const STEPS: StepDefinition[] = [
-  { step: 1, title: "Simulation Triggered", shortDesc: "Controlled Scenario Active", guideSection: "Guide §6.4", icon: Flame },
-  { step: 2, title: "ML Screening & Diagnosis", shortDesc: "Isolation Forest + Specialists", guideSection: "Guide §6.5", icon: Cpu },
-  { step: 3, title: "IdP Context Resolved", shortDesc: "Role & HPC Workload Lookup", guideSection: "Guide §6.6", icon: KeyRound },
-  { step: 4, title: "Role-Sensitive Playbook", shortDesc: "Orchestration Decision", guideSection: "Guide §6.7", icon: Layers },
-  { step: 5, title: "Surgical Containment", shortDesc: "Host Active • Sockets Contained", guideSection: "Guide §6.8", icon: ShieldCheck },
-  { step: 6, title: "Incident & Audit Hash", shortDesc: "SHA-256 Immutable Record", guideSection: "Guide §6.9", icon: ShieldAlert },
-  { step: 7, title: "Validation & Evidence", shortDesc: "Held-out Test Confusion Matrices", guideSection: "Guide §6.10", icon: Scale },
+  { step: 1, title: "Simulation Triggered", shortDesc: "Controlled Scenario Active", guideSection: "Step 1", icon: Flame },
+  { step: 2, title: "ML Screening & Diagnosis", shortDesc: "Isolation Forest + Specialists", guideSection: "Step 2", icon: Cpu },
+  { step: 3, title: "IdP Context Resolved", shortDesc: "Role & HPC Workload Lookup", guideSection: "Step 3", icon: KeyRound },
+  { step: 4, title: "Role-Sensitive Playbook", shortDesc: "Orchestration Decision", guideSection: "Step 4", icon: Layers },
+  { step: 5, title: "Surgical Containment", shortDesc: "Host Active • Sockets Contained", guideSection: "Step 5", icon: ShieldCheck },
+  { step: 6, title: "Incident & Audit Hash", shortDesc: "SHA-256 Immutable Record", guideSection: "Step 6", icon: ShieldAlert },
+  { step: 7, title: "Validation & Evidence", shortDesc: "Held-out Test Confusion Matrices", guideSection: "Step 7", icon: Scale },
 ];
 
 export function DemoProgress({ receipt, activeStep, onStepSelect, onReset }: DemoProgressProps) {
@@ -64,7 +64,7 @@ export function DemoProgress({ receipt, activeStep, onStepSelect, onReset }: Dem
                 7-Step Demonstration Flow
               </h2>
               <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-medium">
-                Guide Section 6 Primary Evidence
+                Section 6 Primary Evidence
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
@@ -605,7 +605,7 @@ export function DemoProgress({ receipt, activeStep, onStepSelect, onReset }: Dem
             <div className="flex items-center gap-2 mb-2">
               <Sparkles className="w-4 h-4 text-amber-400" />
               <span className="font-bold text-white text-sm">
-                Research Validation & Experimental Evidence (Guide §6.10)
+                Research Validation & Experimental Evidence 
               </span>
             </div>
 

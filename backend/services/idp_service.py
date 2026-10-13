@@ -63,7 +63,10 @@ class IdPService:
     def set_outage_mode(self, enabled: bool) -> None:
         """Enable or disable simulated IdP outage for testing and resilience verification."""
         self._outage_mode = enabled
-        logger.warning("idp_outage_mode_changed", outage_mode=enabled)
+        if enabled:
+            logger.warning("idp_outage_mode_changed", outage_mode=enabled)
+        else:
+            logger.info("idp_outage_mode_changed", outage_mode=enabled)
 
     def register_mock_user(self, context: IdPIdentityContext) -> None:
         """Register a user profile in the simulated IdP directory."""

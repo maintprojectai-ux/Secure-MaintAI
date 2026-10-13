@@ -1,7 +1,9 @@
 """Secure-MaintAI — Pydantic Schema Contracts."""
 
 from backend.schemas.alert import (
+    AlertApprove,
     AlertCreate,
+    AlertResolve,
     AlertResponse,
     AlertSeverity,
     AlertStatus,
@@ -65,7 +67,9 @@ __all__ = [
     "AgentHeartbeatResponse",
     "AgentRegisterRequest",
     "AgentRegisterResponse",
+    "AlertApprove",
     "AlertCreate",
+    "AlertResolve",
     "AlertResponse",
     "AlertSeverity",
     "AlertStatus",

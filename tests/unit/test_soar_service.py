@@ -208,3 +208,28 @@ async def test_execute_playbook_process_containment_preserves_workload() -> None
         # Workstation remains ONLINE (not shut down or isolated)
         ws = await session.get(Workstation, ws_id)
         assert ws.status == "ONLINE"
+
+
+@pytest.mark.asyncio
+async def test_save_alert() -> None:
+    """Verify persisting alert record to the database and querying by ID."""
+    alert_id = uuid.uuid4()
+    alert_obj = Alert(
+        id=alert_id,
+        source_type="TECHNICAL_ANOMALY",
+        severity="HIGH",
+        title="High CPU anomaly detected",
+        description="Workstation WS-001 shows sustained abnormal CPU consumption.",
+        status="OPEN",)
+    async with TestAsyncSession() as session:
+        session.add(alert_obj)
+        await session.commit()
+    # Query back to verify persistence
+    async with TestAsyncSession() as session:
+        saved_alert = await session.get(Alert, alert_id)
+        assert saved_alert is not None
+        assert saved_alert.id == alert_id
+        assert saved_alert.severity == "HIGH"
+        assert saved_alert.title == "High CPU anomaly detected"
+        assert saved_alert.status == "OPEN"
+        print(f"\n[Alert Persistence] Alert saved successfully: id={saved_alert.id}, title='{saved_alert.title}', severity={saved_alert.severity}, status={saved_alert.status}")

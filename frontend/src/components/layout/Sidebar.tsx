@@ -22,6 +22,7 @@ import {
   Shield,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { useAlerts } from "@/context/AlertContext";
 import { cn } from "@/lib/utils";
 
 interface NavItem {
@@ -35,7 +36,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
   { name: "Device Monitoring", href: "/devices", icon: Server },
-  { name: "Alerts", href: "/alerts", icon: AlertTriangle, badge: 6, badgeColor: "bg-rose-500" },
+  { name: "Alerts", href: "/alerts", icon: AlertTriangle, badgeColor: "bg-rose-500" },
   { name: "Cybersecurity", href: "/cybersecurity", icon: ShieldAlert },
   { name: "AI Predictions", href: "/predictions", icon: Sparkles, badge: "AI", badgeColor: "bg-purple-500" },
   { name: "Maintenance", href: "/maintenance", icon: Calendar },
@@ -49,7 +50,18 @@ const NAV_ITEMS: NavItem[] = [
 export const Sidebar: React.FC = () => {
   const pathname = usePathname();
   const { user, logout } = useAuth();
+  const { openAlertsCount } = useAlerts();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+
+  const navItems = NAV_ITEMS.map((item) => {
+    if (item.href === "/alerts") {
+      return {
+        ...item,
+        badge: openAlertsCount > 0 ? openAlertsCount : undefined,
+      };
+    }
+    return item;
+  });
 
   const isActive = (href: string) => {
     if (href === "/") return pathname === "/";
@@ -106,7 +118,7 @@ export const Sidebar: React.FC = () => {
 
           {/* Navigation Links */}
           <nav className="p-3 space-y-1 overflow-y-auto max-h-[calc(100vh-190px)]">
-            {NAV_ITEMS.map((item) => {
+            {navItems.map((item) => {
               const Icon = item.icon;
               const active = isActive(item.href);
 

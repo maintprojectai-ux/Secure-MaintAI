@@ -34,6 +34,10 @@ class SecurityEventType(str, Enum):
     DATA_EXFILTRATION = "DATA_EXFILTRATION"
     MALWARE_DETECTED = "MALWARE_DETECTED"
     CRYPTOJACKING = "CRYPTOJACKING"
+    CRYPTOMINING_TRAFFIC = "CRYPTOMINING_TRAFFIC"
+    PORT_SCAN = "PORT_SCAN"
+    BRUTE_FORCE = "BRUTE_FORCE"
+    RANSOMWARE = "RANSOMWARE"
     UNAUTHORIZED_ACCESS = "UNAUTHORIZED_ACCESS"
     POLICY_VIOLATION = "POLICY_VIOLATION"
     OTHER = "OTHER"
@@ -74,8 +78,8 @@ class SecurityEventResponse(BaseModel):
     source: str
     workstation_id: UUID | None = None
     user_id: UUID | None = None
-    event_type: SecurityEventType
-    severity: SecurityEventSeverity
+    event_type: SecurityEventType | str
+    severity: SecurityEventSeverity | str
     confidence: float
     description: str
     evidence: list[str] = Field(default_factory=list)

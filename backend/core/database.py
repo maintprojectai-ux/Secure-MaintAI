@@ -23,8 +23,10 @@ _engine_kwargs: dict[str, Any] = {
     "pool_pre_ping": True,
 }
 if "sqlite" not in settings.database_dsn:
-    _engine_kwargs["pool_size"] = 10
-    _engine_kwargs["max_overflow"] = 20
+    _engine_kwargs["pool_size"] = 5
+    _engine_kwargs["max_overflow"] = 5
+    _engine_kwargs["pool_timeout"] = 30
+    _engine_kwargs["pool_recycle"] = 300
 
 engine = create_async_engine(
     settings.database_dsn,
@@ -48,7 +50,8 @@ async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
     async with async_session_factory() as session:
         try:
             yield session
-            await session.commit()
+            if session.dirty or session.new or session.deleted:
+                await session.commit()
         except Exception:
             await session.rollback()
             raise

@@ -1561,6 +1561,23 @@ export async function getWorkstation(workstationId: string): Promise<Workstation
   return apiFetch<Workstation>(`/workstations/${workstationId}`);
 }
 
+export interface UpdateWorkstationPayload {
+  department?: string | null;
+  lab?: string | null;
+  asset_tag?: string | null;
+  status?: string | null;
+}
+
+export async function updateWorkstation(
+  workstationId: string,
+  data: UpdateWorkstationPayload
+): Promise<Workstation> {
+  return apiFetch<Workstation>(`/workstations/${workstationId}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
 export async function isolateWorkstation(
   workstationId: string
 ): Promise<{ status: string; message: string }> {
@@ -1591,12 +1608,18 @@ export async function getAlerts(params?: {
   status?: string;
   severity?: string;
   sourceType?: string;
+  workstationId?: string;
+  requiresHumanIntervention?: boolean;
   limit?: number;
 }): Promise<any[]> {
   const query = new URLSearchParams();
   if (params?.status) query.set("status", params.status);
   if (params?.severity) query.set("severity", params.severity);
   if (params?.sourceType) query.set("source_type", params.sourceType);
+  if (params?.workstationId) query.set("workstation_id", params.workstationId);
+  if (params?.requiresHumanIntervention !== undefined) {
+    query.set("requires_human_intervention", String(params.requiresHumanIntervention));
+  }
   if (params?.limit) query.set("limit", params.limit.toString());
 
   const qs = query.toString();
@@ -1613,6 +1636,42 @@ export async function resolveAlert(alertId: string, notes?: string): Promise<any
   return apiFetch<any>(`/alerts/${alertId}/resolve`, {
     method: "POST",
     body: JSON.stringify({ notes: notes || "Resolved by operator" }),
+  });
+}
+
+export async function approveAlert(alertId: string, notes?: string): Promise<any> {
+  return apiFetch<any>(`/alerts/${alertId}/approve`, {
+    method: "POST",
+    body: JSON.stringify({ notes: notes || "Authorized by SOC operator" }),
+  });
+}
+
+export interface CreateAlertInput {
+  title: string;
+  description: string;
+  severity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  source_type?:
+    | "TECHNICAL_ANOMALY"
+    | "CYBERSECURITY_THREAT"
+    | "PREDICTIVE_MAINTENANCE"
+    | "HUMAN_INTERVENTION_REQUIRED";
+  workstation_id?: string;
+  requires_human_intervention?: boolean;
+  recommendation?: string;
+}
+
+export async function createAlert(input: CreateAlertInput): Promise<any> {
+  return apiFetch<any>("/alerts", {
+    method: "POST",
+    body: JSON.stringify({
+      title: input.title,
+      description: input.description,
+      severity: input.severity,
+      source_type: input.source_type || "TECHNICAL_ANOMALY",
+      workstation_id: input.workstation_id || null,
+      requires_human_intervention: input.requires_human_intervention || false,
+      recommendation: input.recommendation || null,
+    }),
   });
 }
 
