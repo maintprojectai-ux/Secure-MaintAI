@@ -1697,6 +1697,15 @@ export async function getIncidents(params?: {
   return apiFetch<any[]>(`/incidents${qs ? `?${qs}` : ""}`);
 }
 
+export async function updateIncidentStatus(
+  incidentId: string,
+  newStatus: "OPEN" | "INVESTIGATING" | "CONTAINED" | "RESOLVED" | "CLOSED"
+): Promise<any> {
+  return apiFetch<any>(`/incidents/${incidentId}/status?new_status=${encodeURIComponent(newStatus)}`, {
+    method: "PATCH",
+  });
+}
+
 export async function getSecurityEvents(params?: {
   severity?: string;
   eventType?: string;

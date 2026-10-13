@@ -268,6 +268,10 @@ export interface ActiveThreatItem {
   time_ago: string;
   status: "Investigating" | "Active" | "Blocked" | "Monitoring";
   statusColor: "amber" | "rose" | "emerald" | "blue";
+  workstation_id?: string;
+  workstation_hostname?: string;
+  incident_number?: string;
+  raw_status?: string;
 }
 
 export interface VulnerabilityItem {
@@ -286,6 +290,11 @@ export interface SecurityEventItem {
   severity: "Critical" | "High" | "Medium" | "Low";
   status: "Investigating" | "Blocked" | "Active" | "Monitoring";
   statusColor: "amber" | "emerald" | "rose" | "blue";
+  workstation_id?: string;
+  workstation_hostname?: string;
+  event_type?: string;
+  raw_status?: string;
+  description?: string;
 }
 
 export interface SecurityPostureDimension {

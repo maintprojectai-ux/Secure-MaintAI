@@ -10,14 +10,7 @@ import {
   ExternalLink,
   Search,
   ChevronDown,
-  Play,
-  Pause,
-  Plus,
-  Minus,
-  Crosshair,
   Radio,
-  Clock,
-  AlertTriangle,
   Flame,
   Lock,
   Globe,
@@ -26,25 +19,32 @@ import {
   Eye,
   X,
   RotateCcw,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { DonutChart, DonutSegment } from "@/components/charts/DonutChart";
 import {
-  MOCK_CYBER_KPIS,
-  MOCK_CYBER_ATTACK_DISTRIBUTION,
-  MOCK_TOP_ATTACKED_COUNTRIES,
   MOCK_ACTIVE_THREATS,
   MOCK_TOP_VULNERABILITIES,
   MOCK_RECENT_SECURITY_EVENTS,
   MOCK_SECURITY_POSTURE_DIMENSIONS,
-  MOCK_THREAT_INTEL_FEED,
-  MOCK_SUBNET_HEATMAP_DATA,
   getIncidents,
   getSecurityEvents,
   isolateWorkstation,
+  rollbackWorkstationIsolation,
+  getWorkstations,
+  getDashboardKpis,
+  updateIncidentStatus,
 } from "@/lib/api";
-import { ActiveThreatItem, SecurityEventItem, VulnerabilityItem } from "@/types";
+import {
+  ActiveThreatItem,
+  SecurityEventItem,
+  VulnerabilityItem,
+  Workstation,
+  DashboardKpis,
+} from "@/types";
 
-function mapBackendIncidentToThreat(raw: any): ActiveThreatItem {
+function mapBackendIncidentToThreat(raw: any, wsMap?: Map<string, Workstation>): ActiveThreatItem {
   const cat = (raw.category || "OTHER").toUpperCase();
   let category: ActiveThreatItem["category"] = "SUSPICIOUS";
   if (cat.includes("MALWARE") || cat.includes("SECURITY")) category = "MALWARE";
@@ -67,7 +67,9 @@ function mapBackendIncidentToThreat(raw: any): ActiveThreatItem {
           : "Active";
 
   const statusColor: ActiveThreatItem["statusColor"] =
-    risk === "Critical" ? "rose" : risk === "High Risk" ? "amber" : "blue";
+    status === "Blocked" ? "emerald" : risk === "Critical" ? "rose" : risk === "High Risk" ? "amber" : "blue";
+
+  const ws = raw.workstation_id && wsMap ? wsMap.get(String(raw.workstation_id)) : null;
 
   return {
     id: String(raw.id),
@@ -75,16 +77,57 @@ function mapBackendIncidentToThreat(raw: any): ActiveThreatItem {
     category,
     risk,
     target_description: raw.description || "Active security incident detected",
-    target_ip: "10.10.1.15",
+    target_ip: ws?.ip_address || "10.10.1.15",
     time_ago: raw.created_at
       ? new Date(raw.created_at).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true })
       : "Just now",
     status,
     statusColor,
+    workstation_id: raw.workstation_id ? String(raw.workstation_id) : undefined,
+    workstation_hostname: ws?.hostname || undefined,
+    incident_number: raw.incident_number || undefined,
+    raw_status: raw.status,
   };
 }
 
-function mapBackendSecurityEvent(raw: any): SecurityEventItem {
+function formatEventTitle(eventType?: string, description?: string): string {
+  if (eventType) {
+    return eventType
+      .replace(/_/g, " ")
+      .toLowerCase()
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+  if (description) {
+    const descLower = description.toLowerCase();
+    if (descLower.includes("stratum") || descLower.includes("mining")) {
+      return "Cryptomining Traffic";
+    }
+    if (descLower.includes("brute")) {
+      return "Brute Force Incursion";
+    }
+    if (descLower.includes("scan")) {
+      return "Port Scan Reconnaissance";
+    }
+    if (descLower.includes("ddos") || descLower.includes("flood")) {
+      return "DDoS Packet Flood";
+    }
+    if (description.length > 28) {
+      return description.slice(0, 26) + "…";
+    }
+    return description;
+  }
+  return "Security Event";
+}
+
+function formatEventSource(source?: string): string {
+  if (!source) return "Wazuh SIEM";
+  if (source === "NETWORK_FLOW_INSPECTOR") return "NetFlow";
+  if (source === "SECURITY_MONITOR") return "SecDaemon";
+  if (source.length > 14) return source.slice(0, 12) + "…";
+  return source;
+}
+
+function mapBackendSecurityEvent(raw: any, wsMap?: Map<string, Workstation>): SecurityEventItem {
   const sev = (raw.severity || "MEDIUM").toUpperCase();
   const severity: SecurityEventItem["severity"] =
     sev === "CRITICAL" ? "Critical" : sev === "HIGH" ? "High" : sev === "LOW" ? "Low" : "Medium";
@@ -96,15 +139,24 @@ function mapBackendSecurityEvent(raw: any): SecurityEventItem {
   const status: SecurityEventItem["status"] =
     severity === "Critical" ? "Active" : severity === "High" ? "Investigating" : "Blocked";
 
+  const ws = raw.workstation_id && wsMap ? wsMap.get(String(raw.workstation_id)) : null;
+  const eventTitle = formatEventTitle(raw.event_type, raw.description);
+  const src = formatEventSource(raw.source);
+
   return {
     id: String(raw.id),
     time: timeFormatted,
-    event: raw.description || raw.event_type || "Security Event",
-    source: raw.source || "SIEM/Wazuh",
-    destination: "10.10.1.0/24",
+    event: eventTitle,
+    description: raw.description || raw.event_type || "Security Event",
+    source: src,
+    destination: ws ? `${ws.ip_address} (${ws.hostname})` : (raw.destination || "10.10.1.0/24"),
     severity,
     status,
     statusColor: severity === "Critical" ? "rose" : severity === "High" ? "amber" : "emerald",
+    workstation_id: raw.workstation_id ? String(raw.workstation_id) : undefined,
+    workstation_hostname: ws?.hostname || undefined,
+    event_type: raw.event_type || undefined,
+    raw_status: raw.status,
   };
 }
 
@@ -112,163 +164,297 @@ export default function CybersecurityPage() {
   // Filters & Controls
   const [timeRange, setTimeRange] = useState("Last 24 Hours");
   const [searchQuery, setSearchQuery] = useState("");
-  const [isMapPlaying, setIsMapPlaying] = useState(true);
-  const [mapZoom, setMapZoom] = useState(1);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [isProcessingAction, setIsProcessingAction] = useState(false);
+  const [eventPage, setEventPage] = useState(1);
+  const [eventSeverityFilter, setEventSeverityFilter] = useState<"ALL" | "CRITICAL" | "HIGH" | "BLOCKED">("ALL");
+  const EVENTS_PER_PAGE = 7;
 
-  // Time-range dynamic KPI metrics
-  const kpiByTimeRange: Record<
-    string,
-    {
-      threats_detected: string;
-      threats_detected_change: string;
-      high_risk_events: string;
-      high_risk_change: string;
-      blocked_attacks: string;
-      blocked_attacks_change: string;
-      affected_devices: string;
-      affected_devices_change: string;
-      security_score: number;
-      security_score_change: string;
-    }
-  > = {
-    "Last 24 Hours": {
-      threats_detected: "312",
-      threats_detected_change: "↑ 28% vs last 24h",
-      high_risk_events: "87",
-      high_risk_change: "↑ 35% vs last 24h",
-      blocked_attacks: "1,248",
-      blocked_attacks_change: "↑ 18% vs last 24h",
-      affected_devices: "23",
-      affected_devices_change: "↑ 15% vs last 24h",
-      security_score: 72,
-      security_score_change: "↑ 8 pts vs last 24h",
-    },
-    "Last 7 Days": {
-      threats_detected: "1,840",
-      threats_detected_change: "↑ 12% vs prev week",
-      high_risk_events: "412",
-      high_risk_change: "↑ 9% vs prev week",
-      blocked_attacks: "8,920",
-      blocked_attacks_change: "↑ 22% vs prev week",
-      affected_devices: "38",
-      affected_devices_change: "↓ 4 vs prev week",
-      security_score: 74,
-      security_score_change: "↑ 4 pts vs prev week",
-    },
-    "Last 30 Days": {
-      threats_detected: "6,950",
-      threats_detected_change: "↓ 5% vs prev month",
-      high_risk_events: "1,480",
-      high_risk_change: "↓ 2% vs prev month",
-      blocked_attacks: "34,100",
-      blocked_attacks_change: "↑ 14% vs prev month",
-      affected_devices: "54",
-      affected_devices_change: "↓ 12 vs prev month",
-      security_score: 76,
-      security_score_change: "↑ 10 pts vs prev month",
-    },
-  };
-
-  const currentKpi = kpiByTimeRange[timeRange] || kpiByTimeRange["Last 24 Hours"];
-
-  const attackDistributionData: DonutSegment[] = [
-    { label: "Malware", value: 156, color: "#06b6d4" },
-    { label: "DDoS", value: 93, color: "#3b82f6" },
-    { label: "Brute Force", value: 41, color: "#f59e0b" },
-    { label: "Exploits", value: 22, color: "#8b5cf6" },
-  ];
-
-  // Selected entities for modals
+  // Live state
   const [activeThreats, setActiveThreats] = useState<ActiveThreatItem[]>(MOCK_ACTIVE_THREATS);
   const [securityEvents, setSecurityEvents] = useState<SecurityEventItem[]>(MOCK_RECENT_SECURITY_EVENTS);
+  const [workstations, setWorkstations] = useState<Workstation[]>([]);
+  const [dashboardKpis, setDashboardKpis] = useState<DashboardKpis | null>(null);
+
+  // Selected entities for modals
   const [selectedEvent, setSelectedEvent] = useState<SecurityEventItem | null>(null);
   const [selectedThreat, setSelectedThreat] = useState<ActiveThreatItem | null>(null);
   const [selectedVuln, setSelectedVuln] = useState<VulnerabilityItem | null>(null);
   const [showIsolationModal, setShowIsolationModal] = useState(false);
-  const [isolationTarget, setIsolationTarget] = useState<string | null>(null);
-  const [hoveredHeatmapCell, setHoveredHeatmapCell] = useState<{
-    subnet: string;
-    time: string;
-    value: number;
-  } | null>(null);
+  const [isolationTargetId, setIsolationTargetId] = useState<string | null>(null);
+  const [isolationTargetLabel, setIsolationTargetLabel] = useState<string>("");
+
+  // Dynamic attack distribution computed from live threats
+  const attackDistributionData: DonutSegment[] = useMemo(() => {
+    const counts: Record<string, number> = {
+      Malware: 0,
+      DDoS: 0,
+      "Brute Force": 0,
+      Exploits: 0,
+    };
+    for (const t of activeThreats) {
+      if (t.category === "MALWARE") counts.Malware += 1;
+      else if (t.category === "DDOS") counts.DDoS += 1;
+      else if (t.category === "BRUTE_FORCE") counts["Brute Force"] += 1;
+      else counts.Exploits += 1;
+    }
+    const hasData = Object.values(counts).some((v) => v > 0);
+    if (!hasData) {
+      return [
+        { label: "Malware", value: 156, color: "#06b6d4" },
+        { label: "DDoS", value: 93, color: "#3b82f6" },
+        { label: "Brute Force", value: 41, color: "#f59e0b" },
+        { label: "Exploits", value: 22, color: "#8b5cf6" },
+      ];
+    }
+    return [
+      { label: "Malware", value: counts.Malware, color: "#06b6d4" },
+      { label: "DDoS", value: counts.DDoS, color: "#3b82f6" },
+      { label: "Brute Force", value: counts["Brute Force"], color: "#f59e0b" },
+      { label: "Exploits", value: counts.Exploits, color: "#8b5cf6" },
+    ];
+  }, [activeThreats]);
+
+  // Dynamic KPIs derived from live threat intelligence, SIEM events, and workstation status
+  const currentKpi = useMemo(() => {
+    const activeThreatsList = activeThreats.filter(
+      (t) => t.status === "Active" || t.status === "Investigating"
+    );
+    const threatsCount = activeThreatsList.length;
+    const highRiskCount = securityEvents.filter(
+      (e) => e.severity === "Critical" || e.severity === "High"
+    ).length;
+    const blockedCount = activeThreats.filter((t) => t.status === "Blocked").length;
+
+    // Unique affected devices
+    const affectedIds = new Set<string>();
+    for (const t of activeThreats) {
+      if (t.workstation_id) affectedIds.add(t.workstation_id);
+    }
+    for (const e of securityEvents) {
+      if (e.workstation_id) affectedIds.add(e.workstation_id);
+    }
+    const affectedCount = affectedIds.size > 0 ? affectedIds.size : threatsCount > 0 ? Math.min(threatsCount, 4) : 0;
+
+    // Posture score from backend KPI or derived
+    const posture = dashboardKpis?.security_posture !== undefined
+      ? Math.round(dashboardKpis.security_posture)
+      : Math.max(50, 100 - threatsCount * 10 - highRiskCount * 3);
+
+    return {
+      threats_detected: threatsCount > 0 ? String(threatsCount) : "0",
+      threats_detected_change: threatsCount > 0 ? `Active: ${threatsCount}` : "All clear",
+      high_risk_events: highRiskCount > 0 ? String(highRiskCount) : "0",
+      high_risk_change: highRiskCount > 0 ? `${highRiskCount} alerts requiring action` : "Zero critical events",
+      blocked_attacks: blockedCount > 0 ? String(blockedCount) : "0",
+      blocked_attacks_change: `${blockedCount} neutralized`,
+      affected_devices: String(affectedCount),
+      affected_devices_change: affectedCount > 0 ? `${affectedCount} affected endpoints` : "All devices secure",
+      security_score: posture,
+      security_score_change: posture >= 85 ? "Optimal Resilience" : "Elevated Risk",
+    };
+  }, [activeThreats, securityEvents, dashboardKpis]);
+
+  // Exact percentages and ranking for attack distribution
+  const attackStats = useMemo(() => {
+    const total = attackDistributionData.reduce((acc, curr) => acc + curr.value, 0);
+    const list = attackDistributionData.map((item) => ({
+      ...item,
+      percentage: total > 0 ? ((item.value / total) * 100).toFixed(1) : "0.0",
+    }));
+    const sorted = [...list].sort((a, b) => b.value - a.value);
+    const top = sorted[0] || { label: "Malware", percentage: "0.0" };
+    return {
+      total,
+      list,
+      top,
+    };
+  }, [attackDistributionData]);
 
   // Live Cybersecurity Data Ingestion with Dual-Mode Resilience
-  useEffect(() => {
-    let isMounted = true;
-    async function loadCyberData() {
-      try {
-        const [incidentsRes, eventsRes] = await Promise.allSettled([
-          getIncidents({ limit: 10 }),
-          getSecurityEvents({ limit: 25 }),
-        ]);
+  const loadCyberData = async () => {
+    try {
+      const [incidentsRes, eventsRes, wsRes, kpisRes] = await Promise.allSettled([
+        getIncidents({ limit: 50 }),
+        getSecurityEvents({ limit: 50 }),
+        getWorkstations({ pageSize: 100 }),
+        getDashboardKpis(),
+      ]);
 
-        if (
-          isMounted &&
-          incidentsRes.status === "fulfilled" &&
-          Array.isArray(incidentsRes.value) &&
-          incidentsRes.value.length > 0
-        ) {
-          const liveThreats = incidentsRes.value.map(mapBackendIncidentToThreat);
-          setActiveThreats((prev) => {
-            const liveIds = new Set(liveThreats.map((t) => t.id));
-            const filtered = prev.filter((t) => !liveIds.has(t.id));
-            return [...liveThreats, ...filtered];
-          });
-        }
-
-        if (
-          isMounted &&
-          eventsRes.status === "fulfilled" &&
-          Array.isArray(eventsRes.value) &&
-          eventsRes.value.length > 0
-        ) {
-          const liveEvts = eventsRes.value.map(mapBackendSecurityEvent);
-          setSecurityEvents((prev) => {
-            const liveIds = new Set(liveEvts.map((e) => e.id));
-            const filtered = prev.filter((e) => !liveIds.has(e.id));
-            return [...liveEvts, ...filtered];
-          });
-        }
-      } catch {
-        // Fallback to mock baseline on error
+      const wsList = wsRes.status === "fulfilled" && wsRes.value?.items ? wsRes.value.items : [];
+      setWorkstations(wsList);
+      const wsMap = new Map<string, Workstation>();
+      for (const ws of wsList) {
+        if (ws.id) wsMap.set(String(ws.id), ws);
       }
+
+      if (kpisRes.status === "fulfilled" && kpisRes.value) {
+        setDashboardKpis(kpisRes.value);
+      }
+
+      if (
+        incidentsRes.status === "fulfilled" &&
+        Array.isArray(incidentsRes.value) &&
+        incidentsRes.value.length > 0
+      ) {
+        const liveThreats = incidentsRes.value.map((raw) => mapBackendIncidentToThreat(raw, wsMap));
+        setActiveThreats(liveThreats);
+      }
+
+      if (
+        eventsRes.status === "fulfilled" &&
+        Array.isArray(eventsRes.value) &&
+        eventsRes.value.length > 0
+      ) {
+        const liveEvts = eventsRes.value.map((raw) => mapBackendSecurityEvent(raw, wsMap));
+        setSecurityEvents(liveEvts);
+      }
+    } catch (err) {
+      console.warn("Failed to load live cybersecurity telemetry:", err);
     }
+  };
+
+  useEffect(() => {
     loadCyberData();
+
+    // Listen to Server-Sent Events (SSE) alerts/incidents updates in real-time with zero polling
+    const handleUpdate = () => {
+      loadCyberData();
+    };
+    window.addEventListener("alerts-updated", handleUpdate);
     return () => {
-      isMounted = false;
+      window.removeEventListener("alerts-updated", handleUpdate);
     };
   }, []);
 
-  // Filtered Events
+  // Filtered Events with Search and Severity quick-filters
   const filteredEvents = useMemo(() => {
-    if (!searchQuery.trim()) return securityEvents;
+    let list = securityEvents;
+
+    if (eventSeverityFilter === "CRITICAL") {
+      list = list.filter((e) => e.severity === "Critical");
+    } else if (eventSeverityFilter === "HIGH") {
+      list = list.filter((e) => e.severity === "High");
+    } else if (eventSeverityFilter === "BLOCKED") {
+      list = list.filter((e) => e.status === "Blocked");
+    }
+
+    if (!searchQuery.trim()) return list;
     const q = searchQuery.toLowerCase();
-    return securityEvents.filter(
+    return list.filter(
       (e) =>
         e.event.toLowerCase().includes(q) ||
         e.source.toLowerCase().includes(q) ||
         e.destination.toLowerCase().includes(q) ||
-        e.severity.toLowerCase().includes(q)
+        e.severity.toLowerCase().includes(q) ||
+        (e.description && e.description.toLowerCase().includes(q))
     );
-  }, [searchQuery, securityEvents]);
+  }, [searchQuery, securityEvents, eventSeverityFilter]);
 
-  const handleIsolateClick = (target: string) => {
-    setIsolationTarget(target);
+  const totalEventPages = Math.max(1, Math.ceil(filteredEvents.length / EVENTS_PER_PAGE));
+  const paginatedEvents = useMemo(() => {
+    const start = (eventPage - 1) * EVENTS_PER_PAGE;
+    return filteredEvents.slice(start, start + EVENTS_PER_PAGE);
+  }, [filteredEvents, eventPage]);
+
+  const handleIsolateClick = (targetWsId?: string, displayLabel?: string) => {
+    let resolvedId = targetWsId;
+    let label = displayLabel || "Host Endpoint";
+
+    // If ID is missing or invalid, resolve by label/hostname/IP in workstations
+    if (!resolvedId || resolvedId.length < 20) {
+      const matched = workstations.find(
+        (w) =>
+          w.hostname.toLowerCase() === (displayLabel || "").toLowerCase() ||
+          w.ip_address === displayLabel
+      );
+      if (matched) {
+        resolvedId = String(matched.id);
+        label = `${matched.hostname} (${matched.ip_address})`;
+      } else if (workstations.length > 0) {
+        resolvedId = String(workstations[0].id);
+        label = `${workstations[0].hostname} (${workstations[0].ip_address})`;
+      }
+    }
+
+    setIsolationTargetId(resolvedId || null);
+    setIsolationTargetLabel(label);
     setShowIsolationModal(true);
   };
 
   const handleConfirmIsolation = async () => {
     setShowIsolationModal(false);
-    try {
-      if (isolationTarget) {
-        await isolateWorkstation(isolationTarget);
-      }
-    } catch {
-      // Non-fatal fallback
+    if (!isolationTargetId) {
+      setFeedback("Error: Missing target workstation UUID for surgical isolation.");
+      setTimeout(() => setFeedback(null), 4000);
+      return;
     }
-    setFeedback(`Surgical isolation command executed for target ${isolationTarget}. Traffic restricted to management plane.`);
-    setTimeout(() => setFeedback(null), 6000);
+
+    setIsProcessingAction(true);
+    try {
+      await isolateWorkstation(isolationTargetId);
+      setFeedback(`Surgical isolation executed for ${isolationTargetLabel}. Non-reboot kernel packet filtering active.`);
+      window.dispatchEvent(new CustomEvent("alerts-updated", { detail: { action: "isolation_executed" } }));
+      loadCyberData();
+    } catch (err: any) {
+      setFeedback(`Isolation error: ${err?.message || "Failed to execute surgical containment."}`);
+    } finally {
+      setIsProcessingAction(false);
+      setTimeout(() => setFeedback(null), 6000);
+    }
+  };
+
+  const handleRollbackIsolation = async (targetWsId: string, label: string) => {
+    setIsProcessingAction(true);
+    try {
+      await rollbackWorkstationIsolation(targetWsId);
+      setFeedback(`Surgical isolation rolled back for ${label}. Network connectivity restored to ONLINE.`);
+      window.dispatchEvent(new CustomEvent("alerts-updated", { detail: { action: "isolation_rolled_back" } }));
+      loadCyberData();
+    } catch (err: any) {
+      setFeedback(`Rollback error: ${err?.message || "Failed to rollback isolation."}`);
+    } finally {
+      setIsProcessingAction(false);
+      setTimeout(() => setFeedback(null), 6000);
+    }
+  };
+
+  const handleUpdateStatus = async (
+    threatId: string,
+    newStatus: "INVESTIGATING" | "CONTAINED" | "RESOLVED"
+  ) => {
+    setIsProcessingAction(true);
+    try {
+      await updateIncidentStatus(threatId, newStatus);
+      const displayStatus =
+        newStatus === "RESOLVED" || newStatus === "CONTAINED" ? "Blocked" : "Investigating";
+      const displayColor =
+        newStatus === "RESOLVED" || newStatus === "CONTAINED" ? "emerald" : "amber";
+
+      setActiveThreats((prev) =>
+        prev.map((t) =>
+          t.id === threatId
+            ? { ...t, status: displayStatus, statusColor: displayColor, raw_status: newStatus }
+            : t
+        )
+      );
+
+      if (selectedThreat && selectedThreat.id === threatId) {
+        setSelectedThreat((prev) =>
+          prev
+            ? { ...prev, status: displayStatus, statusColor: displayColor, raw_status: newStatus }
+            : null
+        );
+      }
+
+      setFeedback(`Incident ${threatId} status transitioned to ${newStatus}.`);
+      window.dispatchEvent(new CustomEvent("alerts-updated", { detail: { action: "incident_status_updated" } }));
+    } catch (err: any) {
+      setFeedback(`Status update error: ${err?.message || "Failed to update incident status."}`);
+    } finally {
+      setIsProcessingAction(false);
+      setTimeout(() => setFeedback(null), 5000);
+    }
   };
 
   return (
@@ -294,9 +480,24 @@ export default function CybersecurityPage() {
             type="text"
             placeholder="Search IP, domain, device..."
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-slate-950/80 border border-slate-700/80 rounded-lg text-xs text-white placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setEventPage(1);
+            }}
+            className="w-full pl-10 pr-9 py-2 bg-slate-950/80 border border-slate-700/80 rounded-lg text-xs text-white placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
           />
+          {searchQuery && (
+            <button
+              onClick={() => {
+                setSearchQuery("");
+                setEventPage(1);
+              }}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-0.5"
+              title="Clear search"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
 
         <div className="flex items-center gap-2.5 self-end sm:self-auto">
@@ -510,320 +711,11 @@ export default function CybersecurityPage() {
       </div>
 
       {/* Main SOC Dashboard Grid (12 Columns) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
         {/* Left / Center Column (8 Cols) */}
-        <div className="lg:col-span-8 space-y-6">
-          {/* Global Threat Map (LIVE) */}
-          <div className="glass-card p-5 relative overflow-hidden">
-            {/* Header & Badges */}
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-              <div className="flex items-center gap-2.5">
-                <h3 className="text-sm font-bold text-white tracking-tight">Global Threat Map</h3>
-                <span className="flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/30">
-                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping" />
-                  LIVE
-                </span>
-              </div>
-
-              {/* Map Floating Controls */}
-              <div className="flex items-center gap-1 bg-slate-900/90 border border-slate-700/80 rounded-lg p-1 text-slate-400">
-                <button
-                  onClick={() => setMapZoom((prev) => Math.min(prev + 0.2, 1.8))}
-                  title="Zoom In"
-                  className="p-1 hover:text-white hover:bg-slate-800 rounded transition-colors"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={() => setMapZoom((prev) => Math.max(prev - 0.2, 0.8))}
-                  title="Zoom Out"
-                  className="p-1 hover:text-white hover:bg-slate-800 rounded transition-colors"
-                >
-                  <Minus className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={() => setIsMapPlaying(!isMapPlaying)}
-                  title={isMapPlaying ? "Pause Stream" : "Resume Stream"}
-                  className="p-1 hover:text-white hover:bg-slate-800 rounded transition-colors"
-                >
-                  {isMapPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-                </button>
-                <button
-                  onClick={() => setMapZoom(1)}
-                  title="Reset Map Center"
-                  className="p-1 hover:text-white hover:bg-slate-800 rounded transition-colors"
-                >
-                  <Crosshair className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-
-            {/* Interactive Stylized World Vector Canvas */}
-            <div className="relative my-4 h-84 sm:h-96 bg-slate-950/80 rounded-xl border border-slate-800/80 overflow-hidden flex items-center justify-center">
-              {/* Grid Background Pattern */}
-              <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b15_1px,transparent_1px),linear-gradient(to_bottom,#1e293b15_1px,transparent_1px)] bg-[size:24px_24px]" />
-
-              {/* SVG Stylized World Map with Glowing Attack Trajectories */}
-              <div
-                className="w-full h-full transition-transform duration-500 ease-out flex items-center justify-center"
-                style={{ transform: `scale(${mapZoom})` }}
-              >
-                <svg
-                  viewBox="0 0 800 400"
-                  className="w-full h-full max-w-full max-h-full object-contain pointer-events-none"
-                >
-                  <defs>
-                    <linearGradient id="arcGradRed" x1="0%" y1="0%" x2="100%" y2="100%">
-                      <stop offset="0%" stopColor="#f43f5e" stopOpacity="0.8" />
-                      <stop offset="100%" stopColor="#ef4444" stopOpacity="0.2" />
-                    </linearGradient>
-                    <linearGradient id="arcGradOrange" x1="0%" y1="0%" x2="100%" y2="100%">
-                      <stop offset="0%" stopColor="#f59e0b" stopOpacity="0.8" />
-                      <stop offset="100%" stopColor="#f97316" stopOpacity="0.2" />
-                    </linearGradient>
-                    <radialGradient id="destGlow">
-                      <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.8" />
-                      <stop offset="100%" stopColor="#3b82f6" stopOpacity="0" />
-                    </radialGradient>
-                  </defs>
-
-                  {/* World Continents Rough Geometries (Dark Slate Silhouette) */}
-                  <g fill="#1e293b" opacity="0.6">
-                    {/* North America */}
-                    <path d="M 80 70 Q 140 50 180 90 Q 210 130 170 170 Q 140 180 120 150 Q 80 130 80 70 Z" />
-                    {/* South America */}
-                    <path d="M 170 200 Q 220 220 200 300 Q 170 340 150 280 Q 140 220 170 200 Z" />
-                    {/* Europe */}
-                    <path d="M 380 60 Q 440 50 450 90 Q 430 130 380 120 Q 360 80 380 60 Z" />
-                    {/* Africa */}
-                    <path d="M 370 140 Q 440 140 450 220 Q 420 290 390 280 Q 350 210 370 140 Z" />
-                    {/* Asia / Russia */}
-                    <path d="M 460 50 Q 640 40 700 110 Q 660 200 540 170 Q 470 130 460 50 Z" />
-                    {/* Australia */}
-                    <path d="M 620 250 Q 700 240 700 310 Q 640 330 610 290 Z" />
-                  </g>
-
-                  {/* King Khalid University SOC Target Node (Saudi Arabia Region ~ x:460, y:155) */}
-                  <circle cx="460" cy="155" r="28" fill="url(#destGlow)" />
-                  <circle cx="460" cy="155" r="6" fill="#3b82f6" className="animate-ping" />
-                  <circle cx="460" cy="155" r="4" fill="#60a5fa" />
-                  <text x="475" y="160" fill="#93c5fd" fontSize="10" fontFamily="monospace" fontWeight="bold">
-                    KKU Data Center Hub
-                  </text>
-
-                  {/* Dynamic Trajectory Attack Arcs */}
-                  {/* Origin 1: US East Coast (x:160, y:100) -> Target (x:460, y:155) */}
-                  <path
-                    d="M 160 100 Q 300 10 460 155"
-                    fill="none"
-                    stroke="#f43f5e"
-                    strokeWidth="2"
-                    strokeDasharray={isMapPlaying ? "6 4" : "none"}
-                    className={isMapPlaying ? "animate-pulse" : ""}
-                  />
-                  <circle cx="160" cy="100" r="4" fill="#f43f5e" />
-
-                  {/* Origin 2: China / East Asia (x:650, y:120) -> Target */}
-                  <path
-                    d="M 650 120 Q 560 50 460 155"
-                    fill="none"
-                    stroke="#f59e0b"
-                    strokeWidth="2"
-                    strokeDasharray={isMapPlaying ? "6 4" : "none"}
-                    className={isMapPlaying ? "animate-pulse" : ""}
-                  />
-                  <circle cx="650" cy="120" r="4" fill="#f59e0b" />
-
-                  {/* Origin 3: Eastern Europe / Russia (x:560, y:70) -> Target */}
-                  <path
-                    d="M 560 70 Q 520 80 460 155"
-                    fill="none"
-                    stroke="#a855f7"
-                    strokeWidth="1.5"
-                    strokeDasharray={isMapPlaying ? "4 3" : "none"}
-                  />
-                  <circle cx="560" cy="70" r="3.5" fill="#a855f7" />
-
-                  {/* Origin 4: Western Europe (x:400, y:80) -> Target */}
-                  <path
-                    d="M 400 80 Q 420 90 460 155"
-                    fill="none"
-                    stroke="#06b6d4"
-                    strokeWidth="1.5"
-                    strokeDasharray={isMapPlaying ? "5 4" : "none"}
-                  />
-                  <circle cx="400" cy="80" r="3" fill="#06b6d4" />
-                </svg>
-              </div>
-
-              {/* Bottom-Left Overlay: Attack Intensity & Types Breakdown */}
-              <div className="absolute bottom-3 left-3 bg-slate-900/90 border border-slate-800 rounded-xl p-3 backdrop-blur-md max-w-xs space-y-2">
-                <div>
-                  <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono mb-1">
-                    <span>Attack Intensity</span>
-                    <span className="text-rose-400 font-bold">High</span>
-                  </div>
-                  <div className="h-1.5 w-full rounded-full bg-gradient-to-r from-blue-500 via-amber-500 to-rose-500" />
-                </div>
-
-                <div className="pt-2 border-t border-slate-800/80">
-                  <span className="text-[10px] font-semibold text-slate-400 block mb-1.5 uppercase tracking-wider">
-                    Attack Type
-                  </span>
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-400 flex items-center gap-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
-                        Malware
-                      </span>
-                      <span className="font-mono font-bold text-white">156</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-400 flex items-center gap-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-                        DDoS
-                      </span>
-                      <span className="font-mono font-bold text-white">93</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-400 flex items-center gap-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                        Brute Force
-                      </span>
-                      <span className="font-mono font-bold text-white">41</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-400 flex items-center gap-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
-                        Exploits
-                      </span>
-                      <span className="font-mono font-bold text-white">22</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Bottom-Right Overlay: Top Attacked Countries */}
-              <div className="absolute bottom-3 right-3 bg-slate-900/90 border border-slate-800 rounded-xl p-3 backdrop-blur-md min-w-[170px] space-y-2">
-                <span className="text-[10px] font-semibold text-slate-400 block uppercase tracking-wider">
-                  Top Attacked Countries
-                </span>
-                <div className="space-y-1 text-xs">
-                  {MOCK_TOP_ATTACKED_COUNTRIES.map((c) => (
-                    <div key={c.country} className="flex items-center justify-between">
-                      <span className="text-slate-300">{c.country}</span>
-                      <span className="font-mono font-bold text-white">{c.count}</span>
-                    </div>
-                  ))}
-                </div>
-                <div className="pt-1.5 border-t border-slate-800">
-                  <a
-                    href="#recent-events"
-                    className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-1 font-medium transition-colors"
-                  >
-                    View full report →
-                  </a>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Subnet Heatmap & Attack Types Donut (2-Column Subgrid) */}
+        <div className="lg:col-span-8 flex flex-col gap-6">
+          {/* Top Row: Attack Types Distribution & Top Vulnerabilities (2-Column Subgrid) */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Attack Heatmap (Last 24 Hours) */}
-            <div className="glass-card p-5 flex flex-col justify-between">
-              <div className="pb-3 border-b border-slate-800">
-                <h4 className="text-sm font-bold text-white tracking-tight">
-                  Attack Heatmap <span className="text-xs font-normal text-slate-400">(Last 24 Hours)</span>
-                </h4>
-                <p className="text-[11px] text-slate-400">Subnet density vs hourly incursion times</p>
-              </div>
-
-              {/* Heatmap Matrix with Right-hand Vertical Scale */}
-              <div className="my-4 flex items-center gap-3 overflow-x-auto">
-                <div className="flex-1 min-w-[280px] space-y-1.5">
-                  {/* Rows by Time */}
-                  {MOCK_SUBNET_HEATMAP_DATA.map((row) => (
-                    <div key={row.time} className="flex items-center gap-1.5">
-                      <span className="w-10 text-[10px] font-mono text-slate-400 text-right shrink-0">
-                        {row.time}
-                      </span>
-                      <div className="flex items-center gap-1.5 flex-1">
-                        {row.values.map((val, idx) => {
-                          const subnets = [
-                            "10.10.1.0/24",
-                            "10.10.2.0/24",
-                            "10.10.3.0/24",
-                            "10.10.4.0/24",
-                            "10.10.5.0/24",
-                            "10.10.6.0/24",
-                          ];
-                          let bgClass = "bg-slate-900 border-slate-800 text-slate-500";
-                          if (val > 80) bgClass = "bg-rose-500/90 border-rose-400 text-white shadow-sm shadow-rose-500/30";
-                          else if (val > 50) bgClass = "bg-amber-500/80 border-amber-400 text-white";
-                          else if (val > 25) bgClass = "bg-blue-600/50 border-blue-500/50 text-blue-100";
-
-                          return (
-                            <button
-                              key={idx}
-                              onMouseEnter={() =>
-                                setHoveredHeatmapCell({
-                                  subnet: subnets[idx],
-                                  time: row.time,
-                                  value: val,
-                                })
-                              }
-                              onMouseLeave={() => setHoveredHeatmapCell(null)}
-                              onClick={() => {
-                                setSearchQuery(subnets[idx]);
-                                setFeedback(`Filtered recent security events for subnet ${subnets[idx]}`);
-                                setTimeout(() => setFeedback(null), 4000);
-                              }}
-                              className={`h-7 flex-1 min-w-[36px] rounded border transition-all duration-200 flex items-center justify-center text-[10px] font-mono font-bold cursor-pointer ${bgClass}`}
-                            >
-                              {val}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ))}
-
-                  {/* Subnet Columns Footer Labels */}
-                  <div className="flex items-center text-[9px] font-mono text-slate-400 pl-11 gap-1.5 pt-1">
-                    <span className="flex-1 text-center truncate">10.10.1.0/24</span>
-                    <span className="flex-1 text-center truncate">10.10.2.0/24</span>
-                    <span className="flex-1 text-center truncate">10.10.3.0/24</span>
-                    <span className="flex-1 text-center truncate">10.10.4.0/24</span>
-                    <span className="flex-1 text-center truncate">10.10.5.0/24</span>
-                    <span className="flex-1 text-center truncate">10.10.6.0/24</span>
-                  </div>
-                </div>
-
-                {/* Vertical Color Scale Bar on the Right */}
-                <div className="flex flex-col items-center justify-between h-48 py-1 text-[9px] font-mono text-slate-400 shrink-0">
-                  <span className="text-rose-400 font-bold">High</span>
-                  <div className="w-2 flex-1 my-1.5 rounded-full bg-gradient-to-b from-rose-500 via-amber-500 to-blue-900 border border-slate-800" />
-                  <span className="text-slate-500">Low</span>
-                </div>
-              </div>
-
-              {/* Tooltip & Readout */}
-              <div className="pt-2 border-t border-slate-800 text-[11px] text-slate-400 flex items-center justify-between">
-                <span>
-                  {hoveredHeatmapCell ? (
-                    <span className="text-white font-mono">
-                      {hoveredHeatmapCell.subnet} @ {hoveredHeatmapCell.time}:{" "}
-                      <strong className="text-amber-400">{hoveredHeatmapCell.value} attacks</strong>
-                    </span>
-                  ) : (
-                    "Click a cell to filter security events"
-                  )}
-                </span>
-                <span className="text-slate-500 font-mono">6 Subnets</span>
-              </div>
-            </div>
-
             {/* Attack Types Distribution (Donut Chart) */}
             <div className="glass-card p-5 flex flex-col justify-between">
               <div className="pb-3 border-b border-slate-800">
@@ -838,7 +730,7 @@ export default function CybersecurityPage() {
                     data={attackDistributionData}
                     size={140}
                     strokeWidth={14}
-                    centerLabel="312"
+                    centerLabel={String(attackStats.total)}
                     centerSub="Total"
                     showLegend={false}
                   />
@@ -846,11 +738,12 @@ export default function CybersecurityPage() {
 
                 {/* Legend with exact stats */}
                 <div className="space-y-2 text-xs w-full max-w-[170px]">
-                  {MOCK_CYBER_ATTACK_DISTRIBUTION.map((item) => (
+                  {attackStats.list.map((item) => (
                     <div
                       key={item.label}
                       onClick={() => {
                         setSearchQuery(item.label);
+                        setEventPage(1);
                         setFeedback(`Filtered events for attack type ${item.label}`);
                         setTimeout(() => setFeedback(null), 3000);
                       }}
@@ -869,105 +762,8 @@ export default function CybersecurityPage() {
               </div>
 
               <div className="pt-2 border-t border-slate-800 text-[11px] text-slate-400 flex items-center justify-between">
-                <span>Top Incursion: Malware (XMRig)</span>
-                <span className="text-cyan-400 font-bold">50.0% Dominance</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Security Events & Top Vulnerabilities (2-Column Subgrid) */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6" id="recent-events">
-            {/* Recent Security Events */}
-            <div className="glass-card p-5 flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-                  <div>
-                    <h4 className="text-sm font-bold text-white tracking-tight">Recent Security Events</h4>
-                    <p className="text-[11px] text-slate-400">SIEM events correlated with telemetry</p>
-                  </div>
-                </div>
-
-                {/* Table */}
-                <div className="overflow-x-auto my-3">
-                  <table className="w-full text-left text-xs">
-                    <thead>
-                      <tr className="border-b border-slate-800 text-[10px] font-mono text-slate-400 uppercase tracking-wider">
-                        <th className="pb-2">Time</th>
-                        <th className="pb-2">Event</th>
-                        <th className="pb-2">Source</th>
-                        <th className="pb-2">Destination</th>
-                        <th className="pb-2">Severity</th>
-                        <th className="pb-2 text-right">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-800/60 font-mono">
-                      {filteredEvents.map((evt) => (
-                        <tr
-                          key={evt.id}
-                          onClick={() => setSelectedEvent(evt)}
-                          className="hover:bg-slate-800/40 cursor-pointer transition-colors group"
-                        >
-                          <td className="py-2.5 text-[10px] text-slate-400 whitespace-nowrap">{evt.time}</td>
-                          <td className="py-2.5 font-sans font-medium text-white group-hover:text-blue-400 transition-colors">
-                            {evt.event}
-                          </td>
-                          <td className="py-2.5 text-[11px] text-cyan-400 font-mono">{evt.source}</td>
-                          <td className="py-2.5 text-[11px] text-slate-300 font-mono">{evt.destination}</td>
-                          <td className="py-2.5">
-                            <span
-                              className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${evt.severity === "Critical"
-                                ? "bg-rose-500/20 text-rose-400 border border-rose-500/30"
-                                : evt.severity === "High"
-                                  ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
-                                  : evt.severity === "Medium"
-                                    ? "bg-yellow-500/20 text-yellow-400 border border-yellow-500/30"
-                                    : "bg-blue-500/20 text-blue-400 border border-blue-500/30"
-                                }`}
-                            >
-                              {evt.severity}
-                            </span>
-                          </td>
-                          <td className="py-2.5 text-right whitespace-nowrap">
-                            <span
-                              className={`inline-flex items-center gap-1 text-[10px] ${evt.statusColor === "emerald"
-                                ? "text-emerald-400"
-                                : evt.statusColor === "rose"
-                                  ? "text-rose-400"
-                                  : evt.statusColor === "amber"
-                                    ? "text-amber-400"
-                                    : "text-blue-400"
-                                }`}
-                            >
-                              <span
-                                className={`w-1.5 h-1.5 rounded-full ${evt.statusColor === "emerald"
-                                  ? "bg-emerald-400"
-                                  : evt.statusColor === "rose"
-                                    ? "bg-rose-400"
-                                    : evt.statusColor === "amber"
-                                      ? "bg-amber-400"
-                                      : "bg-blue-400"
-                                  }`}
-                              />
-                              {evt.status}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <div className="pt-2 border-t border-slate-800">
-                <button
-                  onClick={() => {
-                    setFeedback("Displaying complete security event ledger.");
-                    setTimeout(() => setFeedback(null), 3000);
-                  }}
-                  className="text-xs text-blue-400 hover:text-blue-300 font-medium flex items-center gap-1 transition-colors"
-                >
-                  View all events →
-                </button>
+                <span>Top Incursion: {attackStats.top.label}</span>
+                <span className="text-cyan-400 font-bold">{attackStats.top.percentage}% Dominance</span>
               </div>
             </div>
 
@@ -1004,12 +800,13 @@ export default function CybersecurityPage() {
                           </td>
                           <td className="py-2.5">
                             <span
-                              className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${vuln.severity === "Critical"
-                                ? "bg-rose-500/20 text-rose-400 border border-rose-500/30"
-                                : vuln.severity === "High"
-                                  ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
-                                  : "bg-yellow-500/20 text-yellow-400 border border-yellow-500/30"
-                                }`}
+                              className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                                vuln.severity === "Critical"
+                                  ? "bg-rose-500/20 text-rose-400 border border-rose-500/30"
+                                  : vuln.severity === "High"
+                                    ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                                    : "bg-yellow-500/20 text-yellow-400 border border-yellow-500/30"
+                              }`}
                             >
                               {vuln.severity}
                             </span>
@@ -1048,10 +845,236 @@ export default function CybersecurityPage() {
               </div>
             </div>
           </div>
+
+          {/* Bottom Row: Recent Security Events (Full Width of col-span-8, Flex-1 to balance height) */}
+          <div className="glass-card p-5 flex flex-col justify-between flex-1 min-h-[480px]" id="recent-events">
+            <div>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-800 gap-2">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-sm font-bold text-white tracking-tight">Recent Security Events</h4>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700/60">
+                      {filteredEvents.length} Events
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-0.5">SIEM events correlated with telemetry</p>
+                </div>
+
+                {/* Severity & Status Quick Filter Pills */}
+                <div className="flex items-center gap-1.5 overflow-x-auto text-[11px]">
+                  {(["ALL", "CRITICAL", "HIGH", "BLOCKED"] as const).map((sev) => {
+                    const label =
+                      sev === "ALL"
+                        ? "All"
+                        : sev === "CRITICAL"
+                          ? "Critical"
+                          : sev === "HIGH"
+                            ? "High"
+                            : "Blocked";
+                    const isActive = eventSeverityFilter === sev;
+                    return (
+                      <button
+                        key={sev}
+                        onClick={() => {
+                          setEventSeverityFilter(sev);
+                          setEventPage(1);
+                        }}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
+                          isActive
+                            ? "bg-blue-600/30 text-blue-300 border border-blue-500/50 shadow-sm"
+                            : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 border border-transparent"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Table or Empty State */}
+              {filteredEvents.length === 0 ? (
+                <div className="py-16 flex flex-col items-center justify-center text-center">
+                  <div className="w-12 h-12 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-500 mb-3 shadow-inner">
+                    <Search className="w-5 h-5 text-slate-400" />
+                  </div>
+                  <p className="text-sm font-semibold text-slate-200">No security events found</p>
+                  <p className="text-xs text-slate-500 mt-1 max-w-sm">
+                    {searchQuery
+                      ? `No telemetry logs matched "${searchQuery}". Try searching a different IP or keyword.`
+                      : "No active security events found for the selected filter."}
+                  </p>
+                  {(searchQuery || eventSeverityFilter !== "ALL") && (
+                    <button
+                      onClick={() => {
+                        setSearchQuery("");
+                        setEventSeverityFilter("ALL");
+                        setEventPage(1);
+                      }}
+                      className="mt-3.5 px-3 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 text-xs font-medium transition-colors"
+                    >
+                      Reset active filters
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="overflow-x-auto my-3">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-800 text-[10px] font-mono text-slate-400 uppercase tracking-wider">
+                        <th className="pb-2">Time</th>
+                        <th className="pb-2">Event / Threat</th>
+                        <th className="pb-2">Source</th>
+                        <th className="pb-2">Destination</th>
+                        <th className="pb-2">Severity</th>
+                        <th className="pb-2">Status</th>
+                        <th className="pb-2 text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 font-mono">
+                      {paginatedEvents.map((evt) => (
+                        <tr
+                          key={evt.id}
+                          onClick={() => setSelectedEvent(evt)}
+                          className="hover:bg-slate-800/40 cursor-pointer transition-colors group"
+                        >
+                          <td className="py-3 text-[10px] text-slate-400 whitespace-nowrap">{evt.time}</td>
+                          <td className="py-3 max-w-[200px]">
+                            <div
+                              className="font-sans font-semibold text-white group-hover:text-blue-400 transition-colors truncate text-xs"
+                              title={evt.description || evt.event}
+                            >
+                              {evt.event}
+                            </div>
+                            {evt.description && evt.description !== evt.event && (
+                              <div
+                                className="text-[10px] text-slate-400 truncate max-w-[195px]"
+                                title={evt.description}
+                              >
+                                {evt.description}
+                              </div>
+                            )}
+                          </td>
+                          <td className="py-3 text-[10px] text-cyan-400 font-mono whitespace-nowrap">
+                            <span className="px-1.5 py-0.5 rounded bg-cyan-950/60 border border-cyan-800/40">
+                              {evt.source}
+                            </span>
+                          </td>
+                          <td className="py-3 text-[11px] text-slate-300 font-mono whitespace-nowrap">
+                            {evt.workstation_hostname ? (
+                              <div>
+                                <span className="text-white font-medium block text-[11px] truncate max-w-[150px]">
+                                  {evt.workstation_hostname}
+                                </span>
+                                <span className="text-[10px] text-slate-500 block">
+                                  {evt.destination.split(" ")[0]}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="truncate max-w-[150px] block">{evt.destination}</span>
+                            )}
+                          </td>
+                          <td className="py-3 whitespace-nowrap">
+                            <span
+                              className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                                evt.severity === "Critical"
+                                  ? "bg-rose-500/20 text-rose-400 border border-rose-500/30"
+                                  : evt.severity === "High"
+                                    ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                                    : evt.severity === "Medium"
+                                      ? "bg-yellow-500/20 text-yellow-400 border border-yellow-500/30"
+                                      : "bg-blue-500/20 text-blue-400 border border-blue-500/30"
+                              }`}
+                            >
+                              {evt.severity}
+                            </span>
+                          </td>
+                          <td className="py-3 whitespace-nowrap">
+                            <span
+                              className={`inline-flex items-center gap-1 text-[10px] ${
+                                evt.statusColor === "emerald"
+                                  ? "text-emerald-400"
+                                  : evt.statusColor === "rose"
+                                    ? "text-rose-400"
+                                    : evt.statusColor === "amber"
+                                      ? "text-amber-400"
+                                      : "text-blue-400"
+                              }`}
+                            >
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full ${
+                                  evt.statusColor === "emerald"
+                                    ? "bg-emerald-400"
+                                    : evt.statusColor === "rose"
+                                      ? "bg-rose-400"
+                                      : evt.statusColor === "amber"
+                                        ? "bg-amber-400"
+                                        : "bg-blue-400"
+                                }`}
+                              />
+                              {evt.status}
+                            </span>
+                          </td>
+                          <td className="py-3 text-right whitespace-nowrap">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedEvent(evt);
+                              }}
+                              className="px-2 py-1 rounded bg-slate-800/80 hover:bg-blue-600/20 hover:text-blue-400 text-slate-400 border border-slate-700/60 hover:border-blue-500/40 text-[10px] font-mono transition-colors"
+                            >
+                              Inspect
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Footer with Pagination */}
+            <div className="pt-3 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+              <div className="text-slate-400 font-mono text-[11px]">
+                Showing{" "}
+                <strong className="text-white">
+                  {filteredEvents.length === 0 ? 0 : (eventPage - 1) * EVENTS_PER_PAGE + 1}
+                </strong>{" "}
+                –{" "}
+                <strong className="text-white">
+                  {Math.min(filteredEvents.length, eventPage * EVENTS_PER_PAGE)}
+                </strong>{" "}
+                of <strong className="text-white">{filteredEvents.length}</strong> events
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  disabled={eventPage <= 1}
+                  onClick={() => setEventPage((p) => Math.max(1, p - 1))}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded bg-slate-800 border border-slate-700/80 text-slate-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed text-xs transition-colors"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                  <span>Prev</span>
+                </button>
+                <span className="text-[11px] font-mono text-slate-400 px-1">
+                  Page {eventPage} of {totalEventPages}
+                </span>
+                <button
+                  disabled={eventPage >= totalEventPages}
+                  onClick={() => setEventPage((p) => Math.min(totalEventPages, p + 1))}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded bg-slate-800 border border-slate-700/80 text-slate-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed text-xs transition-colors"
+                >
+                  <span>Next</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Right Column Stack (4 Cols) */}
-        <div className="lg:col-span-4 space-y-6">
+        <div className="lg:col-span-4 flex flex-col gap-6">
           {/* Card 1: Active Threats */}
           <div className="glass-card p-5 space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
@@ -1061,7 +1084,7 @@ export default function CybersecurityPage() {
               </span>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-3 max-h-[380px] overflow-y-auto pr-1">
               {activeThreats.map((t) => (
                 <div
                   key={t.id}
@@ -1071,16 +1094,17 @@ export default function CybersecurityPage() {
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-start gap-2.5">
                       <div
-                        className={`p-1.5 rounded-lg shrink-0 mt-0.5 ${t.category === "MALWARE"
-                          ? "bg-rose-500/15 text-rose-400"
-                          : t.category === "DDOS"
-                            ? "bg-amber-500/15 text-amber-400"
-                            : t.category === "BRUTE_FORCE"
-                              ? "bg-yellow-500/15 text-yellow-400"
-                              : t.category === "SQLI"
-                                ? "bg-blue-500/15 text-blue-400"
-                                : "bg-purple-500/15 text-purple-400"
-                          }`}
+                        className={`p-1.5 rounded-lg shrink-0 mt-0.5 ${
+                          t.category === "MALWARE"
+                            ? "bg-rose-500/15 text-rose-400"
+                            : t.category === "DDOS"
+                              ? "bg-amber-500/15 text-amber-400"
+                              : t.category === "BRUTE_FORCE"
+                                ? "bg-yellow-500/15 text-yellow-400"
+                                : t.category === "SQLI"
+                                  ? "bg-blue-500/15 text-blue-400"
+                                  : "bg-purple-500/15 text-purple-400"
+                        }`}
                       >
                         {t.category === "MALWARE" && <ShieldAlert className="w-4 h-4" />}
                         {t.category === "DDOS" && <Flame className="w-4 h-4" />}
@@ -1092,35 +1116,47 @@ export default function CybersecurityPage() {
                         <h5 className="text-xs font-bold text-white group-hover:text-blue-400 transition-colors">
                           {t.title}
                         </h5>
-                        <p className="text-[11px] text-slate-400 mt-0.5">{t.target_description}</p>
-                        <p className="text-[10px] font-mono text-cyan-400 mt-1">{t.target_ip}</p>
+                        <p className="text-[11px] text-slate-400 mt-0.5 line-clamp-2">{t.target_description}</p>
+                        <p className="text-[10px] font-mono text-cyan-400 mt-1 flex items-center gap-1.5">
+                          {t.workstation_hostname ? (
+                            <>
+                              <span className="text-white font-medium">{t.workstation_hostname}</span>
+                              <span className="text-slate-500">•</span>
+                              <span>{t.target_ip}</span>
+                            </>
+                          ) : (
+                            <span>{t.target_ip}</span>
+                          )}
+                        </p>
                       </div>
                     </div>
 
                     <div className="text-right shrink-0">
                       <span
-                        className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${t.risk === "Critical"
-                          ? "bg-rose-500/20 text-rose-400"
-                          : t.risk === "High Risk"
-                            ? "bg-amber-500/20 text-amber-400"
-                            : t.risk === "Medium"
-                              ? "bg-yellow-500/20 text-yellow-400"
-                              : "bg-blue-500/20 text-blue-400"
-                          }`}
+                        className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                          t.risk === "Critical"
+                            ? "bg-rose-500/20 text-rose-400"
+                            : t.risk === "High Risk"
+                              ? "bg-amber-500/20 text-amber-400"
+                              : t.risk === "Medium"
+                                ? "bg-yellow-500/20 text-yellow-400"
+                                : "bg-blue-500/20 text-blue-400"
+                        }`}
                       >
                         {t.risk}
                       </span>
                       <p className="text-[10px] text-slate-500 mt-1.5">{t.time_ago}</p>
                       <div className="flex items-center justify-end gap-1 mt-1">
                         <span
-                          className={`w-1.5 h-1.5 rounded-full ${t.statusColor === "emerald"
-                            ? "bg-emerald-400"
-                            : t.statusColor === "rose"
-                              ? "bg-rose-400"
-                              : t.statusColor === "amber"
-                                ? "bg-amber-400"
-                                : "bg-blue-400"
-                            }`}
+                          className={`w-1.5 h-1.5 rounded-full ${
+                            t.statusColor === "emerald"
+                              ? "bg-emerald-400"
+                              : t.statusColor === "rose"
+                                ? "bg-rose-400"
+                                : t.statusColor === "amber"
+                                  ? "bg-amber-400"
+                                  : "bg-blue-400"
+                          }`}
                         />
                         <span className="text-[9px] text-slate-400">{t.status}</span>
                       </div>
@@ -1132,97 +1168,97 @@ export default function CybersecurityPage() {
           </div>
 
           {/* Card 2: Security Posture */}
-          <div className="glass-card p-5 space-y-4" id="posture-card">
-            <div className="pb-3 border-b border-slate-800 flex items-center justify-between">
-              <h4 className="text-sm font-bold text-white tracking-tight">Security Posture</h4>
-              <span className="text-xs font-mono text-emerald-400 font-bold">Good</span>
-            </div>
-
-            {/* Circular Posture Gauge */}
-            <div className="flex items-center justify-center py-2">
-              <div className="relative w-32 h-32 flex items-center justify-center">
-                <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
-                  <circle cx="50" cy="50" r="40" fill="none" stroke="#1e293b" strokeWidth="9" />
-                  <circle
-                    cx="50"
-                    cy="50"
-                    r="40"
-                    fill="none"
-                    stroke="#10b981"
-                    strokeWidth="9"
-                    strokeDasharray="251.32"
-                    strokeDashoffset="70.37"
-                    strokeLinecap="round"
-                  />
-                </svg>
-                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                  <span className="text-3xl font-bold font-mono text-white">72</span>
-                  <span className="text-[10px] text-slate-400 uppercase font-mono">/100</span>
-                  <span className="text-[10px] font-bold text-emerald-400 mt-0.5">Good</span>
-                </div>
+          <div className="glass-card p-5 space-y-4 flex-1 flex flex-col justify-between" id="posture-card">
+            <div>
+              <div className="pb-3 border-b border-slate-800 flex items-center justify-between">
+                <h4 className="text-sm font-bold text-white tracking-tight">Security Posture</h4>
+                <span
+                  className={`text-xs font-mono font-bold ${
+                    currentKpi.security_score >= 85
+                      ? "text-emerald-400"
+                      : currentKpi.security_score >= 70
+                        ? "text-blue-400"
+                        : "text-amber-400"
+                  }`}
+                >
+                  {currentKpi.security_score >= 85
+                    ? "Optimal"
+                    : currentKpi.security_score >= 70
+                      ? "Good"
+                      : "Elevated Risk"}
+                </span>
               </div>
-            </div>
 
-            {/* Security Dimensions Progress Bars */}
-            <div className="space-y-2.5 pt-2">
-              {MOCK_SECURITY_POSTURE_DIMENSIONS.map((dim) => (
-                <div key={dim.name} className="space-y-1">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-300 font-medium">{dim.name}</span>
-                    <span className="font-mono text-slate-400 font-semibold">
-                      {dim.score}/{dim.max}
+              {/* Center Radial/Gauge Meter Graphic */}
+              <div className="py-4 flex flex-col items-center justify-center">
+                <div className="relative w-36 h-36 flex items-center justify-center">
+                  <svg className="w-full h-full -rotate-90" viewBox="0 0 120 120">
+                    <circle cx="60" cy="60" r="50" fill="transparent" stroke="#1e293b" strokeWidth="12" />
+                    <circle
+                      cx="60"
+                      cy="60"
+                      r="50"
+                      fill="transparent"
+                      stroke={
+                        currentKpi.security_score >= 85
+                          ? "#10b981"
+                          : currentKpi.security_score >= 70
+                            ? "#3b82f6"
+                            : "#f59e0b"
+                      }
+                      strokeWidth="12"
+                      strokeDasharray={2 * Math.PI * 50}
+                      strokeDashoffset={2 * Math.PI * 50 * (1 - currentKpi.security_score / 100)}
+                      strokeLinecap="round"
+                      className="transition-all duration-1000 ease-out"
+                    />
+                  </svg>
+                  <div className="absolute flex flex-col items-center justify-center text-center">
+                    <span className="text-2xl font-bold font-mono text-white tracking-tight">
+                      {currentKpi.security_score}
+                    </span>
+                    <span className="text-[10px] font-mono text-slate-400">/100</span>
+                    <span
+                      className={`text-[10px] font-semibold mt-0.5 ${
+                        currentKpi.security_score >= 85
+                          ? "text-emerald-400"
+                          : currentKpi.security_score >= 70
+                            ? "text-blue-400"
+                            : "text-amber-400"
+                      }`}
+                    >
+                      {currentKpi.security_score >= 85
+                        ? "Optimal"
+                        : currentKpi.security_score >= 70
+                          ? "Good"
+                          : "Elevated"}
                     </span>
                   </div>
-                  <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
-                    <div
-                      className="h-full rounded-full transition-all duration-500"
-                      style={{
-                        width: `${(dim.score / dim.max) * 100}%`,
-                        backgroundColor: dim.colorHex,
-                      }}
-                    />
-                  </div>
                 </div>
-              ))}
-            </div>
-          </div>
+              </div>
 
-          {/* Card 3: Threat Intelligence Feed */}
-          <div className="glass-card p-5 space-y-4">
-            <div className="pb-3 border-b border-slate-800 flex items-center justify-between">
-              <h4 className="text-sm font-bold text-white tracking-tight">Threat Intelligence Feed</h4>
-              <span className="text-[10px] font-mono text-slate-400">External Advisories</span>
-            </div>
-
-            <div className="space-y-3">
-              {MOCK_THREAT_INTEL_FEED.map((item) => (
-                <div
-                  key={item.id}
-                  className="p-3 rounded-xl bg-slate-900/60 border border-slate-800/80 space-y-1.5"
-                >
-                  <div className="flex items-start gap-2">
-                    <div className="p-1 rounded bg-rose-500/10 text-rose-400 shrink-0 mt-0.5">
-                      {item.type === "phishing" ? (
-                        <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-                      ) : (
-                        <ShieldAlert className="w-3.5 h-3.5" />
-                      )}
+              {/* Security Dimensions Progress Bars */}
+              <div className="space-y-2.5 pt-2">
+                {MOCK_SECURITY_POSTURE_DIMENSIONS.map((dim) => (
+                  <div key={dim.name} className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-300 font-medium">{dim.name}</span>
+                      <span className="font-mono text-slate-400 font-semibold">
+                        {dim.score}/{dim.max}
+                      </span>
                     </div>
-                    <div className="flex-1">
-                      <h5 className="text-xs font-bold text-white leading-snug">{item.title}</h5>
-                      <p className="text-[11px] text-slate-400 mt-0.5">{item.description}</p>
-                      <div className="flex items-center justify-between mt-2 pt-1 border-t border-slate-800/60 text-[10px] text-slate-500">
-                        <span className="flex items-center gap-1 font-mono">
-                          <Clock className="w-3 h-3" /> {item.time_ago}
-                        </span>
-                        <span className="text-blue-400 hover:text-blue-300 cursor-pointer font-medium">
-                          Advisory Details
-                        </span>
-                      </div>
+                    <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all duration-500"
+                        style={{
+                          width: `${(dim.score / dim.max) * 100}%`,
+                          backgroundColor: dim.colorHex,
+                        }}
+                      />
                     </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           </div>
         </div>
@@ -1270,6 +1306,12 @@ export default function CybersecurityPage() {
                   <span className="text-slate-400 font-medium">Incident Classification:</span>
                   <span className="text-rose-400 font-bold">{selectedEvent.event}</span>
                 </div>
+                {selectedEvent.description && selectedEvent.description !== selectedEvent.event && (
+                  <div className="text-[11px] text-slate-300 bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80 leading-relaxed">
+                    <span className="text-slate-500 block text-[10px] uppercase font-mono mb-1">Telemetry Evidence Description</span>
+                    {selectedEvent.description}
+                  </div>
+                )}
                 <div className="flex items-center justify-between">
                   <span className="text-slate-400 font-medium">Severity Level:</span>
                   <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30">
@@ -1298,9 +1340,10 @@ export default function CybersecurityPage() {
               </button>
               <button
                 onClick={() => {
-                  const target = selectedEvent.source;
+                  const targetId = selectedEvent.workstation_id;
+                  const label = selectedEvent.workstation_hostname || selectedEvent.source;
                   setSelectedEvent(null);
-                  handleIsolateClick(target);
+                  handleIsolateClick(targetId, label);
                 }}
                 className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-bold transition-colors"
               >
@@ -1336,7 +1379,27 @@ export default function CybersecurityPage() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">TARGET</span>
-                  <span className="text-cyan-400">{selectedThreat.target_ip}</span>
+                  <span className="text-cyan-400">
+                    {selectedThreat.workstation_hostname
+                      ? `${selectedThreat.workstation_hostname} (${selectedThreat.target_ip})`
+                      : selectedThreat.target_ip}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">LIFECYCLE STATUS</span>
+                  <span
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold ${selectedThreat.raw_status === "RESOLVED" ||
+                      selectedThreat.raw_status === "CONTAINED" ||
+                      selectedThreat.status === "Blocked"
+                      ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                      : selectedThreat.raw_status === "INVESTIGATING" ||
+                        selectedThreat.status === "Investigating"
+                        ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                        : "bg-rose-500/20 text-rose-400 border border-rose-500/30"
+                      }`}
+                  >
+                    {selectedThreat.raw_status || selectedThreat.status}
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">RISK LEVEL</span>
@@ -1349,6 +1412,34 @@ export default function CybersecurityPage() {
               </div>
 
               <p className="text-slate-300 leading-relaxed">{selectedThreat.target_description}</p>
+
+              {/* Interactive Incident Status Controls */}
+              <div className="p-3 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2">
+                <span className="text-slate-400 font-medium block">Transition Incident State:</span>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    disabled={isProcessingAction || selectedThreat.raw_status === "INVESTIGATING"}
+                    onClick={() => handleUpdateStatus(selectedThreat.id, "INVESTIGATING")}
+                    className="px-2.5 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 font-semibold text-[11px] disabled:opacity-40 transition-colors"
+                  >
+                    Investigate
+                  </button>
+                  <button
+                    disabled={isProcessingAction || selectedThreat.raw_status === "CONTAINED"}
+                    onClick={() => handleUpdateStatus(selectedThreat.id, "CONTAINED")}
+                    className="px-2.5 py-1.5 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/30 font-semibold text-[11px] disabled:opacity-40 transition-colors"
+                  >
+                    Mark Contained
+                  </button>
+                  <button
+                    disabled={isProcessingAction || selectedThreat.raw_status === "RESOLVED"}
+                    onClick={() => handleUpdateStatus(selectedThreat.id, "RESOLVED")}
+                    className="px-2.5 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-semibold text-[11px] disabled:opacity-40 transition-colors"
+                  >
+                    Resolve Threat
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
@@ -1356,18 +1447,51 @@ export default function CybersecurityPage() {
                 onClick={() => setSelectedThreat(null)}
                 className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium"
               >
-                Cancel
+                Close
               </button>
-              <button
-                onClick={() => {
-                  const target = selectedThreat.target_ip;
-                  setSelectedThreat(null);
-                  handleIsolateClick(target);
-                }}
-                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-bold transition-colors"
-              >
-                Execute Surgical Containment
-              </button>
+              {(() => {
+                const targetWs = selectedThreat.workstation_id
+                  ? workstations.find((w) => String(w.id) === selectedThreat.workstation_id)
+                  : workstations.find(
+                    (w) =>
+                      w.hostname.toLowerCase() ===
+                      (selectedThreat.workstation_hostname || "").toLowerCase() ||
+                      w.ip_address === selectedThreat.target_ip
+                  );
+                const isIsolated = targetWs?.status === "ISOLATED";
+                const targetId = targetWs ? String(targetWs.id) : selectedThreat.workstation_id;
+                const label = targetWs
+                  ? `${targetWs.hostname} (${targetWs.ip_address})`
+                  : selectedThreat.workstation_hostname || selectedThreat.target_ip;
+
+                if (isIsolated && targetId) {
+                  return (
+                    <button
+                      disabled={isProcessingAction}
+                      onClick={() => {
+                        setSelectedThreat(null);
+                        handleRollbackIsolation(targetId, label);
+                      }}
+                      className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-bold transition-colors disabled:opacity-50"
+                    >
+                      Rollback Isolation
+                    </button>
+                  );
+                }
+
+                return (
+                  <button
+                    disabled={isProcessingAction}
+                    onClick={() => {
+                      setSelectedThreat(null);
+                      handleIsolateClick(targetId, label);
+                    }}
+                    className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-bold transition-colors disabled:opacity-50"
+                  >
+                    Execute Surgical Containment
+                  </button>
+                );
+              })()}
             </div>
           </div>
         </div>
@@ -1454,7 +1578,14 @@ export default function CybersecurityPage() {
             <div className="space-y-3 text-xs text-slate-300">
               <p>
                 You are executing surgical isolation for target{" "}
-                <code className="text-rose-400 font-mono font-bold">{isolationTarget}</code>.
+                <code className="text-rose-400 font-mono font-bold">
+                  {isolationTargetLabel || "Selected Host"}
+                </code>
+                {isolationTargetId && (
+                  <span className="block text-[10px] text-slate-500 font-mono mt-0.5">
+                    UUID: {isolationTargetId}
+                  </span>
+                )}.
               </p>
 
               <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1.5 font-mono text-[11px]">
@@ -1490,10 +1621,11 @@ export default function CybersecurityPage() {
                 Cancel
               </button>
               <button
+                disabled={isProcessingAction}
                 onClick={handleConfirmIsolation}
-                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-bold transition-colors"
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-bold transition-colors disabled:opacity-50"
               >
-                Confirm Surgical Containment
+                {isProcessingAction ? "Executing..." : "Confirm Surgical Containment"}
               </button>
             </div>
           </div>
