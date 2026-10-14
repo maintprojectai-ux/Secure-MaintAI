@@ -18,7 +18,7 @@ from backend.core.database import get_async_session
 from backend.core.dependencies import get_current_active_user, require_role
 from backend.models.user import UserAccount
 from backend.models.workstation import Workstation
-from backend.schemas.user import RoleEnum
+from backend.schemas.user import RoleEnum, UserResponse
 from backend.schemas.workstation import (
     WorkstationPaginatedResponse,
     WorkstationResponse,
@@ -38,29 +38,46 @@ def _attach_telemetry_metrics(
     """Attach latest or status-derived telemetry indicators to workstation DTOs."""
     items: list[WorkstationResponse] = []
     for w in workstations:
+        assigned_user_resp: UserResponse | None = None
+        if w.assigned_user:
+            u = w.assigned_user
+            assigned_user_resp = UserResponse(
+                id=u.id,
+                username=u.username,
+                email=u.email,
+                full_name=u.full_name,
+                role=RoleEnum(u.role.name) if u.role else RoleEnum.STUDENT,
+                status=u.status,
+                last_login_at=u.last_login_at,
+                created_at=u.created_at,
+            )
+
         item = WorkstationResponse.model_validate(w)
+        item.assigned_user = assigned_user_resp
+
+        hw_disk = None
+        if isinstance(w.hardware_specs, dict):
+            hw_disk = w.hardware_specs.get("disk_usage_pct") or w.hardware_specs.get("disk_usage")
+
         if w.id in metrics_map:
             m = metrics_map[w.id]
             item.cpu_usage = round(float(m.cpu_usage), 1)
             item.memory_usage = round(float(m.memory_usage), 1)
-            item.disk_usage = (
-                round(float(m.disk_read + m.disk_write) % 100, 1)
-                if (m.disk_read or m.disk_write)
-                else 25.0
-            )
+            # Disk utilization percentage must not be confused with disk I/O throughput
+            item.disk_usage = round(float(hw_disk), 1) if hw_disk is not None else 38.0
         elif w.status in (WorkstationStatus.CRITICAL, WorkstationStatus.ISOLATED):
             item.cpu_usage = 94.0
             item.memory_usage = 89.0
-            item.disk_usage = 76.0
+            item.disk_usage = round(float(hw_disk), 1) if hw_disk is not None else 76.0
         elif w.status == WorkstationStatus.WARNING:
             item.cpu_usage = 78.0
             item.memory_usage = 72.0
-            item.disk_usage = 65.0
+            item.disk_usage = round(float(hw_disk), 1) if hw_disk is not None else 65.0
         elif w.status == WorkstationStatus.ONLINE:
             seed_val = abs(hash(str(w.id))) % 30
             item.cpu_usage = round(20.0 + seed_val, 1)
             item.memory_usage = round(45.0 + (seed_val * 1.2), 1)
-            item.disk_usage = round(20.0 + (seed_val * 0.8), 1)
+            item.disk_usage = round(float(hw_disk), 1) if hw_disk is not None else round(35.0 + (seed_val * 0.4), 1)
         else:
             item.cpu_usage = 0.0
             item.memory_usage = 0.0

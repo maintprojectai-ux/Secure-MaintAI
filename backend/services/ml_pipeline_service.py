@@ -198,13 +198,34 @@ def _extract_38_channel_vector(
     net_bytes = float(item.network.bytes_in_per_sec + item.network.bytes_out_per_sec)
     proc_cnt = float(item.process_count)
 
-    # Scale relative to typical client/workstation operational baselines
-    # Normal client ranges: CPU 5-35%, RAM 30-75%, IO 0-1MB/s, Processes 100-350
-    cpu_factor = max(0.1, cpu_pct / 25.0)
-    mem_factor = min(2.0, max(0.2, mem_pct / 60.0))
-    disk_factor = max(1.0, disk_bytes / 5.0e5)
-    net_factor = max(1.0, net_bytes / 5.0e5)
-    proc_factor = min(2.5, max(0.2, proc_cnt / 250.0))
+    # In normal operational ranges, anchor to learned machine baseline distribution (factor = 1.0)
+    # Only scale when metrics exhibit genuine elevation or saturation
+    if cpu_pct > 75.0:
+        cpu_factor = 1.0 + (cpu_pct - 75.0) / 10.0
+    elif cpu_pct > 50.0:
+        cpu_factor = 1.0 + (cpu_pct - 50.0) / 50.0
+    else:
+        cpu_factor = 1.0
+
+    if mem_pct > 80.0:
+        mem_factor = 1.0 + (mem_pct - 80.0) / 15.0
+    else:
+        mem_factor = 1.0
+
+    if disk_bytes > 2.0e7:
+        disk_factor = min(10.0, 1.0 + (disk_bytes - 2.0e7) / 2.0e7)
+    else:
+        disk_factor = 1.0
+
+    if net_bytes > 1.5e7:
+        net_factor = min(10.0, 1.0 + (net_bytes - 1.5e7) / 1.5e7)
+    else:
+        net_factor = 1.0
+
+    if proc_cnt > 400:
+        proc_factor = min(2.5, 1.0 + (proc_cnt - 400.0) / 200.0)
+    else:
+        proc_factor = 1.0
 
     # CPU channels (0-6)
     v[0:4] *= cpu_factor
@@ -215,10 +236,10 @@ def _extract_38_channel_vector(
     v[5] = max(0.0, 1.0 - v[6])
 
     # Disk channels (10-16)
-    v[10:16] *= min(10.0, disk_factor)
+    v[10:16] *= disk_factor
 
     # Network channels (18-22)
-    v[18:22] *= min(10.0, net_factor)
+    v[18:22] *= net_factor
 
     # Process channels (22)
     v[22] = min(1.0, v[22] * proc_factor)

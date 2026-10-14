@@ -87,6 +87,9 @@ class AgentHeartbeatResponse(BaseModel):
     commands: list[str] = Field(default_factory=list)
 
 
+from backend.schemas.user import UserResponse
+
+
 class WorkstationResponse(BaseModel):
     """Schema for workstation data in API responses."""
 
@@ -108,6 +111,7 @@ class WorkstationResponse(BaseModel):
     cpu_usage: float | None = None
     memory_usage: float | None = None
     disk_usage: float | None = None
+    assigned_user: UserResponse | None = None
 
     model_config = {"from_attributes": True}
 

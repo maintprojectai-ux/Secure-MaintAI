@@ -94,42 +94,63 @@ export function setStoredUser(user: User): void {
   localStorage.setItem("current_user", JSON.stringify(user));
 }
 
-export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const token = getToken();
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...(options.headers as Record<string, string>),
-  };
+const inFlightRequests = new Map<string, Promise<unknown>>();
 
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
+export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  const method = (options.method || "GET").toUpperCase();
+  const isGet = method === "GET";
+
+  if (isGet && inFlightRequests.has(endpoint)) {
+    return inFlightRequests.get(endpoint) as Promise<T>;
   }
 
-  try {
-    const res = await fetch(`${API_BASE}${endpoint}`, {
-      ...options,
-      headers,
-      credentials: "include",
-    });
+  const requestPromise = (async () => {
+    const token = getToken();
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...(options.headers as Record<string, string>),
+    };
 
-    if (!res.ok) {
-      if (res.status === 401) {
-        clearToken();
-      }
-      const errorData = await res.json().catch(() => ({}));
-      throw new ApiError(
-        res.status,
-        errorData.detail || `Request to ${endpoint} failed with status ${res.status}`,
-        errorData
-      );
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
     }
 
-    return (await res.json()) as T;
-  } catch (err: unknown) {
-    if (err instanceof ApiError) throw err;
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new ApiError(500, `Network error: ${msg}`);
+    try {
+      const res = await fetch(`${API_BASE}${endpoint}`, {
+        ...options,
+        headers,
+        credentials: "include",
+      });
+
+      if (!res.ok) {
+        if (res.status === 401) {
+          clearToken();
+        }
+        const errorData = await res.json().catch(() => ({}));
+        throw new ApiError(
+          res.status,
+          errorData.detail || `Request to ${endpoint} failed with status ${res.status}`,
+          errorData
+        );
+      }
+
+      return (await res.json()) as T;
+    } catch (err: unknown) {
+      if (err instanceof ApiError) throw err;
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new ApiError(500, `Network error: ${msg}`);
+    } finally {
+      if (isGet) {
+        inFlightRequests.delete(endpoint);
+      }
+    }
+  })();
+
+  if (isGet) {
+    inFlightRequests.set(endpoint, requestPromise);
   }
+
+  return requestPromise;
 }
 
 // --------------------------------------------------------------------------
@@ -139,7 +160,7 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
 export const MOCK_CURRENT_USER: User = {
   id: "usr-admin-001",
   email: "admin@university.edu",
-  full_name: "Dr. Sarah Al-Rashid",
+  full_name: "Dr. Sarah",
   role: "ADMIN",
   department: "Cybersecurity & IT Infrastructure",
   is_active: true,
@@ -1055,55 +1076,70 @@ export const MOCK_TOP_PREDICTIONS: TopPredictionItem[] = [
     risk: "High Risk",
     riskType: "danger",
     device: "SRV-ACA-01",
-    issue: "High CPU Usage",
+    issue: "Model 02-A: High CPU Contention & Thread Thrashing Diagnosed",
     predicted_time: "Predicted: Sep 17, 2026 10:00 AM",
     confidence_score: 92,
     confidence_label: "92% Confidence",
     sparkline_color: "#f43f5e",
+    stage1_screening: "Model 01 Isolation Forest score (0.2410) exceeded threshold (0.0284)",
+    stage2_model: "Model 02-A (Technical)",
+    anomaly_type: "TECHNICAL_ANOMALY",
   },
   {
     id: "pred-02",
     risk: "Medium Risk",
     riskType: "warning",
     device: "LAB-DB-02",
-    issue: "Disk Space Full",
+    issue: "Model 02-A: Disk Space Saturation & I/O Latency Diagnosed",
     predicted_time: "Predicted: Sep 18, 2026 03:00 AM",
     confidence_score: 78,
     confidence_label: "78% Confidence",
     sparkline_color: "#f59e0b",
+    stage1_screening: "Model 01 Isolation Forest score (0.1980) exceeded threshold (0.0284)",
+    stage2_model: "Model 02-A (Technical)",
+    anomaly_type: "TECHNICAL_ANOMALY",
   },
   {
     id: "pred-03",
     risk: "High Risk",
     riskType: "danger",
     device: "SW-CORE-01",
-    issue: "Network Latency",
+    issue: "Model 02-B: Suspicious Network C2 & Incursion Activity Flagged",
     predicted_time: "Predicted: Sep 16, 2026 08:00 PM",
     confidence_score: 85,
     confidence_label: "85% Confidence",
     sparkline_color: "#f43f5e",
+    stage1_screening: "Model 01 Isolation Forest score (0.2520) exceeded threshold (0.0284)",
+    stage2_model: "Model 02-B (Cyber)",
+    anomaly_type: "SECURITY_ANOMALY",
   },
   {
     id: "pred-04",
     risk: "Low Risk",
     riskType: "info",
     device: "SRV-WEB-01",
-    issue: "Memory Usage",
+    issue: "Model 02-A: Memory Saturation & Resource Leak Diagnosed",
     predicted_time: "Predicted: Sep 19, 2026 11:00 AM",
     confidence_score: 62,
     confidence_label: "62% Confidence",
     sparkline_color: "#8b5cf6",
+    stage1_screening: "Model 01 Isolation Forest score (0.0890) exceeded threshold (0.0284)",
+    stage2_model: "Model 02-A (Technical)",
+    anomaly_type: "TECHNICAL_ANOMALY",
   },
   {
     id: "pred-05",
     risk: "Optimization",
     riskType: "success",
     device: "Multiple Devices",
-    issue: "Resource Optimization",
+    issue: "Model 02-A: Fleet Workload Rebalancing & Headroom Optimization",
     predicted_time: "Available now",
     confidence_score: 95,
     confidence_label: "95% Potential Gain",
     sparkline_color: "#10b981",
+    stage1_screening: "Model 01 Isolation Forest telemetry baseline regular",
+    stage2_model: "Model 02-A (Technical)",
+    anomaly_type: "TECHNICAL_ANOMALY",
   },
 ];
 

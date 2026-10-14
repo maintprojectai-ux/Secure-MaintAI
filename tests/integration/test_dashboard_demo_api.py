@@ -226,3 +226,90 @@ async def test_trigger_demo_scenario_on_current_active_workstation(
     # Step 5: Verify that for SECURITY_ANOMALY, predicted_fault is None (no delay/hardware leak)
     assert receipt["step_5_ml_result"]["anomaly_type"] == "SECURITY_ANOMALY"
     assert receipt["step_5_ml_result"]["predicted_fault"] is None
+
+
+@pytest.mark.asyncio
+async def test_trigger_normal_baseline_demo_scenario(
+    async_client: AsyncClient,
+    admin_headers: dict[str, str],
+) -> None:
+    """
+    Baseline Scenario Live Demo Trigger:
+    Verifies that Normal Baseline telemetry:
+    1. Directly classifies as Normal in Stage 1 screening (model_01_isolation_forest) without entering Stage 2.
+    2. Policy engine selects MAINTAIN_NORMAL_STATE with PLAYBOOK_00_NO_ACTION.
+    3. SOAR execution returns NOMINAL status without generating incidents, alerts, or audit hashes.
+    4. Database contains raw TelemetryMetric for charting, but ZERO AnomalyDetection, Incident, or Alert records.
+    """
+    payload = {"scenario_type": "NORMAL_BASELINE"}
+    response = await async_client.post(
+        "/api/v1/demo/trigger-scenario",
+        json=payload,
+        headers=admin_headers,
+    )
+    assert response.status_code == 200
+    receipt = response.json()
+
+    # Step 5: Pure Model 01 screening result (no Stage 2 specialists)
+    assert receipt["scenario_type"] == "NORMAL_BASELINE"
+    ml_res = receipt["step_5_ml_result"]
+    assert ml_res["is_anomaly"] is False
+    assert ml_res["anomaly_type"] == "NORMAL"
+    assert ml_res["model_name"] == "model_01_isolation_forest"
+    assert ml_res["predicted_fault"] is None
+    assert "operational baseline" in ml_res["evidence"][0].lower()
+
+    # Step 7: Policy decision
+    pol_dec = receipt["step_7_policy_decision"]
+    assert pol_dec["decision"] == "MAINTAIN_NORMAL_STATE"
+    assert pol_dec["playbook_to_execute"] == "PLAYBOOK_00_NO_ACTION"
+    assert pol_dec["requires_human_approval"] is False
+
+    # Step 8: SOAR execution
+    soar_exec = receipt["step_8_soar_execution"]
+    assert soar_exec["status"] == "NOMINAL"
+    assert soar_exec["workstation_final_status"] == "ONLINE"
+    assert "passive monitoring" in soar_exec["action_taken"].lower()
+
+    # Step 9: Incident & Audit Hash
+    inc_audit = receipt["step_9_incident_audit"]
+    assert inc_audit["incident_id"] is None
+    assert inc_audit["alert_id"] is None
+    assert inc_audit["audit_id"] is None
+    assert inc_audit["status"] == "NOMINAL"
+
+    # Database Verification: verify zero anomalies, zero alerts for this workstation
+    import uuid
+    ws_uuid = uuid.UUID(receipt["step_2_workstation"]["id"])
+    from sqlalchemy import select
+    from backend.models.anomaly import AnomalyDetection
+    from backend.models.incident import Incident
+    from backend.models.alert import Alert
+    from backend.models.telemetry import TelemetryMetric
+    from tests.conftest import TestAsyncSession
+
+    async with TestAsyncSession() as session:
+        # 1. TelemetryMetric should be recorded for real-time charting
+        telem_res = await session.execute(
+            select(TelemetryMetric).where(TelemetryMetric.workstation_id == ws_uuid)
+        )
+        assert len(telem_res.scalars().all()) >= 1
+
+        # 2. AnomalyDetection must NOT exist for this clean run
+        anom_res = await session.execute(
+            select(AnomalyDetection).where(AnomalyDetection.workstation_id == ws_uuid)
+        )
+        assert len(anom_res.scalars().all()) == 0
+
+        # 3. Incident must NOT exist for this workstation
+        inc_res = await session.execute(
+            select(Incident).where(Incident.workstation_id == ws_uuid)
+        )
+        assert len(inc_res.scalars().all()) == 0
+
+        # 4. Alert must NOT exist for this workstation
+        alert_res = await session.execute(
+            select(Alert).where(Alert.workstation_id == ws_uuid)
+        )
+        assert len(alert_res.scalars().all()) == 0
+

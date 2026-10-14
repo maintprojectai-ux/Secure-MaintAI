@@ -517,7 +517,9 @@ export function DemoProgress({ receipt, activeStep, onStepSelect, onReset }: Dem
                         ? "Host OS Active • Sockets Contained • No Host Reboot Required"
                         : receipt.step_8_soar_execution.workstation_final_status === "MAINTENANCE"
                           ? "Host OS Active • Maintenance Queued • Hardware Monitored"
-                          : "Host OS Active • Workload Preserved • Zero Research Interruption"}
+                          : receipt.scenario_type === "NORMAL_BASELINE"
+                            ? "Host OS Active • Telemetry Nominal • Continuous Monitoring Active"
+                            : "Host OS Active • Workload Preserved • Zero Research Interruption"}
                     </span>
                   </div>
                   <span className="text-xs text-emerald-400 font-medium">
@@ -559,7 +561,7 @@ export function DemoProgress({ receipt, activeStep, onStepSelect, onReset }: Dem
                 <div className="p-3 rounded-lg bg-slate-900 border border-slate-800">
                   <span className="text-slate-400 block mb-1">Incident Record</span>
                   <span className="font-mono font-bold text-slate-200">
-                    {receipt.step_9_incident_audit.incident_id || "None (Maintenance Workflow)"}
+                    {receipt.step_9_incident_audit.incident_id || "None (Nominal Baseline)"}
                   </span>
                   <span className="text-[10px] text-slate-400 block mt-1">
                     Status: {receipt.step_9_incident_audit.status}
@@ -569,10 +571,10 @@ export function DemoProgress({ receipt, activeStep, onStepSelect, onReset }: Dem
                   <span className="text-slate-400 block mb-1">SIEM/XDR Alert</span>
                   <span
                     className={`font-mono font-bold ${
-                      receipt.step_9_incident_audit.alert_id ? "text-rose-400" : "text-slate-400"
+                      receipt.step_9_incident_audit.alert_id ? "text-rose-400" : "text-emerald-400"
                     }`}
                   >
-                    {receipt.step_9_incident_audit.alert_id || "Exempt / Suppressed"}
+                    {receipt.step_9_incident_audit.alert_id || "None (Nominal Stream)"}
                   </span>
                   <span className="text-[10px] text-slate-400 block mt-1">
                     {receipt.step_9_incident_audit.alert_id
@@ -585,10 +587,12 @@ export function DemoProgress({ receipt, activeStep, onStepSelect, onReset }: Dem
                   <span className="font-mono text-emerald-400 text-[11px] truncate block">
                     {receipt.step_9_incident_audit.audit_id
                       ? `SHA-256: ${receipt.step_9_incident_audit.audit_id.slice(0, 16)}...`
-                      : "SHA-256: Pending Ledger Seal"}
+                      : "None (Nominal Baseline)"}
                   </span>
                   <span className="text-[10px] text-slate-400 block mt-1">
-                    Cryptographically sealed audit log
+                    {receipt.step_9_incident_audit.audit_id
+                      ? "Cryptographically sealed audit log"
+                      : "No security action taken — baseline telemetry normal"}
                   </span>
                 </div>
               </div>

@@ -83,6 +83,7 @@ class UserResponse(BaseModel):
     id: UUID
     username: str
     email: str
+    full_name: str | None = None
     role: RoleEnum
     status: str
     last_login_at: datetime | None = None

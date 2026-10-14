@@ -4,6 +4,7 @@ export interface User {
   id: string;
   email: string;
   full_name: string;
+  username?: string;
   role: UserRole;
   department?: string;
   is_active: boolean;
@@ -333,6 +334,9 @@ export interface TopPredictionItem {
   confidence_score: number;
   confidence_label: string;
   sparkline_color: string;
+  stage1_screening?: string;
+  stage2_model?: string;
+  anomaly_type?: string;
 }
 
 export interface AIInsightItem {

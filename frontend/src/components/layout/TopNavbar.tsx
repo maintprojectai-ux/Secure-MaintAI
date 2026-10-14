@@ -21,7 +21,7 @@ const ROUTE_TITLES: Record<string, { title: string; subtitle: string }> = {
   "/devices": { title: "Devices Monitoring", subtitle: "Monitor and manage all university infrastructure devices in real-time" },
   "/alerts": { title: "Incident & Alert Management", subtitle: "Anomaly screening triage, evidence inspection, and SOAR response" },
   "/cybersecurity": { title: "Cybersecurity & Threat Intelligence", subtitle: "SIEM correlation, attack matrix, and geographic intrusion origins" },
-  "/predictions": { title: "AI Predictive", subtitle: "Model 01, 02-A, 02-B inference, confidence metrics, and What-If analysis" },
+  "/predictions": { title: "AI Predictive", subtitle: "Model 01 screening, Model 02 diagnostics, and empirical validation" },
   "/maintenance": { title: "Predictive Maintenance Schedule", subtitle: "Autonomous task orchestration, calendar dispatch, and hardware health" },
   "/reports": { title: "Reports", subtitle: "Comprehensive overview of your infrastructure performance and security posture" },
   "/users": { title: "Users Management", subtitle: "Manage system users, roles, permissions, and access control." },
@@ -55,11 +55,21 @@ export const TopNavbar: React.FC = () => {
   }, []);
 
   // Determine current page metadata
-  const currentRouteMeta =
-    ROUTE_TITLES[pathname] || {
+  const currentRouteMeta = (() => {
+    if (ROUTE_TITLES[pathname]) {
+      return ROUTE_TITLES[pathname];
+    }
+    if (pathname.startsWith("/devices/")) {
+      return {
+        title: "Device Details",
+        subtitle: "Real-time health telemetry, hardware vitals, and role-sensitive security protection",
+      };
+    }
+    return {
       title: pathname.split("/").filter(Boolean).map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(" > ") || "Overview",
       subtitle: "Secure-MaintAI Platform",
     };
+  })();
 
   return (
     <header className="h-16 px-6 border-b border-slate-800/80 bg-[#070d1e]/80 backdrop-blur-xl sticky top-0 z-30 flex items-center justify-between gap-4">

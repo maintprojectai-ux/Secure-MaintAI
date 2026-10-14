@@ -27,7 +27,7 @@ from backend.models.user import UserAccount
 from backend.models.workstation import Workstation
 from backend.services.alert_broadcaster import alert_broadcaster
 from backend.services.audit import AuditService
-from security.policy_engine import PolicyEvaluationResult
+from security.policy_engine import PolicyDecisionType, PolicyEvaluationResult
 
 logger = get_logger("soar_service")
 
@@ -91,6 +91,19 @@ class SOARService:
                 evaluation,
                 operator=operator,
                 suppression_reason="EMERGENCY_KILL_SWITCH_ACTIVE",
+            )
+
+        if playbook in ("PLAYBOOK_00_NO_ACTION", "NONE") or evaluation.decision == PolicyDecisionType.MAINTAIN_NORMAL_STATE:
+            return PlaybookExecutionResult(
+                playbook_name="PLAYBOOK_00_NO_ACTION",
+                playbook_version="1.0.0",
+                workstation_id=evaluation.workstation_id,
+                status="NOMINAL",
+                action_taken="Continuous passive monitoring maintained. No incident, alert, or containment actions required.",
+                incident_id=None,
+                alert_id=None,
+                audit_id=None,
+                can_rollback=False,
             )
 
         if playbook == "PLAYBOOK_01_ALERT_ONLY":

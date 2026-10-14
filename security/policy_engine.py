@@ -33,6 +33,7 @@ class PolicyDecisionType(str, Enum):
     SURGICAL_NETWORK_ISOLATION = "SURGICAL_NETWORK_ISOLATION"
     ACCOUNT_LOCKOUT = "ACCOUNT_LOCKOUT"
     REQUIRE_HUMAN_APPROVAL = "REQUIRE_HUMAN_APPROVAL"
+    MAINTAIN_NORMAL_STATE = "MAINTAIN_NORMAL_STATE"
 
 
 class PolicyEvaluationResult(BaseModel):
@@ -182,12 +183,29 @@ class SecurityPolicyEngine:
             )
 
         # -------------------------------------------------------------
-        # 4. HARDWARE DEGRADATION / TECHNICAL FAILURE (Rule 29 Scenario 1)
+        # 4. NOMINAL OPERATIONAL BASELINE (Rule 29 Scenario: Baseline Stream)
         # -------------------------------------------------------------
-        if (
-            incident.incident_category in ("HARDWARE_DEGRADATION", "TECHNICAL_FAULT")
-            or not incident.is_threat
-        ):
+        if incident.incident_category == "NORMAL":
+            rules_triggered.append("RULE_NOMINAL_BASELINE_MONITOR")
+            return PolicyEvaluationResult(
+                workstation_id=incident.workstation_id,
+                user_context=user_context,
+                workstation_context=ws_context,
+                correlated_incident=incident,
+                decision=PolicyDecisionType.MAINTAIN_NORMAL_STATE,
+                playbook_to_execute="PLAYBOOK_00_NO_ACTION",
+                target_pids=[],
+                target_ports=[],
+                preserve_workloads=[w.job_id for w in ws_context.active_workloads],
+                requires_human_approval=False,
+                reason="Nominal operational telemetry. Host operating within established baseline; continuous passive monitoring maintained.",
+                policy_rules_triggered=rules_triggered,
+            )
+
+        # -------------------------------------------------------------
+        # 5. HARDWARE DEGRADATION / TECHNICAL FAILURE (Rule 29 Scenario 1)
+        # -------------------------------------------------------------
+        if incident.incident_category in ("HARDWARE_DEGRADATION", "TECHNICAL_FAULT"):
             rules_triggered.append("RULE_TECHNICAL_MAINTENANCE")
             return PolicyEvaluationResult(
                 workstation_id=incident.workstation_id,

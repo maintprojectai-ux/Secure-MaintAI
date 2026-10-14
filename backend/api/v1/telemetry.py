@@ -10,6 +10,7 @@ Per engineering rules Section 10:
 - Optimized for relational storage and future TimescaleDB hypertable extension.
 """
 
+import time
 from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID
@@ -35,6 +36,10 @@ from backend.schemas.telemetry import (
 from backend.services import ml_pipeline_service
 
 router = APIRouter()
+
+# In-memory deduplication cache for high-frequency telemetry polling (3-second TTL)
+_telemetry_cache: dict[str, tuple[float, list[TelemetryResponse]]] = {}
+_TELEMETRY_CACHE_TTL = 3.0
 
 
 @router.get(
@@ -280,7 +285,15 @@ async def get_workstation_telemetry(
     """
     Retrieve time-series telemetry metrics for a specific workstation.
     Ordered newest-first. Requires authenticated user.
+    Uses short TTL in-memory caching to eliminate duplicate requests and avoid DB connection saturation.
     """
+    cache_key = f"{workstation_id}_{limit}"
+    now = time.monotonic()
+    if cache_key in _telemetry_cache:
+        cached_time, cached_data = _telemetry_cache[cache_key]
+        if now - cached_time < _TELEMETRY_CACHE_TTL:
+            return cached_data
+
     target_uuid: UUID | None = None
     try:
         target_uuid = UUID(str(workstation_id))
@@ -300,7 +313,7 @@ async def get_workstation_telemetry(
     result = await session.execute(query)
     metrics = result.scalars().all()
 
-    return [
+    resp = [
         TelemetryResponse(
             id=m.id,
             workstation_id=m.workstation_id,
@@ -317,3 +330,10 @@ async def get_workstation_telemetry(
         )
         for m in metrics
     ]
+
+    # Save to short-lived in-memory cache
+    _telemetry_cache[cache_key] = (now, resp)
+    if len(_telemetry_cache) > 200:
+        _telemetry_cache.clear()
+
+    return resp

@@ -233,3 +233,38 @@ async def test_save_alert() -> None:
         assert saved_alert.title == "High CPU anomaly detected"
         assert saved_alert.status == "OPEN"
         print(f"\n[Alert Persistence] Alert saved successfully: id={saved_alert.id}, title='{saved_alert.title}', severity={saved_alert.severity}, status={saved_alert.status}")
+
+
+@pytest.mark.asyncio
+async def test_execute_playbook_no_action_for_nominal_baseline() -> None:
+    """PLAYBOOK_00_NO_ACTION does not create Incident, Alert, or AuditLog records."""
+    ws_id = uuid.uuid4()
+    eval_res = PolicyEvaluationResult(
+        workstation_id=ws_id,
+        user_context=IdPIdentityContext(
+            user_id="u-norm", username="norm_user", email="norm@univ.edu", role="STUDENT", department="Math"
+        ),
+        workstation_context=IdPWorkstationContext(workstation_id=ws_id, hostname="dept-pc-02", department="Math"),
+        correlated_incident=CorrelatedIncident(
+            workstation_id=ws_id,
+            incident_category="NORMAL",
+            is_threat=False,
+            severity="LOW",
+            confidence=1.0,
+            recommended_action="MONITOR",
+            reason="Nominal baseline telemetry.",
+        ),
+        decision=PolicyDecisionType.MAINTAIN_NORMAL_STATE,
+        playbook_to_execute="PLAYBOOK_00_NO_ACTION",
+        reason="Nominal baseline.",
+    )
+
+    async with TestAsyncSession() as session:
+        soar = SOARService(session)
+        receipt = await soar.execute_policy_decision(eval_res, operator="test:soar")
+        assert receipt.status == "NOMINAL"
+        assert receipt.incident_id is None
+        assert receipt.alert_id is None
+        assert receipt.audit_id is None
+        assert "passive monitoring" in receipt.action_taken.lower()
+

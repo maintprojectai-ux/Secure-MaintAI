@@ -333,3 +333,38 @@ def test_choose_playbook(policy_engine_instance: SecurityPolicyEngine) -> None:
         assert res_kill_switch.requires_human_approval is True
     finally:
         policy_engine_instance.set_emergency_kill_switch(False)
+
+
+def test_nominal_baseline_policy_evaluation(
+    policy_engine_instance: SecurityPolicyEngine,
+) -> None:
+    """Nominal operational telemetry triggers MAINTAIN_NORMAL_STATE with PLAYBOOK_00_NO_ACTION."""
+    ws_id = uuid.uuid4()
+    user_ctx = IdPIdentityContext(
+        user_id="user-norm",
+        username="norm_user",
+        email="norm@univ.edu",
+        role="STUDENT",
+        department="Mathematics",
+    )
+    ws_ctx = IdPWorkstationContext(
+        workstation_id=ws_id,
+        hostname="dept-pc-02",
+        department="Mathematics",
+    )
+    incident = CorrelatedIncident(
+        workstation_id=ws_id,
+        incident_category="NORMAL",
+        is_threat=False,
+        severity="LOW",
+        confidence=1.0,
+        recommended_action="MONITOR",
+        reason="No anomalous telemetry or security incidents detected in operational window.",
+    )
+
+    result = policy_engine_instance.evaluate_policy(incident, user_ctx, ws_ctx)
+    assert result.decision == PolicyDecisionType.MAINTAIN_NORMAL_STATE
+    assert result.playbook_to_execute == "PLAYBOOK_00_NO_ACTION"
+    assert "RULE_NOMINAL_BASELINE_MONITOR" in result.policy_rules_triggered
+    assert result.requires_human_approval is False
+
