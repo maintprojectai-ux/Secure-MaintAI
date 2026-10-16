@@ -21,16 +21,13 @@ from backend.models.anomaly import AnomalyDetection
 from backend.models.security_event import SecurityEvent
 from backend.models.user import UserAccount
 from backend.schemas.user import RoleEnum
-from backend.services.idp_service import idp_service
 from backend.services.soar_service import PlaybookExecutionResult, SOARService
-from security.correlation_engine import SecurityCorrelationEngine
 from security.policy_engine import (
     PolicyEvaluationResult,
     policy_engine,
 )
 
 router = APIRouter()
-_correlation_engine = SecurityCorrelationEngine()
 
 
 class PolicyEvaluationResponse(BaseModel):
@@ -66,14 +63,11 @@ async def evaluate_workstation_policy(
     ),
 ) -> PolicyEvaluationResponse:
     """
-    Executes the complete Resilience Decision Pipeline:
+    Executes the complete Resilience Decision Pipeline via SOARService.evaluate_and_execute:
     1. Queries recent anomaly detections & security events for the workstation.
-    2. Runs multi-source correlation engine.
-    3. Resolves contextual user profile & active research workloads from IdP.
-    4. Evaluates role-sensitive security policy.
-    5. Optionally dispatches and executes the authorized SOAR playbook.
+    2. Runs multi-source correlation engine, IdP context resolution, and policy evaluation.
+    3. Optionally dispatches and executes the authorized SOAR playbook.
     """
-    # 1. Fetch recent anomalies and security events
     anom_res = await session.execute(
         select(AnomalyDetection)
         .where(AnomalyDetection.workstation_id == workstation_id)
@@ -90,33 +84,17 @@ async def evaluate_workstation_policy(
     )
     security_events = sec_res.scalars().all()
 
-    # 2. Correlate
-    incident = _correlation_engine.correlate_workstation(
+    target_user_id = user_id_override or current_user.id
+    soar = SOARService(session)
+    _, _, _, evaluation, playbook_res = await soar.evaluate_and_execute(
         workstation_id=workstation_id,
         anomalies=anomalies,
         security_events=security_events,
+        target_user_id=target_user_id,
+        auto_execute=auto_execute,
+        skip_if_human_approval=True,
+        operator=f"user:{current_user.username}",
     )
-
-    # 3. Resolve Identity Context
-    target_user_id = user_id_override or current_user.id
-    user_context = await idp_service.get_user_context(target_user_id, session=session)
-    ws_context = await idp_service.get_workstation_context(workstation_id, session=session)
-
-    # 4. Evaluate Policy
-    evaluation = policy_engine.evaluate_policy(
-        incident=incident,
-        user_context=user_context,
-        ws_context=ws_context,
-    )
-
-    # 5. Execute SOAR Playbook if requested
-    playbook_res: PlaybookExecutionResult | None = None
-    if auto_execute and not evaluation.requires_human_approval:
-        soar = SOARService(session)
-        playbook_res = await soar.execute_policy_decision(
-            evaluation=evaluation,
-            operator=f"user:{current_user.username}",
-        )
 
     return PolicyEvaluationResponse(
         evaluation=evaluation,

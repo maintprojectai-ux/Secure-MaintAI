@@ -12,6 +12,7 @@ Per engineering rules:
 """
 
 import uuid
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
@@ -22,16 +23,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.logging import get_logger
 from backend.models.alert import Alert
+from backend.models.anomaly import AnomalyDetection
 from backend.models.incident import Incident
+from backend.models.security_event import SecurityEvent
 from backend.models.user import UserAccount
 from backend.models.workstation import Workstation
+from backend.schemas.idp import IdPIdentityContext, IdPWorkstationContext
 from backend.services.alert_broadcaster import alert_broadcaster
 from backend.services.audit import AuditService
+from backend.services.idp_service import idp_service
+from security.correlation_engine import CorrelatedIncident, correlation_engine
 from security.policy_engine import (
+    CONTAINMENT_PLAYBOOKS,
     PROTECTED_MANAGEMENT_PORTS,
-    PROTECTED_SYSTEM_PID_CEILING,
+    PlaybookId,
     PolicyDecisionType,
     PolicyEvaluationResult,
+    policy_engine,
+    validate_target_pids,
+    validate_target_ports,
 )
 
 logger = get_logger("soar_service")
@@ -88,41 +98,72 @@ class SOARService:
 
     @staticmethod
     def validate_pids(pids: list[int]) -> tuple[list[int], list[int]]:
-        """
-        Validate candidate PIDs before process containment.
-        Rejects OS/kernel/init PIDs (<= 1000) and invalid numbers.
-        Returns (validated_pids, rejected_pids).
-        """
-        valid: list[int] = []
-        rejected: list[int] = []
-        for pid in pids:
-            if isinstance(pid, int) and pid > PROTECTED_SYSTEM_PID_CEILING:
-                if pid not in valid:
-                    valid.append(pid)
-            else:
-                rejected.append(pid)
-        return valid, rejected
+        """Delegate PID validation to the canonical validator in security.policy_engine."""
+        return validate_target_pids(pids)
 
     @staticmethod
     def validate_ports(ports: list[int]) -> tuple[list[int], list[int]]:
+        """Delegate port validation to the canonical validator in security.policy_engine."""
+        return validate_target_ports(ports)
+
+    @staticmethod
+    def resolve_human_intervention_status(playbook_initiated: str | None) -> str:
+        """Determine post-approval alert status based on canonical containment playbooks."""
+        if playbook_initiated in CONTAINMENT_PLAYBOOKS:
+            return "CONTAINED"
+        return "ACKNOWLEDGED"
+
+    async def evaluate_and_execute(
+        self,
+        workstation_id: UUID,
+        anomalies: Sequence[AnomalyDetection],
+        security_events: Sequence[SecurityEvent],
+        target_user_id: UUID | str,
+        workstation_name: str | None = None,
+        auto_execute: bool = True,
+        skip_if_human_approval: bool = False,
+        operator: str = "system:soar-engine",
+        endpoint_confirmed: bool = False,
+    ) -> tuple[
+        CorrelatedIncident,
+        IdPIdentityContext,
+        IdPWorkstationContext,
+        PolicyEvaluationResult,
+        PlaybookExecutionResult | None,
+    ]:
         """
-        Validate candidate TCP/UDP ports before socket/port containment.
-        Rejects out-of-range ports and protected management/control-plane ports.
-        Returns (validated_ports, rejected_ports).
+        Execute the unified 4-stage Resilience Decision Pipeline:
+        1. Multi-source correlation (ML anomalies + SIEM security events)
+        2. University IdP identity & active research workload resolution
+        3. Role-sensitive Security Policy Engine evaluation
+        4. Authorized SOAR Playbook execution
         """
-        valid: list[int] = []
-        rejected: list[int] = []
-        for port in ports:
-            if (
-                isinstance(port, int)
-                and 1 <= port <= 65535
-                and port not in PROTECTED_MANAGEMENT_PORTS
-            ):
-                if port not in valid:
-                    valid.append(port)
-            else:
-                rejected.append(port)
-        return valid, rejected
+        incident = correlation_engine.correlate_workstation(
+            workstation_id=workstation_id,
+            anomalies=anomalies,
+            security_events=security_events,
+            workstation_name=workstation_name,
+        )
+        user_context = await idp_service.get_user_context(target_user_id, session=self._session)
+        ws_context = await idp_service.get_workstation_context(workstation_id, session=self._session)
+        evaluation = policy_engine.evaluate_policy(
+            incident=incident,
+            user_context=user_context,
+            ws_context=ws_context,
+        )
+
+        playbook_res: PlaybookExecutionResult | None = None
+        should_execute = auto_execute and not (
+            skip_if_human_approval and evaluation.requires_human_approval
+        )
+        if should_execute:
+            playbook_res = await self.execute_policy_decision(
+                evaluation=evaluation,
+                operator=operator,
+                endpoint_confirmed=endpoint_confirmed,
+            )
+
+        return incident, user_context, ws_context, evaluation, playbook_res
 
     async def execute_policy_decision(
         self,
@@ -148,9 +189,12 @@ class SOARService:
                 execution_mode=exec_mode,
             )
 
-        if playbook in ("PLAYBOOK_00_NO_ACTION", "NONE") or evaluation.decision == PolicyDecisionType.MAINTAIN_NORMAL_STATE:
+        if (
+            playbook in (PlaybookId.PLAYBOOK_00_NO_ACTION.value, "NONE")
+            or evaluation.decision == PolicyDecisionType.MAINTAIN_NORMAL_STATE
+        ):
             return PlaybookExecutionResult(
-                playbook_name="PLAYBOOK_00_NO_ACTION",
+                playbook_name=PlaybookId.PLAYBOOK_00_NO_ACTION.value,
                 playbook_version="1.0.0",
                 workstation_id=evaluation.workstation_id,
                 status="NOMINAL",
@@ -164,23 +208,23 @@ class SOARService:
                 can_rollback=False,
             )
 
-        if playbook == "PLAYBOOK_01_ALERT_ONLY":
+        if playbook == PlaybookId.PLAYBOOK_01_ALERT_ONLY.value:
             return await self._execute_playbook_alert_only(
                 evaluation, operator=operator, execution_mode=exec_mode
             )
-        elif playbook == "PLAYBOOK_02_PROCESS_CONTAINMENT":
+        elif playbook == PlaybookId.PLAYBOOK_02_PROCESS_CONTAINMENT.value:
             return await self._execute_playbook_process_containment(
                 evaluation, operator=operator, execution_mode=exec_mode
             )
-        elif playbook == "PLAYBOOK_03_SURGICAL_ISOLATION":
+        elif playbook == PlaybookId.PLAYBOOK_03_SURGICAL_ISOLATION.value:
             return await self._execute_playbook_surgical_isolation(
                 evaluation, operator=operator, execution_mode=exec_mode
             )
-        elif playbook == "PLAYBOOK_04_MAINTENANCE":
+        elif playbook == PlaybookId.PLAYBOOK_04_MAINTENANCE.value:
             return await self._execute_playbook_maintenance(
                 evaluation, operator=operator, execution_mode=exec_mode
             )
-        elif playbook == "PLAYBOOK_05_ACCOUNT_RESPONSE":
+        elif playbook == PlaybookId.PLAYBOOK_05_ACCOUNT_RESPONSE.value:
             return await self._execute_playbook_account_response(
                 evaluation, operator=operator, execution_mode=exec_mode
             )

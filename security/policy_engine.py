@@ -60,6 +60,44 @@ _PID_PATTERN = re.compile(r"\bpid[\s:=]+(\d+)\b", re.IGNORECASE)
 _PORT_PATTERN = re.compile(r"(?:\bport[\s:=]+|:)(\d{2,5})\b", re.IGNORECASE)
 
 
+def validate_target_pids(pids: list[int]) -> tuple[list[int], list[int]]:
+    """
+    Canonical validator for candidate PIDs before process containment.
+    Rejects OS/kernel/init PIDs (<= 1000) and invalid numbers.
+    Returns (validated_pids, rejected_pids).
+    """
+    valid: list[int] = []
+    rejected: list[int] = []
+    for pid in pids:
+        if isinstance(pid, int) and pid > PROTECTED_SYSTEM_PID_CEILING:
+            if pid not in valid:
+                valid.append(pid)
+        else:
+            rejected.append(pid)
+    return valid, rejected
+
+
+def validate_target_ports(ports: list[int]) -> tuple[list[int], list[int]]:
+    """
+    Canonical validator for candidate TCP/UDP ports before socket/port containment.
+    Rejects out-of-range ports and protected management/control-plane ports.
+    Returns (validated_ports, rejected_ports).
+    """
+    valid: list[int] = []
+    rejected: list[int] = []
+    for port in ports:
+        if (
+            isinstance(port, int)
+            and 1 <= port <= 65535
+            and port not in PROTECTED_MANAGEMENT_PORTS
+        ):
+            if port not in valid:
+                valid.append(port)
+        else:
+            rejected.append(port)
+    return valid, rejected
+
+
 def extract_and_validate_targets(
     evidence: list[str],
     preserve_research: bool = False,
@@ -69,8 +107,8 @@ def extract_and_validate_targets(
     Filters out OS/system PIDs (<= 1000), protected system daemons, protected research
     processes (when preserve_research is True), and management/control-plane ports.
     """
-    valid_pids: list[int] = []
-    valid_ports: list[int] = []
+    candidate_pids: list[int] = []
+    candidate_ports: list[int] = []
 
     for ev in evidence:
         ev_lower = ev.lower()
@@ -81,24 +119,19 @@ def extract_and_validate_targets(
 
         if not is_protected_sys and not is_protected_res:
             for match in _PID_PATTERN.finditer(ev):
-                pid = int(match.group(1))
-                if pid > PROTECTED_SYSTEM_PID_CEILING and pid not in valid_pids:
-                    valid_pids.append(pid)
+                candidate_pids.append(int(match.group(1)))
 
         for port in (3333, 4444, 5555, 8333, 8008):
             if f":{port}" in ev or f"port {port}" in ev_lower:
-                if port not in PROTECTED_MANAGEMENT_PORTS and port not in valid_ports:
-                    valid_ports.append(port)
+                candidate_ports.append(port)
 
         for port_match in _PORT_PATTERN.finditer(ev):
             candidate_port = int(port_match.group(1))
-            if (
-                1024 <= candidate_port <= 65535
-                and candidate_port not in PROTECTED_MANAGEMENT_PORTS
-                and candidate_port not in valid_ports
-            ):
-                valid_ports.append(candidate_port)
+            if 1024 <= candidate_port <= 65535:
+                candidate_ports.append(candidate_port)
 
+    valid_pids, _ = validate_target_pids(candidate_pids)
+    valid_ports, _ = validate_target_ports(candidate_ports)
     return valid_pids, valid_ports
 
 
@@ -113,6 +146,36 @@ class PolicyDecisionType(str, Enum):
     ACCOUNT_LOCKOUT = "ACCOUNT_LOCKOUT"
     REQUIRE_HUMAN_APPROVAL = "REQUIRE_HUMAN_APPROVAL"
     MAINTAIN_NORMAL_STATE = "MAINTAIN_NORMAL_STATE"
+
+
+class PlaybookId(str, Enum):
+    """Canonical SOAR playbook identifiers mapped by the policy engine."""
+
+    PLAYBOOK_00_NO_ACTION = "PLAYBOOK_00_NO_ACTION"
+    PLAYBOOK_01_ALERT_ONLY = "PLAYBOOK_01_ALERT_ONLY"
+    PLAYBOOK_02_PROCESS_CONTAINMENT = "PLAYBOOK_02_PROCESS_CONTAINMENT"
+    PLAYBOOK_03_SURGICAL_ISOLATION = "PLAYBOOK_03_SURGICAL_ISOLATION"
+    PLAYBOOK_04_MAINTENANCE = "PLAYBOOK_04_MAINTENANCE"
+    PLAYBOOK_05_ACCOUNT_RESPONSE = "PLAYBOOK_05_ACCOUNT_RESPONSE"
+
+
+DECISION_TO_PLAYBOOK: dict[PolicyDecisionType, PlaybookId] = {
+    PolicyDecisionType.MAINTAIN_NORMAL_STATE: PlaybookId.PLAYBOOK_00_NO_ACTION,
+    PolicyDecisionType.ALERT_SOC_ONLY: PlaybookId.PLAYBOOK_01_ALERT_ONLY,
+    PolicyDecisionType.REQUIRE_HUMAN_APPROVAL: PlaybookId.PLAYBOOK_01_ALERT_ONLY,
+    PolicyDecisionType.SURGICAL_PROCESS_CONTAINMENT: PlaybookId.PLAYBOOK_02_PROCESS_CONTAINMENT,
+    PolicyDecisionType.SURGICAL_NETWORK_ISOLATION: PlaybookId.PLAYBOOK_03_SURGICAL_ISOLATION,
+    PolicyDecisionType.ALLOW_LEGITIMATE_RESEARCH: PlaybookId.PLAYBOOK_04_MAINTENANCE,
+    PolicyDecisionType.SCHEDULE_MAINTENANCE: PlaybookId.PLAYBOOK_04_MAINTENANCE,
+    PolicyDecisionType.ACCOUNT_LOCKOUT: PlaybookId.PLAYBOOK_05_ACCOUNT_RESPONSE,
+}
+
+CONTAINMENT_PLAYBOOKS: frozenset[str] = frozenset(
+    {
+        PlaybookId.PLAYBOOK_02_PROCESS_CONTAINMENT.value,
+        PlaybookId.PLAYBOOK_03_SURGICAL_ISOLATION.value,
+    }
+)
 
 
 class PolicyEvaluationResult(BaseModel):
@@ -190,13 +253,14 @@ class SecurityPolicyEngine:
         # -------------------------------------------------------------
         if self._kill_switch:
             rules_triggered.append("RULE_KILL_SWITCH_ACTIVE")
+            decision = PolicyDecisionType.ALERT_SOC_ONLY
             return PolicyEvaluationResult(
                 workstation_id=incident.workstation_id,
                 user_context=user_context,
                 workstation_context=ws_context,
                 correlated_incident=incident,
-                decision=PolicyDecisionType.ALERT_SOC_ONLY,
-                playbook_to_execute="PLAYBOOK_01_ALERT_ONLY",
+                decision=decision,
+                playbook_to_execute=DECISION_TO_PLAYBOOK[decision].value,
                 target_pids=[],
                 target_ports=target_ports,
                 preserve_workloads=active_workload_ids,
@@ -220,17 +284,18 @@ class SecurityPolicyEngine:
                 incident.severity.value if hasattr(incident.severity, "value") else incident.severity
             ).upper()
             requires_human_approval = sev_str in ("HIGH", "CRITICAL")
+            decision = (
+                PolicyDecisionType.REQUIRE_HUMAN_APPROVAL
+                if requires_human_approval
+                else PolicyDecisionType.ALERT_SOC_ONLY
+            )
             return PolicyEvaluationResult(
                 workstation_id=incident.workstation_id,
                 user_context=user_context,
                 workstation_context=ws_context,
                 correlated_incident=incident,
-                decision=(
-                    PolicyDecisionType.REQUIRE_HUMAN_APPROVAL
-                    if requires_human_approval
-                    else PolicyDecisionType.ALERT_SOC_ONLY
-                ),
-                playbook_to_execute="PLAYBOOK_01_ALERT_ONLY",
+                decision=decision,
+                playbook_to_execute=DECISION_TO_PLAYBOOK[decision].value,
                 target_pids=[],
                 target_ports=target_ports,
                 preserve_workloads=active_workload_ids,
@@ -251,14 +316,15 @@ class SecurityPolicyEngine:
         ):
             rules_triggered.append("RULE_BENIGN_RESEARCH_COMPUTE")
             preserve_workloads = list(active_workload_ids)
+            decision = PolicyDecisionType.ALLOW_LEGITIMATE_RESEARCH
 
             return PolicyEvaluationResult(
                 workstation_id=incident.workstation_id,
                 user_context=user_context,
                 workstation_context=ws_context,
                 correlated_incident=incident,
-                decision=PolicyDecisionType.ALLOW_LEGITIMATE_RESEARCH,
-                playbook_to_execute="PLAYBOOK_04_MAINTENANCE",
+                decision=decision,
+                playbook_to_execute=DECISION_TO_PLAYBOOK[decision].value,
                 target_pids=[],
                 target_ports=[],
                 preserve_workloads=preserve_workloads,
@@ -275,13 +341,14 @@ class SecurityPolicyEngine:
         # -------------------------------------------------------------
         if category == IncidentCategory.NORMAL.value and not incident.is_threat:
             rules_triggered.append("RULE_NOMINAL_BASELINE_MONITOR")
+            decision = PolicyDecisionType.MAINTAIN_NORMAL_STATE
             return PolicyEvaluationResult(
                 workstation_id=incident.workstation_id,
                 user_context=user_context,
                 workstation_context=ws_context,
                 correlated_incident=incident,
-                decision=PolicyDecisionType.MAINTAIN_NORMAL_STATE,
-                playbook_to_execute="PLAYBOOK_00_NO_ACTION",
+                decision=decision,
+                playbook_to_execute=DECISION_TO_PLAYBOOK[decision].value,
                 target_pids=[],
                 target_ports=[],
                 preserve_workloads=active_workload_ids,
@@ -295,13 +362,14 @@ class SecurityPolicyEngine:
         # -------------------------------------------------------------
         if category in (IncidentCategory.HARDWARE_DEGRADATION.value, IncidentCategory.TECHNICAL_FAULT.value):
             rules_triggered.append("RULE_TECHNICAL_MAINTENANCE")
+            decision = PolicyDecisionType.SCHEDULE_MAINTENANCE
             return PolicyEvaluationResult(
                 workstation_id=incident.workstation_id,
                 user_context=user_context,
                 workstation_context=ws_context,
                 correlated_incident=incident,
-                decision=PolicyDecisionType.SCHEDULE_MAINTENANCE,
-                playbook_to_execute="PLAYBOOK_04_MAINTENANCE",
+                decision=decision,
+                playbook_to_execute=DECISION_TO_PLAYBOOK[decision].value,
                 target_pids=[],
                 target_ports=[],
                 preserve_workloads=active_workload_ids,
@@ -318,14 +386,15 @@ class SecurityPolicyEngine:
                 # Researcher context: Surgical targeting only (terminate miner, preserve research workload)
                 rules_triggered.append("RULE_RESEARCHER_SURGICAL_CONTAINMENT")
                 preserve_workloads = list(active_workload_ids)
+                decision = PolicyDecisionType.SURGICAL_PROCESS_CONTAINMENT
 
                 return PolicyEvaluationResult(
                     workstation_id=incident.workstation_id,
                     user_context=user_context,
                     workstation_context=ws_context,
                     correlated_incident=incident,
-                    decision=PolicyDecisionType.SURGICAL_PROCESS_CONTAINMENT,
-                    playbook_to_execute="PLAYBOOK_02_PROCESS_CONTAINMENT",
+                    decision=decision,
+                    playbook_to_execute=DECISION_TO_PLAYBOOK[decision].value,
                     target_pids=target_pids,
                     target_ports=target_ports,
                     preserve_workloads=preserve_workloads,
@@ -339,13 +408,14 @@ class SecurityPolicyEngine:
             else:
                 # Student / Generic Lab PC: Swift surgical isolation
                 rules_triggered.append("RULE_STUDENT_CRYPTOJACKING_ISOLATION")
+                decision = PolicyDecisionType.SURGICAL_NETWORK_ISOLATION
                 return PolicyEvaluationResult(
                     workstation_id=incident.workstation_id,
                     user_context=user_context,
                     workstation_context=ws_context,
                     correlated_incident=incident,
-                    decision=PolicyDecisionType.SURGICAL_NETWORK_ISOLATION,
-                    playbook_to_execute="PLAYBOOK_03_SURGICAL_ISOLATION",
+                    decision=decision,
+                    playbook_to_execute=DECISION_TO_PLAYBOOK[decision].value,
                     target_pids=target_pids,
                     target_ports=target_ports,
                     preserve_workloads=[],
@@ -359,13 +429,14 @@ class SecurityPolicyEngine:
         # -------------------------------------------------------------
         if category in (IncidentCategory.APT_INTRUSION.value, IncidentCategory.DATA_EXFILTRATION.value):
             rules_triggered.append("RULE_APT_SURGICAL_ISOLATION")
+            decision = PolicyDecisionType.SURGICAL_NETWORK_ISOLATION
             return PolicyEvaluationResult(
                 workstation_id=incident.workstation_id,
                 user_context=user_context,
                 workstation_context=ws_context,
                 correlated_incident=incident,
-                decision=PolicyDecisionType.SURGICAL_NETWORK_ISOLATION,
-                playbook_to_execute="PLAYBOOK_03_SURGICAL_ISOLATION",
+                decision=decision,
+                playbook_to_execute=DECISION_TO_PLAYBOOK[decision].value,
                 target_pids=target_pids,
                 target_ports=target_ports,
                 preserve_workloads=active_workload_ids,
@@ -383,13 +454,14 @@ class SecurityPolicyEngine:
         ):
             if has_active_research and user_role == "RESEARCHER":
                 rules_triggered.append("RULE_RESEARCHER_UNAUTHORIZED_APPROVAL")
+                decision = PolicyDecisionType.REQUIRE_HUMAN_APPROVAL
                 return PolicyEvaluationResult(
                     workstation_id=incident.workstation_id,
                     user_context=user_context,
                     workstation_context=ws_context,
                     correlated_incident=incident,
-                    decision=PolicyDecisionType.REQUIRE_HUMAN_APPROVAL,
-                    playbook_to_execute="PLAYBOOK_01_ALERT_ONLY",
+                    decision=decision,
+                    playbook_to_execute=DECISION_TO_PLAYBOOK[decision].value,
                     target_pids=[],
                     target_ports=target_ports,
                     preserve_workloads=active_workload_ids,
@@ -402,13 +474,14 @@ class SecurityPolicyEngine:
                 )
 
             rules_triggered.append("RULE_BRUTE_FORCE_LOCKOUT")
+            decision = PolicyDecisionType.ACCOUNT_LOCKOUT
             return PolicyEvaluationResult(
                 workstation_id=incident.workstation_id,
                 user_context=user_context,
                 workstation_context=ws_context,
                 correlated_incident=incident,
-                decision=PolicyDecisionType.ACCOUNT_LOCKOUT,
-                playbook_to_execute="PLAYBOOK_05_ACCOUNT_RESPONSE",
+                decision=decision,
+                playbook_to_execute=DECISION_TO_PLAYBOOK[decision].value,
                 target_pids=[],
                 target_ports=[],
                 preserve_workloads=[],
@@ -422,13 +495,14 @@ class SecurityPolicyEngine:
         # -------------------------------------------------------------
         if category == IncidentCategory.SECURITY_ANOMALY_GENERIC.value:
             rules_triggered.append("RULE_GENERIC_SECURITY_ALERT")
+            decision = PolicyDecisionType.ALERT_SOC_ONLY
             return PolicyEvaluationResult(
                 workstation_id=incident.workstation_id,
                 user_context=user_context,
                 workstation_context=ws_context,
                 correlated_incident=incident,
-                decision=PolicyDecisionType.ALERT_SOC_ONLY,
-                playbook_to_execute="PLAYBOOK_01_ALERT_ONLY",
+                decision=decision,
+                playbook_to_execute=DECISION_TO_PLAYBOOK[decision].value,
                 target_pids=target_pids,
                 target_ports=target_ports,
                 preserve_workloads=active_workload_ids,
@@ -446,17 +520,18 @@ class SecurityPolicyEngine:
                 incident.severity.value if hasattr(incident.severity, "value") else incident.severity
             ).upper()
             requires_human_approval = sev_str in ("HIGH", "CRITICAL")
+            decision = (
+                PolicyDecisionType.REQUIRE_HUMAN_APPROVAL
+                if requires_human_approval
+                else PolicyDecisionType.ALERT_SOC_ONLY
+            )
             return PolicyEvaluationResult(
                 workstation_id=incident.workstation_id,
                 user_context=user_context,
                 workstation_context=ws_context,
                 correlated_incident=incident,
-                decision=(
-                    PolicyDecisionType.REQUIRE_HUMAN_APPROVAL
-                    if requires_human_approval
-                    else PolicyDecisionType.ALERT_SOC_ONLY
-                ),
-                playbook_to_execute="PLAYBOOK_01_ALERT_ONLY",
+                decision=decision,
+                playbook_to_execute=DECISION_TO_PLAYBOOK[decision].value,
                 target_pids=[],
                 target_ports=target_ports,
                 preserve_workloads=active_workload_ids,
@@ -466,13 +541,14 @@ class SecurityPolicyEngine:
             )
 
         rules_triggered.append("RULE_DEFAULT_ALERT")
+        decision = PolicyDecisionType.ALERT_SOC_ONLY
         return PolicyEvaluationResult(
             workstation_id=incident.workstation_id,
             user_context=user_context,
             workstation_context=ws_context,
             correlated_incident=incident,
-            decision=PolicyDecisionType.ALERT_SOC_ONLY,
-            playbook_to_execute="PLAYBOOK_01_ALERT_ONLY",
+            decision=decision,
+            playbook_to_execute=DECISION_TO_PLAYBOOK[decision].value,
             target_pids=target_pids,
             target_ports=target_ports,
             preserve_workloads=active_workload_ids,

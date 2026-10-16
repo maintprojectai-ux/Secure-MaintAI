@@ -272,12 +272,10 @@ async def approve_human_intervention_alert(
             detail=f"Alert '{alert_id}' not found.",
         )
 
-    # Transition status to CONTAINED or ACKNOWLEDGED depending on action
-    alert.status = (
-        "CONTAINED"
-        if alert.playbook_initiated in ("PLAYBOOK_02_PROCESS_CONTAINMENT", "PLAYBOOK_03_SURGICAL_ISOLATION")
-        else "ACKNOWLEDGED"
-    )
+    from backend.services.soar_service import SOARService
+
+    # Transition status via canonical SOAR containment playbook classification
+    alert.status = SOARService.resolve_human_intervention_status(alert.playbook_initiated)
     alert.acknowledged_at = datetime.now(timezone.utc)
 
     audit = AuditService(session)

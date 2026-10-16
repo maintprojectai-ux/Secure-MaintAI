@@ -33,11 +33,8 @@ from backend.schemas.telemetry import (
 from backend.services import ml_pipeline_service
 from backend.services.idp_service import idp_service
 from backend.services.soar_service import SOARService
-from security.correlation_engine import SecurityCorrelationEngine
-from security.policy_engine import policy_engine
 
 router = APIRouter()
-_correlation_engine = SecurityCorrelationEngine()
 
 
 class DemoScenarioType(str, Enum):
@@ -252,13 +249,7 @@ async def trigger_demo_scenario(
         await session.commit()
 
         # -------------------------------------------------------------
-        # 4. RESOLVE IDENTITY CONTEXT & ACTIVE WORKLOADS (Step 6)
-        # -------------------------------------------------------------
-        user_context = await idp_service.get_user_context(target_user_id, session=session)
-        ws_context = await idp_service.get_workstation_context(ws.id, session=session)
-
-        # -------------------------------------------------------------
-        # 5. CORRELATE & EVALUATE POLICY (Step 7)
+        # 4. CORRELATE, RESOLVE IDP CONTEXT & EVALUATE POLICY (Steps 6 & 7)
         # -------------------------------------------------------------
         if scenario == DemoScenarioType.NORMAL_BASELINE:
             recent_anomalies = []
@@ -267,23 +258,27 @@ async def trigger_demo_scenario(
             recent_anomalies = [anomaly_record] if anomaly_record is not None else []
             recent_sec = [sec_event] if sec_event is not None else []
 
-        correlated_incident = _correlation_engine.correlate_workstation(
+        soar_service = SOARService(session)
+        (
+            correlated_incident,
+            user_context,
+            ws_context,
+            policy_result,
+            _,
+        ) = await soar_service.evaluate_and_execute(
             workstation_id=ws.id,
             anomalies=recent_anomalies,
             security_events=recent_sec,
-        )
-
-        policy_result = policy_engine.evaluate_policy(
-            incident=correlated_incident,
-            user_context=user_context,
-            ws_context=ws_context,
+            target_user_id=target_user_id,
+            workstation_name=ws.hostname,
+            auto_execute=False,
+            operator="system:demo-controller",
         )
 
         # -------------------------------------------------------------
-        # 6. DISPATCH & EXECUTE SOAR PLAYBOOK (Step 8 & 9)
+        # 5. DISPATCH & EXECUTE SOAR PLAYBOOK (Steps 8 & 9)
         # -------------------------------------------------------------
         soar_t0 = time.perf_counter()
-        soar_service = SOARService(session)
         playbook_receipt = await soar_service.execute_policy_decision(
             evaluation=policy_result,
             operator="system:demo-controller",
