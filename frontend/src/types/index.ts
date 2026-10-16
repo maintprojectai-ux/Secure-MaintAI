@@ -590,6 +590,7 @@ export interface DemoExecutionReceipt {
     model_version: string;
     evidence: string[];
     predicted_fault?: string | null;
+    ml_latency_ms?: number;
   };
   step_6_idp_context: {
     user_id: string;
@@ -601,6 +602,7 @@ export interface DemoExecutionReceipt {
     is_fallback: boolean;
   };
   step_7_policy_decision: {
+    incident_category?: string;
     decision: string;
     playbook_to_execute: string;
     reason: string;
@@ -609,19 +611,28 @@ export interface DemoExecutionReceipt {
   };
   step_8_soar_execution: {
     status: string;
+    execution_mode?: string;
     action_taken: string;
     workstation_final_status: string;
     can_rollback: boolean;
+    soar_execution_ms?: number;
+    details?: Record<string, unknown>;
   };
   step_9_incident_audit: {
     incident_id?: string | null;
     alert_id?: string | null;
     audit_id?: string | null;
+    integrity_hash?: string | null;
     status: string;
   };
   step_10_validation_summary: {
     instruction: string;
     acceptance_thresholds: Record<string, string>;
+    measured_timings?: {
+      ml_inference_ms: number;
+      soar_execution_ms: number;
+      total_pipeline_ms: number;
+    };
   };
 }
 

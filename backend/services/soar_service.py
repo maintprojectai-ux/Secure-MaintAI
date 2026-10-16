@@ -27,7 +27,12 @@ from backend.models.user import UserAccount
 from backend.models.workstation import Workstation
 from backend.services.alert_broadcaster import alert_broadcaster
 from backend.services.audit import AuditService
-from security.policy_engine import PolicyDecisionType, PolicyEvaluationResult
+from security.policy_engine import (
+    PROTECTED_MANAGEMENT_PORTS,
+    PROTECTED_SYSTEM_PID_CEILING,
+    PolicyDecisionType,
+    PolicyEvaluationResult,
+)
 
 logger = get_logger("soar_service")
 
@@ -56,11 +61,16 @@ class PlaybookExecutionResult(BaseModel):
     playbook_name: str
     playbook_version: str
     workstation_id: UUID
-    status: str = Field(..., description="'SUCCESS', 'FAILED', 'SUPPRESSED', 'SKIPPED'")
+    status: str = Field(..., description="'SUCCESS', 'FAILED', 'SUPPRESSED', 'SKIPPED', 'NOMINAL'")
+    execution_mode: str = Field(
+        default="RECORDED_CONTROL_PLANE",
+        description="'RECORDED_CONTROL_PLANE' (persisted in control plane / awaiting agent ACK) vs 'CONFIRMED_ENDPOINT_ENFORCEMENT'",
+    )
     action_taken: str
     incident_id: UUID | None = None
     alert_id: UUID | None = None
     audit_id: UUID | None = None
+    audit_integrity_hash: str | None = None
     details: dict[str, Any] = Field(default_factory=dict)
     can_rollback: bool = True
     executed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -76,21 +86,66 @@ class SOARService:
         self._session = session
         self._audit = AuditService(session)
 
+    @staticmethod
+    def validate_pids(pids: list[int]) -> tuple[list[int], list[int]]:
+        """
+        Validate candidate PIDs before process containment.
+        Rejects OS/kernel/init PIDs (<= 1000) and invalid numbers.
+        Returns (validated_pids, rejected_pids).
+        """
+        valid: list[int] = []
+        rejected: list[int] = []
+        for pid in pids:
+            if isinstance(pid, int) and pid > PROTECTED_SYSTEM_PID_CEILING:
+                if pid not in valid:
+                    valid.append(pid)
+            else:
+                rejected.append(pid)
+        return valid, rejected
+
+    @staticmethod
+    def validate_ports(ports: list[int]) -> tuple[list[int], list[int]]:
+        """
+        Validate candidate TCP/UDP ports before socket/port containment.
+        Rejects out-of-range ports and protected management/control-plane ports.
+        Returns (validated_ports, rejected_ports).
+        """
+        valid: list[int] = []
+        rejected: list[int] = []
+        for port in ports:
+            if (
+                isinstance(port, int)
+                and 1 <= port <= 65535
+                and port not in PROTECTED_MANAGEMENT_PORTS
+            ):
+                if port not in valid:
+                    valid.append(port)
+            else:
+                rejected.append(port)
+        return valid, rejected
+
     async def execute_policy_decision(
         self,
         evaluation: PolicyEvaluationResult,
         operator: str = "system:soar-engine",
+        endpoint_confirmed: bool = False,
     ) -> PlaybookExecutionResult:
         """
         Dispatch and execute the authorized SOAR playbook for a policy evaluation result.
         """
         playbook = evaluation.playbook_to_execute
+        exec_mode = (
+            "CONFIRMED_ENDPOINT_ENFORCEMENT"
+            if endpoint_confirmed
+            else "RECORDED_CONTROL_PLANE"
+        )
 
         if evaluation.kill_switch_active:
             return await self._execute_playbook_alert_only(
                 evaluation,
                 operator=operator,
                 suppression_reason="EMERGENCY_KILL_SWITCH_ACTIVE",
+                execution_mode=exec_mode,
             )
 
         if playbook in ("PLAYBOOK_00_NO_ACTION", "NONE") or evaluation.decision == PolicyDecisionType.MAINTAIN_NORMAL_STATE:
@@ -99,31 +154,47 @@ class SOARService:
                 playbook_version="1.0.0",
                 workstation_id=evaluation.workstation_id,
                 status="NOMINAL",
+                execution_mode=exec_mode,
                 action_taken="Continuous passive monitoring maintained. No incident, alert, or containment actions required.",
                 incident_id=None,
                 alert_id=None,
                 audit_id=None,
+                audit_integrity_hash=None,
+                details={"preserved_jobs": list(evaluation.preserve_workloads)},
                 can_rollback=False,
             )
 
         if playbook == "PLAYBOOK_01_ALERT_ONLY":
-            return await self._execute_playbook_alert_only(evaluation, operator=operator)
+            return await self._execute_playbook_alert_only(
+                evaluation, operator=operator, execution_mode=exec_mode
+            )
         elif playbook == "PLAYBOOK_02_PROCESS_CONTAINMENT":
-            return await self._execute_playbook_process_containment(evaluation, operator=operator)
+            return await self._execute_playbook_process_containment(
+                evaluation, operator=operator, execution_mode=exec_mode
+            )
         elif playbook == "PLAYBOOK_03_SURGICAL_ISOLATION":
-            return await self._execute_playbook_surgical_isolation(evaluation, operator=operator)
+            return await self._execute_playbook_surgical_isolation(
+                evaluation, operator=operator, execution_mode=exec_mode
+            )
         elif playbook == "PLAYBOOK_04_MAINTENANCE":
-            return await self._execute_playbook_maintenance(evaluation, operator=operator)
+            return await self._execute_playbook_maintenance(
+                evaluation, operator=operator, execution_mode=exec_mode
+            )
         elif playbook == "PLAYBOOK_05_ACCOUNT_RESPONSE":
-            return await self._execute_playbook_account_response(evaluation, operator=operator)
+            return await self._execute_playbook_account_response(
+                evaluation, operator=operator, execution_mode=exec_mode
+            )
         else:
-            return await self._execute_playbook_alert_only(evaluation, operator=operator)
+            return await self._execute_playbook_alert_only(
+                evaluation, operator=operator, execution_mode=exec_mode
+            )
 
     async def _execute_playbook_alert_only(
         self,
         eval_res: PolicyEvaluationResult,
         operator: str,
         suppression_reason: str | None = None,
+        execution_mode: str = "RECORDED_CONTROL_PLANE",
     ) -> PlaybookExecutionResult:
         """Playbook 1: Alert Only (v1.0.0). Creates Incident & Alert without host modification."""
         inc_num = f"INC-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
@@ -185,8 +256,10 @@ class SOARService:
             result="success",
             metadata_={
                 "incident_id": str(inc.id),
+                "alert_id": str(alert.id),
                 "category": eval_res.correlated_incident.incident_category,
                 "suppression_reason": suppression_reason,
+                "execution_mode": execution_mode,
             },
         )
         await self._session.commit()
@@ -197,10 +270,16 @@ class SOARService:
             playbook_version="1.0.0",
             workstation_id=eval_res.workstation_id,
             status="SUCCESS" if not suppression_reason else "SUPPRESSED",
+            execution_mode=execution_mode,
             action_taken="Dispatched SOC alert notification without host disruption.",
             incident_id=inc.id,
             alert_id=alert.id,
             audit_id=audit_entry.id,
+            audit_integrity_hash=audit_entry.integrity_hash,
+            details={
+                "requires_human_approval": is_human_intervention,
+                "preserved_jobs": list(eval_res.preserve_workloads),
+            },
             can_rollback=False,
         )
 
@@ -208,11 +287,15 @@ class SOARService:
         self,
         eval_res: PolicyEvaluationResult,
         operator: str,
+        execution_mode: str = "RECORDED_CONTROL_PLANE",
     ) -> PlaybookExecutionResult:
         """
         Playbook 2: Targeted Process Containment (v1.0.0).
         Terminates specific rogue miner/malware processes without terminating protected research jobs.
         """
+        valid_pids, rejected_pids = self.validate_pids(eval_res.target_pids)
+        valid_ports, rejected_ports = self.validate_ports(eval_res.target_ports)
+
         inc_num = f"INC-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
         inc = Incident(
             incident_number=inc_num,
@@ -223,8 +306,8 @@ class SOARService:
             title=f"Surgical Containment: {eval_res.correlated_incident.incident_category}",
             description=eval_res.reason,
             response_action=(
-                f"Surgically blocked ports {eval_res.target_ports} and terminated rogue process while "
-                f"protecting active research workloads: {eval_res.preserve_workloads}"
+                f"[{execution_mode}] Surgically blocked ports {valid_ports} and targeted rogue PIDs {valid_pids} "
+                f"while protecting active research workloads: {eval_res.preserve_workloads}"
             ),
         )
         self._session.add(inc)
@@ -252,10 +335,14 @@ class SOARService:
             result="success",
             metadata_={
                 "incident_id": str(inc.id),
-                "target_ports": eval_res.target_ports,
-                "target_pids": eval_res.target_pids,
+                "alert_id": str(alert.id),
+                "target_ports": valid_ports,
+                "rejected_ports": rejected_ports,
+                "target_pids": valid_pids,
+                "rejected_pids": rejected_pids,
                 "preserved_workloads": eval_res.preserve_workloads,
                 "role": eval_res.user_context.role,
+                "execution_mode": execution_mode,
             },
         )
         await self._session.commit()
@@ -266,15 +353,22 @@ class SOARService:
             playbook_version="1.0.0",
             workstation_id=eval_res.workstation_id,
             status="SUCCESS",
+            execution_mode=execution_mode,
             action_taken=(
-                f"Surgically contained unauthorized process/ports {eval_res.target_ports} "
+                f"Surgically contained unauthorized process/ports {valid_ports} "
                 f"while keeping research jobs {eval_res.preserve_workloads} uninterrupted."
             ),
             incident_id=inc.id,
+            alert_id=alert.id,
             audit_id=audit_entry.id,
+            audit_integrity_hash=audit_entry.integrity_hash,
             details={
                 "preserved_jobs": eval_res.preserve_workloads,
-                "blocked_ports": eval_res.target_ports,
+                "blocked_ports": valid_ports,
+                "rejected_ports": rejected_ports,
+                "terminated_pids": valid_pids,
+                "rejected_pids": rejected_pids,
+                "execution_mode": execution_mode,
             },
             can_rollback=True,
         )
@@ -283,12 +377,16 @@ class SOARService:
         self,
         eval_res: PolicyEvaluationResult,
         operator: str,
+        execution_mode: str = "RECORDED_CONTROL_PLANE",
     ) -> PlaybookExecutionResult:
         """
         Playbook 3: Surgical Network Isolation (v1.0.0).
         Isolates the endpoint network to prevent lateral movement or C2 exfiltration
         without rebooting or terminating the host OS (Rule 19).
         """
+        valid_pids, rejected_pids = self.validate_pids(eval_res.target_pids)
+        valid_ports, rejected_ports = self.validate_ports(eval_res.target_ports)
+
         # Update workstation status to ISOLATED
         ws_res = await self._session.execute(select(Workstation).where(Workstation.id == eval_res.workstation_id))
         ws = ws_res.scalar_one_or_none()
@@ -336,6 +434,11 @@ class SOARService:
                 "evidence": eval_res.correlated_incident.evidence,
                 "role": eval_res.user_context.role,
                 "isolation_mode": "SURGICAL_NETWORK_DROP",
+                "blocked_ports": valid_ports,
+                "rejected_ports": rejected_ports,
+                "target_pids": valid_pids,
+                "rejected_pids": rejected_pids,
+                "execution_mode": execution_mode,
             },
         )
         await self._session.commit()
@@ -346,10 +449,20 @@ class SOARService:
             playbook_version="1.0.0",
             workstation_id=eval_res.workstation_id,
             status="SUCCESS",
+            execution_mode=execution_mode,
             action_taken="Applied surgical network isolation rules to host. Management agent telemetry remains active.",
             incident_id=inc.id,
             alert_id=alert.id,
             audit_id=audit_entry.id,
+            audit_integrity_hash=audit_entry.integrity_hash,
+            details={
+                "blocked_ports": valid_ports,
+                "rejected_ports": rejected_ports,
+                "terminated_pids": valid_pids,
+                "rejected_pids": rejected_pids,
+                "preserved_management_ports": sorted(PROTECTED_MANAGEMENT_PORTS),
+                "execution_mode": execution_mode,
+            },
             can_rollback=True,
         )
 
@@ -357,35 +470,61 @@ class SOARService:
         self,
         eval_res: PolicyEvaluationResult,
         operator: str,
+        execution_mode: str = "RECORDED_CONTROL_PLANE",
     ) -> PlaybookExecutionResult:
         """
-        Playbook 4: Predictive Maintenance Advisory (v1.0.0).
-        Dispatches hardware/performance maintenance ticket without security containment (Rule 29 Scenario 1 & 3).
+        Playbook 4: Predictive Maintenance & Authorized Compute Advisory (v1.0.0).
+        Dispatches hardware/performance maintenance ticket for technical faults (Scenario 1)
+        or records authorized research compute preservation without false fault alerts (Scenario 3).
         """
+        is_research_allow = eval_res.decision == PolicyDecisionType.ALLOW_LEGITIMATE_RESEARCH
         inc_num = f"INC-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+
+        inc_title = (
+            f"Authorized Research Compute: {eval_res.correlated_incident.incident_category}"
+            if is_research_allow
+            else f"Maintenance Advisory: {eval_res.correlated_incident.incident_category}"
+        )
+        inc_action = (
+            f"Verified authorized research jobs {eval_res.preserve_workloads}; compute state preserved without containment."
+            if is_research_allow
+            else "Dispatched hardware inspection / predictive maintenance ticket."
+        )
+
         inc = Incident(
             incident_number=inc_num,
             severity=eval_res.correlated_incident.severity,
             category="MAINTENANCE",
             workstation_id=eval_res.workstation_id,
-            status="OPEN",
-            title=f"Maintenance Advisory: {eval_res.correlated_incident.incident_category}",
+            status="RESOLVED" if is_research_allow else "OPEN",
+            title=inc_title,
             description=eval_res.reason,
-            response_action="Dispatched hardware inspection / predictive maintenance ticket.",
+            response_action=inc_action,
         )
         self._session.add(inc)
         await self._session.flush()
+
+        alert_title = (
+            f"Authorized Research Workload Preserved: {eval_res.correlated_incident.incident_category}"
+            if is_research_allow
+            else f"Predictive Maintenance: {eval_res.correlated_incident.incident_category}"
+        )
+        alert_rec = (
+            f"Authorized research compute verified ({eval_res.preserve_workloads}). State preserved without containment or service interruption."
+            if is_research_allow
+            else "Hardware degradation or technical fault diagnosed. Technician inspection and maintenance servicing recommended."
+        )
 
         alert = Alert(
             source_type="PREDICTIVE_MAINTENANCE",
             source_id=inc.id,
             workstation_id=eval_res.workstation_id,
             severity=eval_res.correlated_incident.severity,
-            status="OPEN",
-            title=f"Predictive Maintenance: {eval_res.correlated_incident.incident_category}",
+            status="RESOLVED" if is_research_allow else "OPEN",
+            title=alert_title,
             description=eval_res.reason,
             requires_human_intervention=False,
-            recommendation="Hardware degradation or technical fault diagnosed. Technician inspection and maintenance servicing recommended.",
+            recommendation=alert_rec,
             playbook_initiated="PLAYBOOK_04_MAINTENANCE",
         )
         self._session.add(alert)
@@ -393,27 +532,44 @@ class SOARService:
 
         audit_entry = await self._audit.log(
             actor=operator,
-            action="soar.playbook.maintenance_advisory",
+            action="soar.playbook.research_workload_preserved" if is_research_allow else "soar.playbook.maintenance_advisory",
             resource=f"workstation:{eval_res.workstation_id}",
             result="success",
             metadata_={
                 "incident_id": str(inc.id),
+                "alert_id": str(alert.id),
                 "category": eval_res.correlated_incident.incident_category,
+                "decision": eval_res.decision.value,
+                "preserved_workloads": eval_res.preserve_workloads,
                 "reason": eval_res.reason,
+                "execution_mode": execution_mode,
             },
         )
         await self._session.commit()
         await _broadcast_soar_alert(alert)
+
+        action_msg = (
+            f"Verified authorized research workload {eval_res.preserve_workloads}. Active compute state preserved without containment."
+            if is_research_allow
+            else "Logged maintenance ticket. Active compute workloads preserved without containment."
+        )
 
         return PlaybookExecutionResult(
             playbook_name="PLAYBOOK_04_MAINTENANCE",
             playbook_version="1.0.0",
             workstation_id=eval_res.workstation_id,
             status="SUCCESS",
-            action_taken="Logged maintenance ticket. Active compute workloads preserved without containment.",
+            execution_mode=execution_mode,
+            action_taken=action_msg,
             incident_id=inc.id,
             alert_id=alert.id,
             audit_id=audit_entry.id,
+            audit_integrity_hash=audit_entry.integrity_hash,
+            details={
+                "preserved_jobs": list(eval_res.preserve_workloads),
+                "is_authorized_research": is_research_allow,
+                "execution_mode": execution_mode,
+            },
             can_rollback=False,
         )
 
@@ -421,6 +577,7 @@ class SOARService:
         self,
         eval_res: PolicyEvaluationResult,
         operator: str,
+        execution_mode: str = "RECORDED_CONTROL_PLANE",
     ) -> PlaybookExecutionResult:
         """
         Playbook 5: Account Lockout & Credential Revocation (v1.0.0).
@@ -472,8 +629,10 @@ class SOARService:
             result="success",
             metadata_={
                 "incident_id": str(inc.id),
+                "alert_id": str(alert.id),
                 "username": eval_res.user_context.username,
                 "role": eval_res.user_context.role,
+                "execution_mode": execution_mode,
             },
         )
         await self._session.commit()
@@ -484,9 +643,16 @@ class SOARService:
             playbook_version="1.0.0",
             workstation_id=eval_res.workstation_id,
             status="SUCCESS",
+            execution_mode=execution_mode,
             action_taken=f"Locked account for user {eval_res.user_context.username}.",
             incident_id=inc.id,
+            alert_id=alert.id,
             audit_id=audit_entry.id,
+            audit_integrity_hash=audit_entry.integrity_hash,
+            details={
+                "locked_username": eval_res.user_context.username,
+                "execution_mode": execution_mode,
+            },
             can_rollback=True,
         )
 
@@ -514,3 +680,4 @@ class SOARService:
         await self._session.commit()
         logger.info("surgical_isolation_rolled_back", workstation_id=str(workstation_id))
         return True
+

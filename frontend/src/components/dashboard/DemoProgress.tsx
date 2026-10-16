@@ -239,9 +239,14 @@ export function DemoProgress({ receipt, activeStep, onStepSelect, onReset }: Dem
                 {/* Process List Snapshot */}
                 {receipt.step_2_workstation.processes && receipt.step_2_workstation.processes.length > 0 && (
                   <div className="mt-3 pt-2.5 border-t border-slate-800/80">
-                    <div className="flex items-center gap-1.5 mb-1.5 text-slate-300 font-semibold text-[11px]">
-                      <Terminal className="w-3.5 h-3.5 text-cyan-400" />
-                      <span>Simulated Active Process Tree Snapshot</span>
+                    <div className="flex items-center justify-between gap-1.5 mb-1.5 text-slate-300 font-semibold text-[11px]">
+                      <div className="flex items-center gap-1.5">
+                        <Terminal className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>Scenario Reference Process Snapshot</span>
+                      </div>
+                      <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
+                        Preset Seed Profile
+                      </span>
                     </div>
                     <div className="space-y-1 bg-slate-950/60 rounded-md p-2 border border-slate-800 font-mono text-[10px]">
                       {receipt.step_2_workstation.processes.map((proc) => (
@@ -271,9 +276,14 @@ export function DemoProgress({ receipt, activeStep, onStepSelect, onReset }: Dem
                 {/* Network Sockets Snapshot */}
                 {receipt.step_3_telemetry.sockets && receipt.step_3_telemetry.sockets.length > 0 && (
                   <div className="mt-3 pt-2.5 border-t border-slate-800/80">
-                    <div className="flex items-center gap-1.5 mb-1.5 text-slate-300 font-semibold text-[11px]">
-                      <Network className="w-3.5 h-3.5 text-indigo-400" />
-                      <span>Active Network Sockets & Inspection</span>
+                    <div className="flex items-center justify-between gap-1.5 mb-1.5 text-slate-300 font-semibold text-[11px]">
+                      <div className="flex items-center gap-1.5">
+                        <Network className="w-3.5 h-3.5 text-indigo-400" />
+                        <span>Scenario Reference Network Sockets</span>
+                      </div>
+                      <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
+                        Preset Seed Profile
+                      </span>
                     </div>
                     <div className="space-y-1 bg-slate-950/60 rounded-md p-2 border border-slate-800 font-mono text-[10px]">
                       {receipt.step_3_telemetry.sockets.map((sock, idx) => (
@@ -342,7 +352,7 @@ export function DemoProgress({ receipt, activeStep, onStepSelect, onReset }: Dem
                       </span>
                     )}
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
                     <span className="text-slate-400">
                       Runtime Confidence:{" "}
                       <strong className="text-indigo-400 font-mono">
@@ -355,6 +365,14 @@ export function DemoProgress({ receipt, activeStep, onStepSelect, onReset }: Dem
                         {receipt.step_5_ml_result.score.toFixed(3)}
                       </strong>
                     </span>
+                    {typeof receipt.step_5_ml_result.ml_latency_ms === "number" && (
+                      <span className="text-slate-400">
+                        Measured Inference:{" "}
+                        <strong className="text-emerald-400 font-mono">
+                          {receipt.step_5_ml_result.ml_latency_ms.toFixed(2)} ms
+                        </strong>
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -456,7 +474,12 @@ export function DemoProgress({ receipt, activeStep, onStepSelect, onReset }: Dem
             {receipt ? (
               <div>
                 <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {receipt.step_7_policy_decision.incident_category && (
+                      <span className="px-2 py-0.5 rounded bg-slate-800 text-cyan-300 border border-slate-700 font-semibold font-mono text-[11px]">
+                        Category: {receipt.step_7_policy_decision.incident_category}
+                      </span>
+                    )}
                     <span className="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-semibold font-mono text-[11px]">
                       {receipt.step_7_policy_decision.playbook_to_execute}
                     </span>
@@ -500,7 +523,7 @@ export function DemoProgress({ receipt, activeStep, onStepSelect, onReset }: Dem
             {receipt ? (
               <div>
                 <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span
                       className={`px-2.5 py-1 rounded font-bold text-xs ${
                         receipt.step_8_soar_execution.workstation_final_status === "ISOLATED"
@@ -512,6 +535,9 @@ export function DemoProgress({ receipt, activeStep, onStepSelect, onReset }: Dem
                     >
                       Status: {receipt.step_8_soar_execution.workstation_final_status}
                     </span>
+                    <span className="px-2 py-0.5 rounded bg-slate-800 text-cyan-300 border border-slate-700 font-mono text-[10px]">
+                      Mode: {receipt.step_8_soar_execution.execution_mode || "RECORDED_CONTROL_PLANE"}
+                    </span>
                     <span className="text-slate-300 font-semibold">
                       {receipt.step_8_soar_execution.workstation_final_status === "ISOLATED"
                         ? "Host OS Active • Sockets Contained • No Host Reboot Required"
@@ -522,9 +548,16 @@ export function DemoProgress({ receipt, activeStep, onStepSelect, onReset }: Dem
                             : "Host OS Active • Workload Preserved • Zero Research Interruption"}
                     </span>
                   </div>
-                  <span className="text-xs text-emerald-400 font-medium">
-                    {receipt.step_8_soar_execution.can_rollback ? "✓ Instant Rollback Available" : ""}
-                  </span>
+                  <div className="flex items-center gap-3">
+                    {typeof receipt.step_8_soar_execution.soar_execution_ms === "number" && (
+                      <span className="text-[11px] font-mono text-slate-400">
+                        SOAR Time: <strong className="text-emerald-400">{receipt.step_8_soar_execution.soar_execution_ms.toFixed(2)} ms</strong>
+                      </span>
+                    )}
+                    <span className="text-xs text-emerald-400 font-medium">
+                      {receipt.step_8_soar_execution.can_rollback ? "✓ Instant Rollback Available" : ""}
+                    </span>
+                  </div>
                 </div>
                 <p className="text-[11px] text-slate-300 mt-1">
                   {receipt.step_8_soar_execution.action_taken}
@@ -583,15 +616,20 @@ export function DemoProgress({ receipt, activeStep, onStepSelect, onReset }: Dem
                   </span>
                 </div>
                 <div className="p-3 rounded-lg bg-slate-900 border border-slate-800">
-                  <span className="text-slate-400 block mb-1">Immutable Audit Hash</span>
-                  <span className="font-mono text-emerald-400 text-[11px] truncate block">
-                    {receipt.step_9_incident_audit.audit_id
-                      ? `SHA-256: ${receipt.step_9_incident_audit.audit_id.slice(0, 16)}...`
-                      : "None (Nominal Baseline)"}
+                  <span className="text-slate-400 block mb-1">Immutable Audit SHA-256 Digest</span>
+                  <span
+                    className="font-mono text-emerald-400 text-[11px] truncate block"
+                    title={receipt.step_9_incident_audit.integrity_hash || undefined}
+                  >
+                    {receipt.step_9_incident_audit.integrity_hash
+                      ? `SHA-256: ${receipt.step_9_incident_audit.integrity_hash.slice(0, 20)}...`
+                      : receipt.step_9_incident_audit.audit_id
+                        ? `Audit ID: ${receipt.step_9_incident_audit.audit_id}`
+                        : "None (Nominal Baseline)"}
                   </span>
                   <span className="text-[10px] text-slate-400 block mt-1">
-                    {receipt.step_9_incident_audit.audit_id
-                      ? "Cryptographically sealed audit log"
+                    {receipt.step_9_incident_audit.integrity_hash
+                      ? `Audit UUID: ${receipt.step_9_incident_audit.audit_id?.slice(0, 8)}... • Cryptographically sealed`
                       : "No security action taken — baseline telemetry normal"}
                   </span>
                 </div>
@@ -631,30 +669,40 @@ export function DemoProgress({ receipt, activeStep, onStepSelect, onReset }: Dem
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
               <div className="p-2 rounded bg-slate-950 border border-slate-800/80">
-                <span className="text-slate-400 block">Agent RSS Overhead</span>
+                <span className="text-slate-400 block">Agent RSS Overhead (Target)</span>
                 <span className="font-mono font-semibold text-emerald-400">
                   {receipt?.step_10_validation_summary?.acceptance_thresholds?.agent_max_rss || "< 50 MB"}
                 </span>
-                <span className="text-[10px] text-slate-400 block">Lightweight profile</span>
+                <span className="text-[10px] text-slate-400 block">Design threshold</span>
               </div>
               <div className="p-2 rounded bg-slate-950 border border-slate-800/80">
-                <span className="text-slate-400 block">Agent CPU Overhead</span>
+                <span className="text-slate-400 block">Agent CPU Overhead (Target)</span>
                 <span className="font-mono font-semibold text-emerald-400">
                   {receipt?.step_10_validation_summary?.acceptance_thresholds?.agent_max_cpu || "< 2.0%"}
                 </span>
-                <span className="text-[10px] text-slate-400 block">Non-intrusive collection</span>
+                <span className="text-[10px] text-slate-400 block">Design threshold</span>
               </div>
               <div className="p-2 rounded bg-slate-950 border border-slate-800/80">
-                <span className="text-slate-400 block">Screening Latency</span>
-                <span className="font-mono font-semibold text-emerald-400">&lt; 10 ms Target</span>
-                <span className="text-[10px] text-slate-400 block">Real-time inference</span>
-              </div>
-              <div className="p-2 rounded bg-slate-950 border border-slate-800/80">
-                <span className="text-slate-400 block">SOAR MTTR</span>
-                <span className="font-mono font-semibold text-emerald-400">
-                  {receipt?.step_10_validation_summary?.acceptance_thresholds?.soar_mttr || "< 2.0 s"}
+                <span className="text-slate-400 block">Measured ML Inference</span>
+                <span className="font-mono font-semibold text-cyan-400">
+                  {typeof receipt?.step_10_validation_summary?.measured_timings?.ml_inference_ms === "number"
+                    ? `${receipt.step_10_validation_summary.measured_timings.ml_inference_ms.toFixed(2)} ms`
+                    : typeof receipt?.step_5_ml_result?.ml_latency_ms === "number"
+                      ? `${receipt.step_5_ml_result.ml_latency_ms.toFixed(2)} ms`
+                      : "Awaiting run"}
                 </span>
-                <span className="text-[10px] text-slate-400 block">Sub-second containment</span>
+                <span className="text-[10px] text-slate-400 block">Live runtime measurement</span>
+              </div>
+              <div className="p-2 rounded bg-slate-950 border border-slate-800/80">
+                <span className="text-slate-400 block">Measured Pipeline / SOAR</span>
+                <span className="font-mono font-semibold text-cyan-400">
+                  {typeof receipt?.step_10_validation_summary?.measured_timings?.total_pipeline_ms === "number"
+                    ? `${receipt.step_10_validation_summary.measured_timings.total_pipeline_ms.toFixed(1)} ms`
+                    : "Awaiting run"}
+                </span>
+                <span className="text-[10px] text-slate-400 block">
+                  Target: {receipt?.step_10_validation_summary?.acceptance_thresholds?.soar_mttr || "< 2.0 s"}
+                </span>
               </div>
             </div>
           </div>

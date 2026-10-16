@@ -7,6 +7,7 @@ Per Rule 38 (No Fabricated Completion) and Rule 39 (Research Integrity).
 Zero shortcuts: all ML confidence, scores, IdP profiles, and SOAR actions are real.
 """
 
+import time
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
@@ -122,6 +123,7 @@ async def trigger_demo_scenario(
     7. Records Incidents, Alerts, and SHA-256 Audit Trail (Step 9)
     8. Returns execution receipt with dynamic values and experimental metrics (Step 10)
     """
+    pipeline_t0 = time.perf_counter()
     now = datetime.now(timezone.utc)
     scenario = payload.scenario_type
 
@@ -156,142 +158,148 @@ async def trigger_demo_scenario(
             os_name=profile.target_os,
         )
 
-    # Register mock IdP user and workloads
+    # Reset workstation status, temporal ML state, and stale workloads before executing scenario
+    ws.status = "ONLINE"
+    ml_pipeline_service.reset_state(str(ws.id))
+    idp_service.clear_workloads(ws.id)
     idp_service.register_mock_user(profile.user_context)
     for workload in profile.workloads:
-        workload.workstation_id = ws.id
-        idp_service.register_workload(workload)
-    if profile.is_idp_outage:
-        idp_service.set_outage_mode(True)
-    target_user_id = profile.user_context.user_id
+        workload_copy = workload.model_copy(update={"workstation_id": ws.id})
+        idp_service.register_workload(workload_copy)
 
-    cpu_metrics = profile.cpu
-    mem_metrics = profile.memory
-    disk_metrics = profile.disk
-    net_metrics = profile.network
-    process_count = profile.process_count
+    try:
+        if profile.is_idp_outage:
+            idp_service.set_outage_mode(True)
+        target_user_id = profile.user_context.user_id
 
-    # -------------------------------------------------------------
-    # 2. CONSTRUCT RAW TELEMETRY & FEED TO REAL ML RUNTIME (Step 3, 4, 5)
-    # -------------------------------------------------------------
-    raw_telemetry = TelemetryCreate(
-        agent_id=uuid.uuid4(),
-        workstation_id=ws.id,
-        timestamp=now,
-        cpu=cpu_metrics,
-        memory=mem_metrics,
-        disk=disk_metrics,
-        network=net_metrics,
-        process_count=process_count,
-    )
+        cpu_metrics = profile.cpu
+        mem_metrics = profile.memory
+        disk_metrics = profile.disk
+        net_metrics = profile.network
+        process_count = profile.process_count
 
-    # Execute scikit-learn model inference:
-    ml_eval = ml_pipeline_service.evaluate_telemetry_snapshot(
-        raw_telemetry,
-        workstation_name=ws.hostname,
-    )
-
-    # Persist Telemetry Metric
-    telemetry_record = TelemetryMetric(
-        workstation_id=ws.id,
-        timestamp=now,
-        schema_version="1.0.0",
-        cpu_usage=cpu_metrics.usage_percent,
-        memory_usage=mem_metrics.usage_percent,
-        disk_read=disk_metrics.read_bytes_per_sec,
-        disk_write=disk_metrics.write_bytes_per_sec,
-        network_in=net_metrics.bytes_in_per_sec,
-        network_out=net_metrics.bytes_out_per_sec,
-        process_count=process_count,
-    )
-    session.add(telemetry_record)
-
-    # Persist Anomaly Detection only if genuine anomaly detected
-    anomaly_record: AnomalyDetection | None = None
-    if ml_eval.is_anomaly:
-        anomaly_record = AnomalyDetection(
+        # -------------------------------------------------------------
+        # 2. CONSTRUCT RAW TELEMETRY & FEED TO REAL ML RUNTIME (Step 3, 4, 5)
+        # -------------------------------------------------------------
+        raw_telemetry = TelemetryCreate(
+            agent_id=uuid.uuid4(),
             workstation_id=ws.id,
             timestamp=now,
-            anomaly_type=ml_eval.anomaly_type.value,
-            score=ml_eval.score,
-            confidence=ml_eval.confidence,
-            model_name=ml_eval.model_name,
-            model_version=ml_eval.model_version,
-            features_snapshot=ml_eval.features_snapshot,
-            evidence=ml_eval.evidence,
-            status="DETECTED",
+            cpu=cpu_metrics,
+            memory=mem_metrics,
+            disk=disk_metrics,
+            network=net_metrics,
+            process_count=process_count,
         )
-        session.add(anomaly_record)
 
-    # -------------------------------------------------------------
-    # 3. PERSIST SECURITY EVENT IF APPLICABLE
-    # -------------------------------------------------------------
-    sec_event: SecurityEvent | None = None
-    if profile.security_event_spec:
-        sec_event = SecurityEvent(
+        # Execute scikit-learn model inference and measure runtime latency:
+        ml_t0 = time.perf_counter()
+        ml_eval = ml_pipeline_service.evaluate_telemetry_snapshot(
+            raw_telemetry,
+            workstation_name=ws.hostname,
+        )
+        ml_latency_ms = round((time.perf_counter() - ml_t0) * 1000.0, 2)
+
+        # Persist Telemetry Metric
+        telemetry_record = TelemetryMetric(
             workstation_id=ws.id,
             timestamp=now,
-            event_type=profile.security_event_spec["event_type"],
-            severity=profile.security_event_spec["severity"],
-            confidence=profile.security_event_spec["confidence"],
-            source=profile.security_event_spec["source"],
-            description=profile.security_event_spec["description"],
-            evidence=profile.security_event_spec["evidence"],
+            schema_version="1.0.0",
+            cpu_usage=cpu_metrics.usage_percent,
+            memory_usage=mem_metrics.usage_percent,
+            disk_read=disk_metrics.read_bytes_per_sec,
+            disk_write=disk_metrics.write_bytes_per_sec,
+            network_in=net_metrics.bytes_in_per_sec,
+            network_out=net_metrics.bytes_out_per_sec,
+            process_count=process_count,
         )
-        session.add(sec_event)
+        session.add(telemetry_record)
 
-    await session.commit()
+        # Persist Anomaly Detection only if genuine anomaly detected
+        anomaly_record: AnomalyDetection | None = None
+        if ml_eval.is_anomaly:
+            anomaly_record = AnomalyDetection(
+                workstation_id=ws.id,
+                timestamp=now,
+                anomaly_type=ml_eval.anomaly_type.value,
+                score=ml_eval.score,
+                confidence=ml_eval.confidence,
+                model_name=ml_eval.model_name,
+                model_version=ml_eval.model_version,
+                features_snapshot=ml_eval.features_snapshot,
+                evidence=ml_eval.evidence,
+                status="DETECTED",
+            )
+            session.add(anomaly_record)
 
-    # -------------------------------------------------------------
-    # 4. RESOLVE IDENTITY CONTEXT & ACTIVE WORKLOADS (Step 6)
-    # -------------------------------------------------------------
-    user_context = await idp_service.get_user_context(target_user_id, session=session)
-    ws_context = await idp_service.get_workstation_context(ws.id, session=session)
+        # -------------------------------------------------------------
+        # 3. PERSIST SECURITY EVENT IF APPLICABLE
+        # -------------------------------------------------------------
+        sec_event: SecurityEvent | None = None
+        if profile.security_event_spec:
+            sec_event = SecurityEvent(
+                workstation_id=ws.id,
+                timestamp=now,
+                event_type=profile.security_event_spec["event_type"],
+                severity=profile.security_event_spec["severity"],
+                confidence=profile.security_event_spec["confidence"],
+                source=profile.security_event_spec["source"],
+                description=profile.security_event_spec["description"],
+                evidence=profile.security_event_spec["evidence"],
+            )
+            session.add(sec_event)
 
-    # -------------------------------------------------------------
-    # 5. CORRELATE & EVALUATE POLICY (Step 7)
-    # -------------------------------------------------------------
-    # Evaluate policy strictly on the events generated in this demonstration scenario run,
-    # preventing cross-scenario contamination from prior test executions on the same host.
-    if scenario == DemoScenarioType.NORMAL_BASELINE:
-        recent_anomalies = []
-        recent_sec = []
-    else:
-        recent_anomalies = [anomaly_record] if anomaly_record is not None else []
-        recent_sec = [sec_event] if sec_event is not None else []
+        await session.commit()
 
-    correlated_incident = _correlation_engine.correlate_workstation(
-        workstation_id=ws.id,
-        anomalies=recent_anomalies,
-        security_events=recent_sec,
-    )
+        # -------------------------------------------------------------
+        # 4. RESOLVE IDENTITY CONTEXT & ACTIVE WORKLOADS (Step 6)
+        # -------------------------------------------------------------
+        user_context = await idp_service.get_user_context(target_user_id, session=session)
+        ws_context = await idp_service.get_workstation_context(ws.id, session=session)
 
-    policy_result = policy_engine.evaluate_policy(
-        incident=correlated_incident,
-        user_context=user_context,
-        ws_context=ws_context,
-    )
+        # -------------------------------------------------------------
+        # 5. CORRELATE & EVALUATE POLICY (Step 7)
+        # -------------------------------------------------------------
+        if scenario == DemoScenarioType.NORMAL_BASELINE:
+            recent_anomalies = []
+            recent_sec = []
+        else:
+            recent_anomalies = [anomaly_record] if anomaly_record is not None else []
+            recent_sec = [sec_event] if sec_event is not None else []
 
-    # -------------------------------------------------------------
-    # 6. DISPATCH & EXECUTE SOAR PLAYBOOK (Step 8 & 9)
-    # -------------------------------------------------------------
-    soar_service = SOARService(session)
-    playbook_receipt = await soar_service.execute_policy_decision(
-        evaluation=policy_result,
-        operator="system:demo-controller",
-    )
+        correlated_incident = _correlation_engine.correlate_workstation(
+            workstation_id=ws.id,
+            anomalies=recent_anomalies,
+            security_events=recent_sec,
+        )
 
-    # Restore IdP outage mode if it was toggled for this scenario
-    if scenario == DemoScenarioType.IDP_OUTAGE_FALLBACK:
+        policy_result = policy_engine.evaluate_policy(
+            incident=correlated_incident,
+            user_context=user_context,
+            ws_context=ws_context,
+        )
+
+        # -------------------------------------------------------------
+        # 6. DISPATCH & EXECUTE SOAR PLAYBOOK (Step 8 & 9)
+        # -------------------------------------------------------------
+        soar_t0 = time.perf_counter()
+        soar_service = SOARService(session)
+        playbook_receipt = await soar_service.execute_policy_decision(
+            evaluation=policy_result,
+            operator="system:demo-controller",
+        )
+        soar_execution_ms = round((time.perf_counter() - soar_t0) * 1000.0, 2)
+    finally:
+        # Unconditionally clear simulated IdP outage mode after scenario run
         idp_service.set_outage_mode(False)
 
     await session.commit()
     await session.refresh(ws)
+    total_pipeline_ms = round((time.perf_counter() - pipeline_t0) * 1000.0, 2)
 
     # -------------------------------------------------------------
     # 7. COMPILE COMPLETE 10-STEP EXECUTION RECEIPT
     # -------------------------------------------------------------
-    # Fetch live KPI snapshot
     ws_total_query = select(Workstation)
     ws_all = (await session.execute(ws_total_query)).scalars().all()
     kpi_online = sum(1 for w in ws_all if w.status == "ONLINE")
@@ -301,8 +309,13 @@ async def trigger_demo_scenario(
         "incident_id": str(playbook_receipt.incident_id) if playbook_receipt.incident_id else None,
         "alert_id": str(playbook_receipt.alert_id) if playbook_receipt.alert_id else None,
         "audit_id": str(playbook_receipt.audit_id) if playbook_receipt.audit_id else None,
+        "integrity_hash": playbook_receipt.audit_integrity_hash,
         "status": playbook_receipt.status,
     }
+
+    active_wl_ids = [
+        w.job_id for w in (ws_context.active_workloads or user_context.active_workloads) if w.is_active
+    ]
 
     return DemoExecutionReceipt(
         scenario_type=scenario.value,
@@ -345,17 +358,19 @@ async def trigger_demo_scenario(
             "model_version": ml_eval.model_version,
             "evidence": ml_eval.evidence,
             "predicted_fault": ml_eval.predicted_fault,
+            "ml_latency_ms": ml_latency_ms,
         },
         step_6_idp_context={
             "user_id": user_context.user_id,
             "username": user_context.username,
             "role": user_context.role,
             "department": user_context.department,
-            "lab": user_context.lab,
-            "active_workloads": [w.job_id for w in user_context.active_workloads],
+            "lab": user_context.lab or ws_context.lab,
+            "active_workloads": active_wl_ids,
             "is_fallback": user_context.is_fallback,
         },
         step_7_policy_decision={
+            "incident_category": correlated_incident.incident_category,
             "decision": policy_result.decision.value,
             "playbook_to_execute": policy_result.playbook_to_execute,
             "reason": policy_result.reason,
@@ -364,9 +379,12 @@ async def trigger_demo_scenario(
         },
         step_8_soar_execution={
             "status": playbook_receipt.status,
+            "execution_mode": playbook_receipt.execution_mode,
             "action_taken": playbook_receipt.action_taken,
             "workstation_final_status": ws.status,
             "can_rollback": playbook_receipt.can_rollback,
+            "soar_execution_ms": soar_execution_ms,
+            "details": playbook_receipt.details,
         },
         step_9_incident_audit=incident_info,
         step_10_validation_summary={
@@ -376,5 +394,11 @@ async def trigger_demo_scenario(
                 "agent_max_cpu": "< 2.0%",
                 "soar_mttr": "< 2.0 s",
             },
+            "measured_timings": {
+                "ml_inference_ms": ml_latency_ms,
+                "soar_execution_ms": soar_execution_ms,
+                "total_pipeline_ms": total_pipeline_ms,
+            },
         },
     )
+

@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Sequence
 from uuid import UUID
 
@@ -27,6 +28,45 @@ from backend.models.security_event import SecurityEvent
 from backend.schemas.security_event import SecurityEventSeverity, SecurityEventType
 
 logger = logging.getLogger(__name__)
+
+
+class IncidentCategory(str, Enum):
+    """Canonical incident categories emitted by the correlation engine and routed by the policy engine."""
+
+    NORMAL = "NORMAL"
+    BENIGN_HIGH_LOAD = "BENIGN_HIGH_LOAD"
+    BENIGN_HIGH_COMPUTE = "BENIGN_HIGH_COMPUTE"
+    TECHNICAL_FAULT = "TECHNICAL_FAULT"
+    HARDWARE_DEGRADATION = "HARDWARE_DEGRADATION"
+    CRYPTOJACKING = "CRYPTOJACKING"
+    APT_INTRUSION = "APT_INTRUSION"
+    DATA_EXFILTRATION = "DATA_EXFILTRATION"
+    UNAUTHORIZED_ACCESS = "UNAUTHORIZED_ACCESS"
+    BRUTE_FORCE_ATTACK = "BRUTE_FORCE_ATTACK"
+    SECURITY_ANOMALY_GENERIC = "SECURITY_ANOMALY_GENERIC"
+
+
+_CATEGORY_ALIASES: dict[str, str] = {
+    "NORMAL": IncidentCategory.NORMAL.value,
+    "NOMINAL": IncidentCategory.NORMAL.value,
+    "BENIGN_HIGH_LOAD": IncidentCategory.BENIGN_HIGH_LOAD.value,
+    "BENIGN_HIGH_COMPUTE": IncidentCategory.BENIGN_HIGH_COMPUTE.value,
+    "TECHNICAL_FAULT": IncidentCategory.TECHNICAL_FAULT.value,
+    "HARDWARE_DEGRADATION": IncidentCategory.HARDWARE_DEGRADATION.value,
+    "CRYPTOJACKING": IncidentCategory.CRYPTOJACKING.value,
+    "APT_INTRUSION": IncidentCategory.APT_INTRUSION.value,
+    "PRIVILEGE_ESCALATION": IncidentCategory.APT_INTRUSION.value,
+    "DATA_EXFILTRATION": IncidentCategory.DATA_EXFILTRATION.value,
+    "UNAUTHORIZED_ACCESS": IncidentCategory.UNAUTHORIZED_ACCESS.value,
+    "BRUTE_FORCE_ATTACK": IncidentCategory.BRUTE_FORCE_ATTACK.value,
+    "SECURITY_ANOMALY_GENERIC": IncidentCategory.SECURITY_ANOMALY_GENERIC.value,
+}
+
+
+def normalize_incident_category(category: str) -> str:
+    """Normalize an incident category string to a known canonical value or uppercase token."""
+    cleaned = (category or "").strip().upper()
+    return _CATEGORY_ALIASES.get(cleaned, cleaned or IncidentCategory.SECURITY_ANOMALY_GENERIC.value)
 
 
 @dataclass
@@ -48,6 +88,7 @@ class CorrelatedIncident:
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def __post_init__(self) -> None:
+        self.incident_category = normalize_incident_category(self.incident_category)
         if self.reason and not self.summary:
             self.summary = self.reason
         elif self.summary and not self.reason:
@@ -210,6 +251,23 @@ class SecurityCorrelationEngine:
                 confidence=0.85,
                 title=f"Unauthorized Access Detected on {ws_label}",
                 summary="Detected unauthorized security events or authentication failures on host.",
+                evidence=aggregated_evidence,
+                recommended_action="ALERT_SOC",
+                correlated_anomaly_ids=anomaly_ids,
+                correlated_event_ids=event_ids,
+            )
+
+        # 4b. Uncorroborated ML Security Anomaly (Model 02-B flagged host anomaly without matching SIEM rule)
+        if has_apt_anomaly:
+            logger.info("correlation_engine: detected SECURITY_ANOMALY_GENERIC on %s", ws_label)
+            return CorrelatedIncident(
+                workstation_id=workstation_id,
+                is_threat=True,
+                incident_category=IncidentCategory.SECURITY_ANOMALY_GENERIC.value,
+                severity=SecurityEventSeverity.HIGH,
+                confidence=0.82,
+                title=f"Host Security Anomaly Detected on {ws_label}",
+                summary="ML Cyber Specialist (Model 02-B) flagged anomalous host process/network behavior requiring SOC review.",
                 evidence=aggregated_evidence,
                 recommended_action="ALERT_SOC",
                 correlated_anomaly_ids=anomaly_ids,

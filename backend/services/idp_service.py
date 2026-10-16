@@ -74,12 +74,13 @@ class IdPService:
         self._mock_directory[context.username] = context
 
     def register_workload(self, workload: AuthorizedWorkload) -> None:
-        """Register an active authorized compute workload for a workstation."""
+        """Register an active authorized compute workload for a workstation (idempotent by job_id)."""
         if workload.workstation_id is not None:
             key = str(workload.workstation_id)
-            if key not in self._active_workloads:
-                self._active_workloads[key] = []
-            self._active_workloads[key].append(workload)
+            existing = self._active_workloads.get(key, [])
+            filtered = [w for w in existing if w.job_id != workload.job_id]
+            filtered.append(workload)
+            self._active_workloads[key] = filtered
             self._workstation_cache.pop(key, None)
             logger.info(
                 "idp_workload_registered",
@@ -87,6 +88,16 @@ class IdPService:
                 workstation_id=key,
                 workload_type=workload.workload_type.value,
             )
+
+    def clear_workloads(self, workstation_id: UUID | str | None = None) -> None:
+        """Clear registered active workloads for a specific workstation or globally."""
+        if workstation_id is not None:
+            key = str(workstation_id)
+            self._active_workloads.pop(key, None)
+            self._workstation_cache.pop(key, None)
+        else:
+            self._active_workloads.clear()
+            self._workstation_cache.clear()
 
     def clear_cache(self) -> None:
         """Flush the identity cache."""

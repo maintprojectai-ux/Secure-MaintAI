@@ -6,6 +6,8 @@ Every privileged operation creates an audit entry.
 Audit entries are never updated or deleted.
 """
 
+import hashlib
+import json
 import uuid
 from datetime import datetime
 
@@ -54,5 +56,23 @@ class AuditLog(Base, UUIDPrimaryKeyMixin):
         Index("ix_audit_log_correlation", "correlation_id"),
     )
 
+    @property
+    def integrity_hash(self) -> str:
+        """Compute deterministic SHA-256 cryptographic digest of the audit log record."""
+        canonical = json.dumps(
+            {
+                "id": str(self.id) if self.id else "",
+                "actor": self.actor,
+                "action": self.action,
+                "resource": self.resource,
+                "result": self.result,
+                "metadata": self.metadata_ or {},
+            },
+            sort_keys=True,
+            default=str,
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
     def __repr__(self) -> str:
         return f"<AuditLog(actor='{self.actor}', action='{self.action}', result='{self.result}')>"
+

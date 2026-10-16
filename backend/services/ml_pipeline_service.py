@@ -160,8 +160,21 @@ def initialise(base_dir: Path | None = None) -> None:
 
 
 def is_ready() -> bool:
-    """Check if ML models are loaded and ready for inference."""
+    """Check if primary ML screening models are loaded and ready for inference."""
     return _is_initialised
+
+
+def get_readiness_status() -> dict[str, bool]:
+    """Return granular readiness status for Stage 1 (Model 01) and Stage 2 specialists (Model 02-A, Model 02-B)."""
+    m1_ready = _model_01_default is not None
+    m2a_ready = _model_02a_pipeline is not None and _model_02a_contract is not None
+    m2b_ready = _model_02b_pipeline is not None and _model_02b_columns is not None
+    return {
+        "model_01_isolation_forest": m1_ready,
+        "model_02a_rcaeval_rf": m2a_ready,
+        "model_02b_windows_apt_rf": m2b_ready,
+        "all_ready": m1_ready and m2a_ready and m2b_ready,
+    }
 
 
 def _get_model_01_for_workstation(workstation_identifier: str | None) -> dict[str, Any] | None:
@@ -231,9 +244,10 @@ def _extract_38_channel_vector(
     v[0:4] *= cpu_factor
     v[4:7] *= cpu_factor
 
-    # Memory channels (7-12)
-    v[6] = min(1.0, v[6] * mem_factor)
-    v[5] = max(0.0, 1.0 - v[6])
+    # Memory channels (7-9)
+    v[7] = min(1.0, v[7] * mem_factor)
+    v[8] = max(0.0, 1.0 - v[7])
+    v[9] = min(1.0, v[9] * mem_factor)
 
     # Disk channels (10-16)
     v[10:16] *= disk_factor
@@ -388,7 +402,14 @@ def _diagnose_cyber_threat(item: TelemetryCreate) -> tuple[bool, float, list[str
     df = pd.DataFrame([feats])
     pred = int(_model_02b_pipeline.predict(df)[0])
     probs = _model_02b_pipeline.predict_proba(df)[0]
-    threat_prob = float(probs[1]) if len(probs) > 1 else float(pred)
+    classes = list(getattr(_model_02b_pipeline, "classes_", [0, 1]))
+    if 1 in classes:
+        pos_idx = classes.index(1)
+    elif "1" in classes:
+        pos_idx = classes.index("1")
+    else:
+        pos_idx = 1
+    threat_prob = float(probs[pos_idx]) if len(probs) > pos_idx else float(pred)
 
     top_evidence = []
     if threat_prob >= 0.7:
