@@ -504,6 +504,7 @@ export interface ValidationMetricsResponse {
 
 export type DemoScenarioType =
   | "STUDENT_CYBER_THREAT"
+  | "RESEARCHER_CYBER_THREAT"
   | "TECHNICAL_DEGRADATION"
   | "RESEARCHER_HPC_WORKLOAD"
   | "PRIVILEGE_ESCALATION"

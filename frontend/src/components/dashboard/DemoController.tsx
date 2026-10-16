@@ -28,6 +28,8 @@ interface DemoControllerProps {
   onReset: () => void;
   workstationId?: string;
   targetHostname?: string;
+  isIsolated?: boolean;
+  onRestoreNetwork?: () => void;
 }
 
 interface ScenarioOption {
@@ -35,6 +37,8 @@ interface ScenarioOption {
   title: string;
   subtitle: string;
   badge: string;
+  rolePersona: string;
+  expectedOutcome: string;
   color: string;
   borderColor: string;
   icon: React.ElementType;
@@ -42,55 +46,78 @@ interface ScenarioOption {
 
 const SCENARIOS: ScenarioOption[] = [
   {
-    type: "STUDENT_CYBER_THREAT",
-    title: "Scenario 2: Student Cyber Threat Simulation",
-    subtitle: "High anomaly score + student role → surgical containment of sockets & process kill",
-    badge: "Cyber Threat",
-    color: "bg-rose-500/10 text-rose-400 hover:bg-rose-500/20",
-    borderColor: "border-rose-500/40",
-    icon: ShieldAlert,
-  },
-  {
     type: "TECHNICAL_DEGRADATION",
-    title: "Scenario 1: Technical Degradation Simulation",
-    subtitle: "Disk I/O + thermal fault → technical anomaly → maintenance ticket dispatched",
-    badge: "Technical",
+    title: "Scenario 1: Hardware & Thermal Fault",
+    subtitle: "Simulates severe disk I/O thrashing and thermal rise. AI diagnoses a mechanical hardware fault and dispatches an automated maintenance work order.",
+    badge: "Hardware Fault",
+    rolePersona: "IT Infrastructure",
+    expectedOutcome: "Work Order Dispatched • Host Online",
     color: "bg-amber-500/10 text-amber-400 hover:bg-amber-500/20",
     borderColor: "border-amber-500/40",
     icon: Zap,
   },
   {
+    type: "STUDENT_CYBER_THREAT",
+    title: "Scenario 2: Student Cryptojacking Threat",
+    subtitle: "Simulates an unauthorized crypto-mining script running under a student account. AI flags rogue stratum traffic, severing outbound sockets and isolating the host.",
+    badge: "Cyber Threat",
+    rolePersona: "Student Account",
+    expectedOutcome: "Host Isolated • Sockets Blocked",
+    color: "bg-rose-500/10 text-rose-400 hover:bg-rose-500/20",
+    borderColor: "border-rose-500/40",
+    icon: ShieldAlert,
+  },
+  {
     type: "RESEARCHER_HPC_WORKLOAD",
-    title: "Scenario 3: Researcher HPC Workload Simulation",
-    subtitle: "High compute load + researcher role → preservation of scientific workload without isolation",
-    badge: "HPC Workload",
+    title: "Scenario 3: Researcher Heavy Computing Workload",
+    subtitle: "Simulates intensive multi-threaded numerical simulations. University IdP verifies active research credentials, ensuring legitimate scientific jobs are preserved without interruption.",
+    badge: "Legitimate Compute",
+    rolePersona: "Faculty Researcher",
+    expectedOutcome: "Workload Preserved • Zero Interruption",
     color: "bg-purple-500/10 text-purple-400 hover:bg-purple-500/20",
     borderColor: "border-purple-500/40",
     icon: Microscope,
   },
   {
+    type: "RESEARCHER_CYBER_THREAT",
+    title: "Scenario 4: Researcher Cryptojacking Threat",
+    subtitle: "Simulates an unauthorized crypto-mining script on a faculty PC during active HPC simulation. AI terminates rogue miner and severs sockets while keeping research running.",
+    badge: "Cyber Threat",
+    rolePersona: "Faculty Researcher",
+    expectedOutcome: "Miner Terminated • Workload Preserved",
+    color: "bg-pink-500/10 text-pink-400 hover:bg-pink-500/20",
+    borderColor: "border-pink-500/40",
+    icon: ShieldAlert,
+  },
+  {
     type: "PRIVILEGE_ESCALATION",
-    title: "Scenario 4: Privilege Escalation Simulation",
-    subtitle: "Simulated LSASS/security descriptor read → emergency role revocation & host isolation",
-    badge: "Privilege Escalation",
+    title: "Scenario 5: Unauthorized Privilege Escalation",
+    subtitle: "Simulates credential harvesting and unauthorized permission elevation. AI triggers emergency host isolation to immediately prevent lateral movement across the campus network.",
+    badge: "Privilege Threat",
+    rolePersona: "Compromised Account",
+    expectedOutcome: "Host Quarantined • Lateral Movement Blocked",
     color: "bg-red-500/10 text-red-300 hover:bg-red-500/20",
     borderColor: "border-red-600/50",
     icon: Lock,
   },
   {
     type: "IDP_OUTAGE_FALLBACK",
-    title: "Scenario 5: IdP Outage Fallback",
-    subtitle: "Directory server timeout → safe fail-secure fallback with operator manual authorization required",
-    badge: "Fail-Safe",
+    title: "Scenario 6: University IdP Outage Fallback",
+    subtitle: "Simulates a campus directory network timeout. System seamlessly engages secure local identity cache and flags the incident for SOC administrator review.",
+    badge: "Fail-Safe Fallback",
+    rolePersona: "Directory Service",
+    expectedOutcome: "Safe Local Cache • SOC Review Flagged",
     color: "bg-orange-500/10 text-orange-400 hover:bg-orange-500/20",
     borderColor: "border-orange-500/40",
     icon: WifiOff,
   },
   {
     type: "NORMAL_BASELINE",
-    title: "Baseline: Normal Telemetry Stream",
-    subtitle: "Nominal university lab metrics → model scores normal → health status green",
-    badge: "Nominal",
+    title: "Scenario 7: Normal Operational Baseline",
+    subtitle: "Simulates standard everyday university lab usage. AI confirms normal operational variance; workstation health remains 100% green with zero false alerts.",
+    badge: "Nominal Baseline",
+    rolePersona: "General Lab User",
+    expectedOutcome: "Healthy & Online • Zero False Alarms",
     color: "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20",
     borderColor: "border-emerald-500/40",
     icon: Activity,
@@ -105,15 +132,17 @@ export function DemoController({
   onReset,
   workstationId,
   targetHostname,
+  isIsolated,
+  onRestoreNetwork,
 }: DemoControllerProps) {
-  const [selectedScenario, setSelectedScenario] = useState<DemoScenarioType>("STUDENT_CYBER_THREAT");
+  const [selectedScenario, setSelectedScenario] = useState<DemoScenarioType>("TECHNICAL_DEGRADATION");
   const [isExecuting, setIsExecuting] = useState(false);
   const [executionMessage, setExecutionMessage] = useState<string | null>(null);
 
   const handleTriggerScenario = async (scenarioType: DemoScenarioType) => {
     setSelectedScenario(scenarioType);
     setIsExecuting(true);
-    setExecutionMessage(`Dispatching authentic pipeline for ${scenarioType.replace(/_/g, " ")}...`);
+    setExecutionMessage(`Injecting telemetry & running autonomous defense pipeline for ${scenarioType.replace(/_/g, " ")}...`);
 
     try {
       const liveReceipt = await triggerDemoScenario(scenarioType, workstationId);
@@ -130,7 +159,7 @@ export function DemoController({
         : "N/A";
 
       setExecutionMessage(
-        `Pipeline Executed: ${liveReceipt.scenario_title} • Model: ${liveReceipt.step_5_ml_result?.model_name || "Ensemble"} • Confidence: ${confText} • IdP Role: ${liveReceipt.step_6_idp_context?.role || "N/A"} • SOAR Action: ${liveReceipt.step_8_soar_execution?.action_taken || "Evaluated"}`
+        `Pipeline Completed: ${liveReceipt.scenario_title} • AI Diagnosis: ${liveReceipt.step_5_ml_result?.anomaly_type || "Evaluated"} (${confText} conf) • IdP Role: ${liveReceipt.step_6_idp_context?.role || "N/A"} • SOAR Action: ${liveReceipt.step_8_soar_execution?.action_taken || "Completed"}`
       );
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : "Unknown error";
@@ -140,37 +169,68 @@ export function DemoController({
     }
   };
 
-
-
   return (
     <div className="rounded-xl border border-slate-800 bg-[#091124]/95 shadow-xl p-4 sm:p-5 mb-6 text-slate-100 backdrop-blur-md">
       {/* Top Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-800/80">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse" />
             <h2 className="text-base font-bold text-white tracking-tight">
-              Live Demonstration Controller
+              Interactive Scenario Simulator
             </h2>
             {targetHostname && (
               <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-300 border border-blue-500/30">
                 Target Device: {targetHostname}
               </span>
             )}
+            {isIsolated && (
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40 flex items-center gap-1">
+                <ShieldAlert className="w-3 h-3" /> Security Quarantine Active
+              </span>
+            )}
           </div>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Trigger academic simulation scenarios through the authentic ML ➔ IdP ➔ SOAR ➔ DB pipeline.
+          <p className="text-xs text-slate-400 mt-1">
+            Safely test incident detection and autonomous SOAR playbooks on this machine.
           </p>
         </div>
 
+        {isIsolated && onRestoreNetwork && (
+          <button
+            type="button"
+            onClick={onRestoreNetwork}
+            className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-md transition-colors flex items-center gap-1.5 cursor-pointer self-start md:self-auto"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>Restore Network Connectivity</span>
+          </button>
+        )}
       </div>
 
-      {/* Scenario Selection Grid (6 Academic Simulation Scenarios) */}
+      {/* Scenario Selection Grid (6 Academic Simulation Scenarios in Order) */}
       <div className="mt-4">
-        <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-2">
-          Select Simulation Scenario (Dispatches Real Pipeline)
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+          <div>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">
+              Select a Scenario to Test Autonomous Response
+            </h3>
+            <p className="text-[11px] text-slate-400">
+              Click any scenario below to inject authentic telemetry and verify the autonomous 7-step defense pipeline on {targetHostname || "this workstation"}.
+            </p>
+          </div>
+          {receipt && onReset && (
+            <button
+              type="button"
+              onClick={onReset}
+              className="self-start sm:self-auto text-xs text-slate-400 hover:text-white px-2.5 py-1 rounded-lg hover:bg-slate-800 border border-slate-700/60 transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <RotateCcw className="w-3 h-3" />
+              <span>Reset Results</span>
+            </button>
+          )}
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           {SCENARIOS.map((sc) => {
             const Icon = sc.icon;
             const isSelected = selectedScenario === sc.type;
@@ -180,34 +240,45 @@ export function DemoController({
                 type="button"
                 onClick={() => handleTriggerScenario(sc.type)}
                 disabled={isExecuting}
-                className={`p-3 rounded-xl border text-left transition-all duration-200 cursor-pointer relative group flex flex-col justify-between ${isSelected
-                    ? `${sc.borderColor} bg-slate-800/80 shadow-lg`
+                className={`p-3.5 rounded-xl border text-left transition-all duration-200 cursor-pointer relative group flex flex-col justify-between ${isSelected
+                    ? `${sc.borderColor} bg-slate-800/90 shadow-xl ring-1 ring-cyan-500/30`
                     : "border-slate-800/80 bg-slate-900/60 hover:border-slate-700 hover:bg-slate-800/50"
                   }`}
               >
                 <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span
-                      className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${sc.borderColor} ${sc.color}`}
-                    >
-                      {sc.badge}
-                    </span>
-                    <Icon className="w-4 h-4 text-slate-400 group-hover:text-slate-200 transition-colors" />
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${sc.borderColor} ${sc.color}`}>
+                        {sc.badge}
+                      </span>
+                      <span className="text-[10px] text-slate-400 bg-slate-800/80 px-1.5 py-0.5 rounded border border-slate-700/50 font-medium">
+                        {sc.rolePersona}
+                      </span>
+                    </div>
+                    <Icon className="w-4 h-4 text-slate-400 group-hover:text-slate-200 transition-colors shrink-0" />
                   </div>
-                  <div className="text-xs font-bold text-white tracking-tight">{sc.title}</div>
-                  <div className="text-[11px] text-slate-400 mt-1 leading-snug line-clamp-2">
+
+                  <div className="text-xs font-bold text-white tracking-tight group-hover:text-cyan-300 transition-colors">
+                    {sc.title}
+                  </div>
+                  <div className="text-[11px] text-slate-300 mt-1.5 leading-relaxed">
                     {sc.subtitle}
                   </div>
                 </div>
 
-                <div className="mt-2.5 pt-2 border-t border-slate-800/60 flex items-center justify-between text-[10px]">
-                  <span className="text-slate-500 font-mono">POST /api/v1/demo/trigger-scenario</span>
+                <div className="mt-3 pt-2.5 border-t border-slate-800/80 flex items-center justify-between text-[11px]">
+                  <div className="text-[10px] text-slate-400 flex items-center gap-1">
+                    <span className="text-slate-500">Expected:</span>
+                    <span className="font-medium text-slate-300 truncate max-w-[170px]">{sc.expectedOutcome}</span>
+                  </div>
                   {isSelected && receipt ? (
-                    <span className="text-cyan-400 font-semibold flex items-center gap-1">
-                      <CheckCircle2 className="w-3 h-3" /> Active
+                    <span className="text-cyan-400 font-bold flex items-center gap-1 shrink-0 text-[10px]">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Simulated
                     </span>
                   ) : (
-                    <span className="text-slate-400 group-hover:text-slate-200 font-medium">Trigger ➔</span>
+                    <span className="text-indigo-400 group-hover:text-cyan-300 font-semibold flex items-center gap-1 shrink-0 text-[10px]">
+                      Run Scenario ➔
+                    </span>
                   )}
                 </div>
               </button>

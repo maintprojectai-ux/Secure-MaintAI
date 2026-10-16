@@ -80,6 +80,7 @@ class IdPService:
             if key not in self._active_workloads:
                 self._active_workloads[key] = []
             self._active_workloads[key].append(workload)
+            self._workstation_cache.pop(key, None)
             logger.info(
                 "idp_workload_registered",
                 job_id=workload.job_id,

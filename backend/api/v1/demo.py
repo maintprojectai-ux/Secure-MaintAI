@@ -41,6 +41,7 @@ _correlation_engine = SecurityCorrelationEngine()
 
 class DemoScenarioType(str, Enum):
     STUDENT_CYBER_THREAT = "STUDENT_CYBER_THREAT"
+    RESEARCHER_CYBER_THREAT = "RESEARCHER_CYBER_THREAT"
     TECHNICAL_DEGRADATION = "TECHNICAL_DEGRADATION"
     RESEARCHER_HPC_WORKLOAD = "RESEARCHER_HPC_WORKLOAD"
     PRIVILEGE_ESCALATION = "PRIVILEGE_ESCALATION"
@@ -206,6 +207,7 @@ async def trigger_demo_scenario(
     session.add(telemetry_record)
 
     # Persist Anomaly Detection only if genuine anomaly detected
+    anomaly_record: AnomalyDetection | None = None
     if ml_eval.is_anomaly:
         anomaly_record = AnomalyDetection(
             workstation_id=ws.id,
@@ -224,6 +226,7 @@ async def trigger_demo_scenario(
     # -------------------------------------------------------------
     # 3. PERSIST SECURITY EVENT IF APPLICABLE
     # -------------------------------------------------------------
+    sec_event: SecurityEvent | None = None
     if profile.security_event_spec:
         sec_event = SecurityEvent(
             workstation_id=ws.id,
@@ -248,27 +251,14 @@ async def trigger_demo_scenario(
     # -------------------------------------------------------------
     # 5. CORRELATE & EVALUATE POLICY (Step 7)
     # -------------------------------------------------------------
+    # Evaluate policy strictly on the events generated in this demonstration scenario run,
+    # preventing cross-scenario contamination from prior test executions on the same host.
     if scenario == DemoScenarioType.NORMAL_BASELINE:
         recent_anomalies = []
         recent_sec = []
     else:
-        anom_query = (
-            select(AnomalyDetection)
-            .where(AnomalyDetection.workstation_id == ws.id)
-            .order_by(desc(AnomalyDetection.timestamp))
-            .limit(5)
-        )
-        anom_res = await session.execute(anom_query)
-        recent_anomalies = anom_res.scalars().all()
-
-        sec_query = (
-            select(SecurityEvent)
-            .where(SecurityEvent.workstation_id == ws.id)
-            .order_by(desc(SecurityEvent.timestamp))
-            .limit(5)
-        )
-        sec_res = await session.execute(sec_query)
-        recent_sec = sec_res.scalars().all()
+        recent_anomalies = [anomaly_record] if anomaly_record is not None else []
+        recent_sec = [sec_event] if sec_event is not None else []
 
     correlated_incident = _correlation_engine.correlate_workstation(
         workstation_id=ws.id,

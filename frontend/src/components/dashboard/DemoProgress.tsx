@@ -36,13 +36,13 @@ interface StepDefinition {
 }
 
 const STEPS: StepDefinition[] = [
-  { step: 1, title: "Simulation Triggered", shortDesc: "Controlled Scenario Active", guideSection: "Step 1", icon: Flame },
-  { step: 2, title: "ML Screening & Diagnosis", shortDesc: "Isolation Forest + Specialists", guideSection: "Step 2", icon: Cpu },
-  { step: 3, title: "IdP Context Resolved", shortDesc: "Role & HPC Workload Lookup", guideSection: "Step 3", icon: KeyRound },
-  { step: 4, title: "Role-Sensitive Playbook", shortDesc: "Orchestration Decision", guideSection: "Step 4", icon: Layers },
-  { step: 5, title: "Surgical Containment", shortDesc: "Host Active • Sockets Contained", guideSection: "Step 5", icon: ShieldCheck },
-  { step: 6, title: "Incident & Audit Hash", shortDesc: "SHA-256 Immutable Record", guideSection: "Step 6", icon: ShieldAlert },
-  { step: 7, title: "Validation & Evidence", shortDesc: "Held-out Test Confusion Matrices", guideSection: "Step 7", icon: Scale },
+  { step: 1, title: "Telemetry Injected", shortDesc: "Host Snapshot Generated", guideSection: "Step 1: Input", icon: Flame },
+  { step: 2, title: "Dual-Stage AI Diagnosis", shortDesc: "Screening & Classification", guideSection: "Step 2: Detection", icon: Cpu },
+  { step: 3, title: "University IdP Context", shortDesc: "Role & Workload Check", guideSection: "Step 3: Identity", icon: KeyRound },
+  { step: 4, title: "Policy Decision Engine", shortDesc: "Role-Sensitive Rule Evaluation", guideSection: "Step 4: Decision", icon: Layers },
+  { step: 5, title: "Surgical Containment", shortDesc: "Host Active • Sockets Contained", guideSection: "Step 5: Action", icon: ShieldCheck },
+  { step: 6, title: "Incident & Audit Hash", shortDesc: "SHA-256 Immutable Record", guideSection: "Step 6: Compliance", icon: ShieldAlert },
+  { step: 7, title: "Validation & Metrics", shortDesc: "Resilience & Latency Verification", guideSection: "Step 7: Verification", icon: Scale },
 ];
 
 export function DemoProgress({ receipt, activeStep, onStepSelect, onReset }: DemoProgressProps) {
@@ -61,16 +61,16 @@ export function DemoProgress({ receipt, activeStep, onStepSelect, onReset }: Dem
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-lg font-bold tracking-tight text-white">
-                7-Step Demonstration Flow
+                7-Step Autonomous Defense Pipeline
               </h2>
               <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-medium">
-                Section 6 Primary Evidence
+                Live SOAR Trace
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
               {receipt
                 ? `Active Scenario: ${receipt.scenario_title}`
-                : "Select a simulation scenario from the Demonstration Controller to drive the live pipeline."}
+                : "Select any scenario from the simulator above to observe the authentic 7-step detection and containment pipeline."}
             </p>
           </div>
         </div>
@@ -306,7 +306,7 @@ export function DemoProgress({ receipt, activeStep, onStepSelect, onReset }: Dem
               </div>
             ) : (
               <div className="text-slate-400 italic py-2">
-                Awaiting scenario trigger. Select a simulation in the Demonstration Controller above and click &quot;Execute Live Pipeline&quot;.
+                No active scenario running on this machine. Click &quot;Run Scenario&quot; on any card above to observe the authentic 7-step defense pipeline in real time.
               </div>
             )}
           </div>
@@ -609,7 +609,7 @@ export function DemoProgress({ receipt, activeStep, onStepSelect, onReset }: Dem
             <div className="flex items-center gap-2 mb-2">
               <Sparkles className="w-4 h-4 text-amber-400" />
               <span className="font-bold text-white text-sm">
-                Research Validation & Experimental Evidence 
+                Autonomous Defense Verification & System Resilience
               </span>
             </div>
 

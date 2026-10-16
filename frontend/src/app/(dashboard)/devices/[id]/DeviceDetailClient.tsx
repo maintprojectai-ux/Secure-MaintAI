@@ -891,7 +891,7 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
               }`}
           >
             <Sparkles className="w-3.5 h-3.5 text-purple-300" />
-            <span>Security & AI Simulation</span>
+            <span>Security & Resilience Scenarios</span>
             {demoReceipt && (
               <span className="px-1.5 py-0.2 rounded-full text-[9px] font-bold bg-cyan-400 text-slate-950 uppercase tracking-wider ml-1">
                 Receipt
@@ -918,7 +918,7 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
           <Info className="w-3.5 h-3.5 text-slate-500" />
           <span>
             {activeTab === "overview" && "Simplified operational health, load levels, and university user ownership."}
-            {activeTab === "simulation" && "Interactive academic test scenarios: see AI detection & automated containment in real time."}
+            {activeTab === "simulation" && "Test how AI detection, university IdP permissions, and automated SOAR playbooks protect this device in real time."}
             {activeTab === "specs" && "Full technical hardware components, network addresses, and agent daemon details."}
           </span>
         </div>
@@ -1416,17 +1416,17 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
               <div className="glass-card p-5 rounded-2xl border-slate-800/80 bg-gradient-to-br from-[#0c1328] to-[#091124] shadow-xl space-y-3">
                 <div className="flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-purple-400" />
-                  <h3 className="text-sm font-bold text-white tracking-tight">Security & Resilience Demonstration</h3>
+                  <h3 className="text-sm font-bold text-white tracking-tight">Test Machine Resilience</h3>
                 </div>
                 <p className="text-xs text-slate-300 leading-relaxed">
-                  Want to see how Secure-MaintAI detects and defends against cryptojacking, hardware degradation, or student threats?
+                  Simulate how Secure-MaintAI detects and defends this device against hardware faults, student cyber threats, or heavy research compute.
                 </p>
                 <button
                   type="button"
                   onClick={() => setActiveTab("simulation")}
                   className="w-full py-2.5 px-4 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-md shadow-purple-600/20 transition-all cursor-pointer"
                 >
-                  <span>Launch Simulation Controller</span>
+                  <span>Open Scenario Simulator</span>
                   <ArrowRight className="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -1436,7 +1436,7 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
       )}
 
       {/* =================================================================== */}
-      {/* TAB 2: SECURITY & AI RESILIENCE SIMULATION (Demo Suite)             */}
+      {/* TAB 2: AUTONOMOUS DEFENSE SCENARIOS (Interactive Simulation Suite) */}
       {/* =================================================================== */}
       {activeTab === "simulation" && (
         <div className="space-y-6">
@@ -1445,15 +1445,15 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
             <div className="flex items-center gap-2.5">
               <Sparkles className="w-5 h-5 text-purple-400 shrink-0" />
               <h2 className="text-sm font-bold text-white tracking-tight">
-                Autonomous Security & AI Resilience Verification Suite
+                Autonomous Defense & Incident Simulation Suite
               </h2>
             </div>
             <p className="text-xs text-slate-300 leading-relaxed">
-              Use the scenarios below to simulate real-world university operational events—including hardware degradation, student cryptojacking threats, and legitimate high-performance computing workloads. Observe the complete 7-step autonomous detection, university IdP role resolution, and SOAR surgical response pipeline in real time.
+              Safely test how Secure-MaintAI defends <strong className="text-white font-mono">{workstation.hostname}</strong> against real-world operational incidents. Choose any scenario below to inject realistic telemetry and observe how dual-stage AI screens the fault, verifies University IdP credentials, and applies surgical SOAR containment—without rebooting the machine or interrupting legitimate research.
             </p>
           </div>
 
-          {/* 10-Step Interactive Pipeline Controller */}
+          {/* Interactive Pipeline Controller */}
           <DemoController
             receipt={demoReceipt}
             activeStep={demoActiveStep}
@@ -1465,6 +1465,8 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
             }}
             workstationId={workstation.id}
             targetHostname={workstation.hostname}
+            isIsolated={workstation.is_isolated}
+            onRestoreNetwork={handleToggleIsolation}
           />
 
           {/* Visual Step-by-Step Pipeline Stepper */}
