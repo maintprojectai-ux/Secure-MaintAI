@@ -30,7 +30,6 @@ from backend.schemas.security_event import (
     SecurityEventCreate,
     SecurityEventResponse,
     SecurityEventSeverity,
-    SecurityEventType,
 )
 from security.adapters.wazuh_adapter import WazuhAdapter
 from security.correlation_engine import CorrelatedIncident, correlation_engine

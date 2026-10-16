@@ -236,7 +236,7 @@ class TestMLTelemetryScreening:
         res_normal = ml_pipeline_service.evaluate_telemetry_snapshot(
             normal_telemetry, workstation_name="machine-1-1"
         )
-        print(f"Normal telemetry evaluation result: --------------")
+        print("Normal telemetry evaluation result: --------------")
         print(f"Normal telemetry evaluation result: {res_normal.anomaly_type}, score={res_normal.score:.2f}, confidence={res_normal.confidence:.2f}")
 
         assert isinstance(res_normal, ml_pipeline_service.AnomalyEvaluationResult)
@@ -260,7 +260,7 @@ class TestMLTelemetryScreening:
         res_anom = ml_pipeline_service.evaluate_telemetry_snapshot(
             anom_telemetry, workstation_name="machine-1-1"
         )
-        print(f"\n Anomalous telemetry evaluation result: --------------")
+        print("\n Anomalous telemetry evaluation result: --------------")
         print(f"Anomalous telemetry evaluation result: {res_anom.anomaly_type}, score={res_anom.score:.2f}, confidence={res_anom.confidence:.2f}")
 
         assert isinstance(res_anom, ml_pipeline_service.AnomalyEvaluationResult)

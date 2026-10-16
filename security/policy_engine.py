@@ -10,14 +10,12 @@ Per engineering rules:
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
 from backend.core.logging import get_logger
 from backend.schemas.idp import IdPIdentityContext, IdPWorkstationContext, WorkloadType
-from backend.schemas.security_event import SecurityEventSeverity
 from security.correlation_engine import CorrelatedIncident
 
 logger = get_logger("policy_engine")
@@ -230,7 +228,7 @@ class SecurityPolicyEngine:
                 # Researcher context: Surgical targeting only (terminate miner, preserve research workload)
                 rules_triggered.append("RULE_RESEARCHER_SURGICAL_CONTAINMENT")
                 preserve_workloads = [w.job_id for w in ws_context.active_workloads if w.is_active]
-                
+
                 # In research environment, isolate the rogue stratum network connection/miner process
                 # rather than shutting down the host or terminating the simulation
                 return PolicyEvaluationResult(

@@ -2,7 +2,7 @@
 
 **AI-Driven University Infrastructure Resilience Platform**
 
-[![Tests](https://img.shields.io/badge/Tests-144%20Passed-success?style=flat-square&logo=pytest)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-182%20Passed-success?style=flat-square&logo=pytest)](tests/)
 [![Python](https://img.shields.io/badge/Python-3.11%20%7C%20FastAPI-blue?style=flat-square&logo=python)](backend/)
 [![Next.js](https://img.shields.io/badge/Next.js-16.3.4%20(Turbopack)-black?style=flat-square&logo=next.js)](frontend/)
 [![TailwindCSS](https://img.shields.io/badge/TailwindCSS-v4.3.3%20(CSS--first)-38bdf8?style=flat-square&logo=tailwindcss)](frontend/)
@@ -143,7 +143,7 @@ secure-maintai/
 │   └── migrations/versions/ # Foundation schema migrations
 ├── infrastructure/          # Docker compose and deployment configuration
 │   └── docker/              # Dockerfile.backend, compose configurations
-├── tests/                   # 144 automated tests across all test suites
+├── tests/                   # 182 automated tests across all test suites
 │   ├── unit/                # Unit tests (RBAC, policy, adapters, SOAR, IdP)
 │   ├── integration/         # Integration tests (APIs, anomaly persistence)
 │   ├── ml/                  # ML runtime inference and feature builder tests
@@ -221,7 +221,7 @@ Compiles with 0 errors across all 15 routes using Turbopack.
 
 ---
 
-## 5. Automated Test Suite (144 Tests)
+## 5. Automated Test Suite (182 Tests)
 
 The repository includes a comprehensive test suite enforcing 100% test passing before code merging (Rule 4 & Rule 28):
 
@@ -234,11 +234,11 @@ pytest tests/ -v
 
 | Suite | Focus Areas | Tests | Status |
 | :--- | :--- | :---: | :---: |
-| **Unit Tests** | Security Policy Engine, SOAR Engine, IdP Service, RBAC, Adapters, Buffers, Schemas, JWT Security | 97 | **PASSED** |
-| **Integration Tests** | Telemetry Ingestion, Workstation Lifecycle, Security APIs, Incidents, Dashboard Demo API, Active Device Targeting | 33 | **PASSED** |
-| **ML Runtime Tests** | Model 01/02-A/02-B loading, screening, diagnosis contracts, and latency benchmarks | 8 | **PASSED** |
-| **Rule 29 E2E Scenarios**| Mandatory verification scenarios (Cryptojacking, Research preservation, IdP fallback, Agent offline) | 6 | **PASSED** |
-| **Total** | | **144** | **100% GREEN** |
+| **Unit Tests** | Security Policy Engine, SOAR Engine, IdP Service, RBAC, Adapters, Buffers, Schemas, JWT Security | 107 | **PASSED** |
+| **Integration Tests** | Telemetry Ingestion, Workstation Lifecycle, Security APIs, Incidents, Dashboard, Demo, Maintenance, Reports, System APIs | 52 | **PASSED** |
+| **ML Runtime Tests** | Model 01/02-A/02-B loading, screening, diagnosis contracts, and latency benchmarks | 10 | **PASSED** |
+| **Rule 29 E2E Scenarios**| Mandatory verification scenarios (Cryptojacking, Research preservation, IdP fallback, Agent offline) | 13 | **PASSED** |
+| **Total** | | **182** | **100% GREEN** |
 
 ---
 
@@ -263,23 +263,28 @@ The system implements strict, server-authoritative RBAC (Rule 8):
 | | `GET` | `/api/v1/ready` | No | Readiness probe verifying database & ML connectivity |
 | **Auth** | `POST` | `/api/v1/auth/login` | No | JWT token issuance with encrypted credentials |
 | | `GET` | `/api/v1/auth/me` | Yes | Return authenticated user identity & permissions |
+| **Dashboard** | `GET` | `/api/v1/dashboard/kpis` | Yes | Retrieve live database-backed fleet KPIs and posture |
+| | `GET` | `/api/v1/dashboard/validation-metrics`| Yes | Real measured held-out ML validation metrics & matrices |
 | **Telemetry** | `POST` | `/api/v1/telemetry` | Agent/User | Ingest machine metrics with inline ML anomaly screening |
-| | `GET` | `/api/v1/telemetry/{id}` | Yes | Query historical telemetry time-series |
+| | `GET` | `/api/v1/telemetry/workstation/{id}` | Yes | Query historical telemetry time-series for workstation |
+| | `GET` | `/api/v1/telemetry/anomalies` | Yes | List recent ML anomaly detections and evidence |
 | **Workstations**| `GET` | `/api/v1/workstations` | Yes | Query fleet inventory with pagination and filters |
 | | `POST` | `/api/v1/workstations/{id}/isolate` | IT/Admin | Execute surgical network containment |
 | | `POST` | `/api/v1/workstations/{id}/rollback`| IT/Admin | Revert containment and restore normal networking |
 | **Security** | `POST` | `/api/v1/security/events` | Yes | Ingest normalized security events |
 | | `POST` | `/api/v1/security/events/wazuh` | Yes | Ingest raw Wazuh/Sysmon alerts |
-| | `GET` | `/api/v1/security/correlate/{id}` | Yes | Run multi-source threat correlation on workstation |
+| | `POST` | `/api/v1/security/correlate/{id}` | Yes | Run multi-source threat correlation on workstation |
 | **SOAR & Policy**| `POST` | `/api/v1/policy/evaluate` | Yes | Evaluate security policies against threat context |
 | | `POST` | `/api/v1/policy/kill-switch` | Admin | Activate/deactivate global emergency containment |
-| **Incidents** | `GET` | `/api/v1/incidents` | Yes | Query active incidents and forensic timelines |
+| **Incidents & Alerts** | `GET` | `/api/v1/incidents` | Yes | Query active incidents and forensic timelines |
 | | `GET` | `/api/v1/alerts` | Yes | Query active and acknowledged system alerts |
+| | `GET` | `/api/v1/alerts/stream` | Yes | Server-Sent Events (SSE) real-time alert stream |
+| **Maintenance** | `GET` | `/api/v1/maintenance/tasks` | Yes | Query predictive and scheduled maintenance work orders |
+| **Reports** | `GET` | `/api/v1/reports/summary` | Yes | Executive resilience and compliance summary reports |
+| **System & Audit**| `GET` | `/api/v1/system/settings` | Yes | Inspect runtime ML thresholds and IdP diagnostics |
+| | `GET` | `/api/v1/audit` | IT/Admin | Query immutable SHA-256 hash-chained audit logs |
 | **Users** | `GET` | `/api/v1/users` | Admin | List all registered user accounts and IdP statuses |
-| **Demonstration** | `POST` | `/api/v1/demo/trigger-scenario` | Yes | Dispatch authentic 10-stage simulation with active device targeting |
-| | `GET` | `/api/v1/demo/dashboard-kpis` | Yes | Retrieve live fleet KPIs and operational aggregates |
-| | `GET` | `/api/v1/demo/validation-metrics`| Yes | Real measured runtime validation metrics and model thresholds |
-| | `GET` | `/api/v1/demo/recent-anomalies` | Yes | Streaming recent anomaly event feed for administrative UI |
+| **Demonstration** | `POST` | `/api/v1/demo/trigger-scenario` | Yes | Dispatch authentic 10-stage simulation across 7 scenarios |
 
 ---
 

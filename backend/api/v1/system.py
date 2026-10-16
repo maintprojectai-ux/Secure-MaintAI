@@ -6,7 +6,7 @@ and IdP / Wazuh health diagnostics for platform operators.
 """
 
 import time
-from typing import Annotated
+from typing import Annotated, TypedDict
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
@@ -23,8 +23,19 @@ from security.policy_engine import policy_engine
 
 router = APIRouter()
 
+
+class RuntimeSettingsDict(TypedDict):
+    """Typed dictionary for runtime configurable platform parameters."""
+
+    smd_threshold: float
+    sysmon_confidence: float
+    auto_surgical_isolation: bool
+    notify_critical: bool
+    notify_daily_report: bool
+
+
 # Runtime configurable parameters
-_runtime_settings = {
+_runtime_settings: RuntimeSettingsDict = {
     "smd_threshold": 0.95,
     "sysmon_confidence": 0.85,
     "auto_surgical_isolation": True,

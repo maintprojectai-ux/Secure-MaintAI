@@ -16,13 +16,12 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 
-from backend.models.alert import Alert
 from backend.models.audit import AuditLog
 from backend.models.workstation import Workstation
 from backend.schemas.idp import IdPIdentityContext, IdPWorkstationContext
+from backend.services.soar_service import SOARService
 from security.correlation_engine import CorrelatedIncident
 from security.policy_engine import PolicyDecisionType, PolicyEvaluationResult
-from backend.services.soar_service import SOARService
 from tests.conftest import TestAsyncSession
 
 

@@ -7,6 +7,7 @@ and viewing device hardware/lab assignments.
 Per engineering rules Section 8 & 9: RBAC controlled, auditable.
 """
 
+from collections.abc import Sequence
 from typing import Annotated
 from uuid import UUID
 
@@ -16,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.database import get_async_session
 from backend.core.dependencies import get_current_active_user, require_role
+from backend.models.telemetry import TelemetryMetric
 from backend.models.user import UserAccount
 from backend.models.workstation import Workstation
 from backend.schemas.user import RoleEnum, UserResponse
@@ -25,14 +27,13 @@ from backend.schemas.workstation import (
     WorkstationStatus,
     WorkstationUpdate,
 )
-from backend.models.telemetry import TelemetryMetric
 from backend.services.audit import AuditService
 
 router = APIRouter()
 
 
 def _attach_telemetry_metrics(
-    workstations: list[Workstation],
+    workstations: Sequence[Workstation],
     metrics_map: dict[UUID, TelemetryMetric],
 ) -> list[WorkstationResponse]:
     """Attach latest or status-derived telemetry indicators to workstation DTOs."""

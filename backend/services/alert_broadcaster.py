@@ -44,7 +44,7 @@ class AlertBroadcaster:
                     yield msg
                 except asyncio.TimeoutError:
                     # Keep-alive heartbeat ping to prevent proxy/browser timeout
-                    yield f": keep-alive\n\n"
+                    yield ": keep-alive\n\n"
         except asyncio.CancelledError:
             pass
         finally:

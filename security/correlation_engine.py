@@ -209,7 +209,7 @@ class SecurityCorrelationEngine:
                 severity=sev,
                 confidence=0.85,
                 title=f"Unauthorized Access Detected on {ws_label}",
-                summary=f"Detected unauthorized security events or authentication failures on host.",
+                summary="Detected unauthorized security events or authentication failures on host.",
                 evidence=aggregated_evidence,
                 recommended_action="ALERT_SOC",
                 correlated_anomaly_ids=anomaly_ids,

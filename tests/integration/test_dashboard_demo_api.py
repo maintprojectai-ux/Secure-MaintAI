@@ -282,9 +282,10 @@ async def test_trigger_normal_baseline_demo_scenario(
     import uuid
     ws_uuid = uuid.UUID(receipt["step_2_workstation"]["id"])
     from sqlalchemy import select
+
+    from backend.models.alert import Alert
     from backend.models.anomaly import AnomalyDetection
     from backend.models.incident import Incident
-    from backend.models.alert import Alert
     from backend.models.telemetry import TelemetryMetric
     from tests.conftest import TestAsyncSession
 

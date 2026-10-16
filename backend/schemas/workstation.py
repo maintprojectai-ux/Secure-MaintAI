@@ -12,6 +12,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from backend.schemas.user import UserResponse
+
 
 class WorkstationStatus(str, Enum):
     """Workstation operational status."""
@@ -85,9 +87,6 @@ class AgentHeartbeatResponse(BaseModel):
     status: str = "acknowledged"
     acknowledged_at: datetime
     commands: list[str] = Field(default_factory=list)
-
-
-from backend.schemas.user import UserResponse
 
 
 class WorkstationResponse(BaseModel):
