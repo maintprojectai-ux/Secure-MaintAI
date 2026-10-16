@@ -47,8 +47,8 @@ interface ScenarioOption {
 const SCENARIOS: ScenarioOption[] = [
   {
     type: "TECHNICAL_DEGRADATION",
-    title: "Scenario 1: Hardware & Thermal Fault",
-    subtitle: "Simulates severe disk I/O thrashing and thermal rise. AI diagnoses a mechanical hardware fault and dispatches an automated maintenance work order.",
+    title: "Scenario 1: Hardware & Memory Fault",
+    subtitle: "Simulates severe memory leak and disk I/O thrashing. AI diagnoses a technical fault ('mem') and dispatches an automated maintenance work order.",
     badge: "Hardware Fault",
     rolePersona: "IT Infrastructure",
     expectedOutcome: "Work Order Dispatched • Host Online",
@@ -57,12 +57,12 @@ const SCENARIOS: ScenarioOption[] = [
     icon: Zap,
   },
   {
-    type: "STUDENT_CYBER_THREAT",
-    title: "Scenario 2: Student Cryptojacking Threat",
-    subtitle: "Simulates an unauthorized crypto-mining script running under a student account. AI flags rogue stratum traffic, severing outbound sockets and isolating the host.",
+    type: "CYBER_THREAT",
+    title: "Scenario 2: Cryptojacking Cyber Threat",
+    subtitle: "Simulates an unauthorized crypto-mining process with outbound Stratum traffic. SOAR response adapts to the University IdP role (Student: Full Host Isolation • Researcher: Selective Miner Kill, Workload Preserved).",
     badge: "Cyber Threat",
-    rolePersona: "Student Account",
-    expectedOutcome: "Host Isolated • Sockets Blocked",
+    rolePersona: "Role-Sensitive (Student / Researcher)",
+    expectedOutcome: "Student: Isolated • Researcher: Job Preserved",
     color: "bg-rose-500/10 text-rose-400 hover:bg-rose-500/20",
     borderColor: "border-rose-500/40",
     icon: ShieldAlert,
@@ -79,30 +79,19 @@ const SCENARIOS: ScenarioOption[] = [
     icon: Microscope,
   },
   {
-    type: "RESEARCHER_CYBER_THREAT",
-    title: "Scenario 4: Researcher Cryptojacking Threat",
-    subtitle: "Simulates an unauthorized crypto-mining script on a faculty PC during active HPC simulation. AI terminates rogue miner and severs sockets while keeping research running.",
-    badge: "Cyber Threat",
-    rolePersona: "Faculty Researcher",
-    expectedOutcome: "Miner Terminated • Workload Preserved",
-    color: "bg-pink-500/10 text-pink-400 hover:bg-pink-500/20",
-    borderColor: "border-pink-500/40",
-    icon: ShieldAlert,
-  },
-  {
     type: "PRIVILEGE_ESCALATION",
-    title: "Scenario 5: Unauthorized Privilege Escalation",
-    subtitle: "Simulates credential harvesting and unauthorized permission elevation. AI triggers emergency host isolation to immediately prevent lateral movement across the campus network.",
+    title: "Scenario 4: Unauthorized Privilege Escalation",
+    subtitle: "Simulates credential harvesting and unauthorized permission elevation. AI triggers emergency containment to prevent lateral movement across the campus network.",
     badge: "Privilege Threat",
     rolePersona: "Compromised Account",
-    expectedOutcome: "Host Quarantined • Lateral Movement Blocked",
+    expectedOutcome: "Session Revoked • Lateral Movement Blocked",
     color: "bg-red-500/10 text-red-300 hover:bg-red-500/20",
     borderColor: "border-red-600/50",
     icon: Lock,
   },
   {
     type: "IDP_OUTAGE_FALLBACK",
-    title: "Scenario 6: University IdP Outage Fallback",
+    title: "Scenario 5: University IdP Outage Fallback",
     subtitle: "Simulates a campus directory network timeout. System seamlessly engages secure local identity cache and flags the incident for SOC administrator review.",
     badge: "Fail-Safe Fallback",
     rolePersona: "Directory Service",
@@ -113,7 +102,7 @@ const SCENARIOS: ScenarioOption[] = [
   },
   {
     type: "NORMAL_BASELINE",
-    title: "Scenario 7: Normal Operational Baseline",
+    title: "Scenario 6: Normal Operational Baseline",
     subtitle: "Simulates standard everyday university lab usage. AI confirms normal operational variance; workstation health remains 100% green with zero false alerts.",
     badge: "Nominal Baseline",
     rolePersona: "General Lab User",
@@ -123,6 +112,8 @@ const SCENARIOS: ScenarioOption[] = [
     icon: Activity,
   },
 ];
+
+type SimulatedRoleOption = "AUTO" | "STUDENT" | "RESEARCHER";
 
 export function DemoController({
   receipt,
@@ -136,16 +127,20 @@ export function DemoController({
   onRestoreNetwork,
 }: DemoControllerProps) {
   const [selectedScenario, setSelectedScenario] = useState<DemoScenarioType>("TECHNICAL_DEGRADATION");
+  const [simulatedRole, setSimulatedRole] = useState<SimulatedRoleOption>("AUTO");
   const [isExecuting, setIsExecuting] = useState(false);
   const [executionMessage, setExecutionMessage] = useState<string | null>(null);
 
   const handleTriggerScenario = async (scenarioType: DemoScenarioType) => {
     setSelectedScenario(scenarioType);
     setIsExecuting(true);
-    setExecutionMessage(`Injecting telemetry & running autonomous defense pipeline for ${scenarioType.replace(/_/g, " ")}...`);
+    const roleOverride = simulatedRole === "AUTO" ? undefined : simulatedRole;
+    setExecutionMessage(
+      `Injecting telemetry & running autonomous defense pipeline for ${scenarioType.replace(/_/g, " ")}${roleOverride ? ` (IdP Role: ${roleOverride})` : ""}...`
+    );
 
     try {
-      const liveReceipt = await triggerDemoScenario(scenarioType, workstationId);
+      const liveReceipt = await triggerDemoScenario(scenarioType, workstationId, roleOverride);
       onReceiptUpdate(liveReceipt);
 
       // Visually step through the pipeline (Steps 1 to 7) for demonstration effect
@@ -191,20 +186,42 @@ export function DemoController({
             )}
           </div>
           <p className="text-xs text-slate-400 mt-1">
-            Safely test incident detection and autonomous SOAR playbooks on this machine.
+            Safely test incident detection and role-sensitive autonomous SOAR playbooks on this machine.
           </p>
         </div>
 
-        {isIsolated && onRestoreNetwork && (
-          <button
-            type="button"
-            onClick={onRestoreNetwork}
-            className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-md transition-colors flex items-center gap-1.5 cursor-pointer self-start md:self-auto"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <span>Restore Network Connectivity</span>
-          </button>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* University IdP Role Context Selector */}
+          <div className="flex items-center gap-1.5 bg-slate-900/90 border border-slate-800 px-2.5 py-1.5 rounded-xl text-[11px]">
+            <span className="text-slate-400 font-medium">IdP Role Context:</span>
+            {(["AUTO", "STUDENT", "RESEARCHER"] as SimulatedRoleOption[]).map((roleOpt) => (
+              <button
+                key={roleOpt}
+                type="button"
+                onClick={() => setSimulatedRole(roleOpt)}
+                disabled={isExecuting}
+                className={`px-2 py-0.5 rounded-md font-mono font-semibold text-[10px] transition cursor-pointer ${
+                  simulatedRole === roleOpt
+                    ? "bg-indigo-500/30 text-indigo-200 border border-indigo-400/50"
+                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+                }`}
+              >
+                {roleOpt === "AUTO" ? "Auto (Device)" : roleOpt}
+              </button>
+            ))}
+          </div>
+
+          {isIsolated && onRestoreNetwork && (
+            <button
+              type="button"
+              onClick={onRestoreNetwork}
+              className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-md transition-colors flex items-center gap-1.5 cursor-pointer self-start md:self-auto"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Restore Network Connectivity</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Scenario Selection Grid (6 Academic Simulation Scenarios in Order) */}

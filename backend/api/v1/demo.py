@@ -38,6 +38,7 @@ router = APIRouter()
 
 
 class DemoScenarioType(str, Enum):
+    CYBER_THREAT = "CYBER_THREAT"
     STUDENT_CYBER_THREAT = "STUDENT_CYBER_THREAT"
     RESEARCHER_CYBER_THREAT = "RESEARCHER_CYBER_THREAT"
     TECHNICAL_DEGRADATION = "TECHNICAL_DEGRADATION"
@@ -50,6 +51,10 @@ class DemoScenarioType(str, Enum):
 class DemoScenarioRequest(BaseModel):
     scenario_type: DemoScenarioType
     workstation_id: UUID | str | None = Field(default=None, description="Optional target workstation ID or hostname")
+    user_role: str | None = Field(
+        default=None,
+        description="Optional University IdP role context (e.g., STUDENT, RESEARCHER, IT_OPERATOR, ADMIN)",
+    )
 
 
 class DemoExecutionReceipt(BaseModel):
@@ -127,9 +132,6 @@ async def trigger_demo_scenario(
     # -------------------------------------------------------------
     # 1. SETUP TARGET WORKSTATION & IDP CONTEXT FROM REGISTRY
     # -------------------------------------------------------------
-    profile = get_scenario_profile(scenario.value, now=now)
-    title = profile.title
-
     ws = None
     if payload.workstation_id:
         try:
@@ -144,6 +146,43 @@ async def trigger_demo_scenario(
                 )
             )
             ws = res.scalar_one_or_none()
+
+    requested_role = payload.user_role.strip().upper() if payload.user_role else None
+    is_research_host = bool(
+        ws
+        and (
+            any(k in (ws.hostname or "").lower() for k in ("hpc", "quantum", "dept-pc"))
+            or any(k in (ws.lab or "").lower() for k in ("research", "quantum", "faculty"))
+        )
+    )
+
+    is_cyber_threat_scenario = scenario in {
+        DemoScenarioType.CYBER_THREAT,
+        DemoScenarioType.STUDENT_CYBER_THREAT,
+        DemoScenarioType.RESEARCHER_CYBER_THREAT,
+    }
+
+    # Same cyber-threat scenario adapts to the active user's role (STUDENT vs RESEARCHER)
+    effective_profile_key = scenario.value
+    if is_cyber_threat_scenario:
+        if (
+            scenario == DemoScenarioType.RESEARCHER_CYBER_THREAT
+            or requested_role == "RESEARCHER"
+            or (requested_role is None and is_research_host)
+        ):
+            effective_profile_key = DemoScenarioType.RESEARCHER_CYBER_THREAT.value
+        else:
+            effective_profile_key = DemoScenarioType.STUDENT_CYBER_THREAT.value
+
+    profile = get_scenario_profile(effective_profile_key, now=now)
+    if requested_role and requested_role in {"STUDENT", "RESEARCHER", "IT_OPERATOR", "ADMIN"}:
+        profile.user_context.role = requested_role
+        if requested_role != "RESEARCHER" and effective_profile_key != DemoScenarioType.RESEARCHER_HPC_WORKLOAD.value:
+            profile.user_context.active_workloads = []
+            profile.workloads = []
+
+    title = "Cryptojacking Cyber Threat Simulation" if is_cyber_threat_scenario else profile.title
+    step_1_scenario_type = "CYBER_THREAT" if is_cyber_threat_scenario else scenario.value
 
     if ws is None:
         ws = await _get_or_create_demo_workstation(
@@ -341,7 +380,7 @@ async def trigger_demo_scenario(
         },
         step_4_scenario={
             "name": title,
-            "type": scenario.value,
+            "type": step_1_scenario_type,
             "triggered_at": now.isoformat(),
         },
         step_5_ml_result={

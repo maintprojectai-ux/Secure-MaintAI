@@ -1565,11 +1565,16 @@ export async function getWorkstationTelemetry(
 
 export async function triggerDemoScenario(
   scenarioType: DemoScenarioType,
-  workstationId?: string
+  workstationId?: string,
+  userRole?: string
 ): Promise<DemoExecutionReceipt> {
   return apiFetch<DemoExecutionReceipt>("/demo/trigger-scenario", {
     method: "POST",
-    body: JSON.stringify({ scenario_type: scenarioType, workstation_id: workstationId }),
+    body: JSON.stringify({
+      scenario_type: scenarioType,
+      workstation_id: workstationId,
+      user_role: userRole,
+    }),
   });
 }
 

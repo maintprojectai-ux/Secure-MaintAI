@@ -503,6 +503,7 @@ export interface ValidationMetricsResponse {
 }
 
 export type DemoScenarioType =
+  | "CYBER_THREAT"
   | "STUDENT_CYBER_THREAT"
   | "RESEARCHER_CYBER_THREAT"
   | "TECHNICAL_DEGRADATION"
