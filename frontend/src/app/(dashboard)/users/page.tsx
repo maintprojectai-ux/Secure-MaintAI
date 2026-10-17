@@ -1,38 +1,37 @@
 "use client";
 
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import {
   Users,
   UserPlus,
-  Filter,
   Search,
   Shield,
-  ShieldAlert,
   ShieldCheck,
-  MoreVertical,
   CheckCircle,
   XCircle,
   Clock,
   Download,
-  KeyRound,
   RefreshCw,
-  ExternalLink,
   ChevronRight,
   Lock,
   Unlock,
-  AlertCircle,
 } from "lucide-react";
 import {
-  MOCK_USER_MANAGEMENT_LIST,
   getUsers,
   createUser,
   updateUser,
-  deleteUser,
+  getAuditLogs,
 } from "@/lib/api";
 import { UserRole, UserManagementItem } from "@/types";
 import { DonutChart } from "@/components/charts/DonutChart";
 import { Modal } from "@/components/ui/Modal";
-import { useAuth } from "@/context/AuthContext";
+
+const ROLE_DEPT_MAP: Record<UserRole, string> = {
+  ADMIN: "Administration & SOC",
+  IT_OPERATOR: "IT Operations",
+  RESEARCHER: "AI & Scientific Computing Lab",
+  STUDENT: "Academic Computing",
+};
 
 function mapBackendUserToItem(u: any): UserManagementItem {
   const roleMap: Record<string, UserRole> = {
@@ -41,86 +40,150 @@ function mapBackendUserToItem(u: any): UserManagementItem {
     RESEARCHER: "RESEARCHER",
     STUDENT: "STUDENT",
   };
-  const role: UserRole = roleMap[u.role] || "STUDENT";
-  const status =
-    u.status === "ACTIVE"
+  const role: UserRole = roleMap[String(u.role || "").toUpperCase()] || "STUDENT";
+  const rawStatus = String(u.status || "active").toLowerCase();
+  const status: "ACTIVE" | "PENDING" | "SUSPENDED" =
+    rawStatus === "active"
       ? "ACTIVE"
-      : u.status === "PENDING"
+      : rawStatus === "inactive" || rawStatus === "pending"
         ? "PENDING"
         : "SUSPENDED";
   const lastLogin = u.last_login_at
-    ? new Date(u.last_login_at).toLocaleDateString("en-US")
-    : "Recently";
+    ? new Date(u.last_login_at).toLocaleString("en-US", {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : "Never";
 
   return {
     id: String(u.id),
-    full_name: u.username || u.email.split("@")[0],
+    full_name: u.full_name || u.username || u.email.split("@")[0],
     email: u.email,
     role,
-    department: "Academic Computing",
+    department: ROLE_DEPT_MAP[role] || "Academic Computing",
     status,
     last_login: lastLogin,
     two_factor_enabled: true,
   };
 }
 
+interface UserActivityItem {
+  action: string;
+  user: string;
+  time: string;
+}
+
 export default function UsersManagementPage() {
-  const { user: currentUser } = useAuth();
-  const [users, setUsers] = useState<UserManagementItem[]>(MOCK_USER_MANAGEMENT_LIST);
+  const [users, setUsers] = useState<UserManagementItem[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<"ALL" | "ACTIVE" | "PENDING" | "SUSPENDED">("ALL");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedRole, setSelectedRole] = useState<string>("ALL");
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const pageSize = 10;
   const [isAddUserOpen, setIsAddUserOpen] = useState(false);
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
+  const [recentUserActivity, setRecentUserActivity] = useState<UserActivityItem[]>([]);
 
-  // Live Users Ingestion with Dual-Mode Fallback
-  useEffect(() => {
-    let isMounted = true;
-    async function loadLiveUsers() {
-      try {
-        const res = await getUsers({ page: 1, pageSize: 50 });
-        if (isMounted && res && Array.isArray(res.items) && res.items.length > 0) {
-          const liveItems = res.items.map(mapBackendUserToItem);
-          setUsers((prev) => {
-            const liveIds = new Set(liveItems.map((u) => u.id));
-            const filtered = prev.filter((u) => !liveIds.has(u.id));
-            return [...liveItems, ...filtered];
-          });
+  const loadLiveUsers = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const res = await getUsers({ page: 1, pageSize: 100 });
+      if (res && Array.isArray(res.items)) {
+        const liveItems = res.items.map(mapBackendUserToItem);
+        setUsers(liveItems);
+
+        try {
+          const auditRes = await getAuditLogs({ page: 1, pageSize: 8 });
+          if (auditRes && Array.isArray(auditRes.items) && auditRes.items.length > 0) {
+            const userLookup = new Map(liveItems.map((u) => [u.id, u.full_name]));
+            const mappedActivity: UserActivityItem[] = auditRes.items.slice(0, 5).map((item) => {
+              const actorName = userLookup.get(item.actor) || item.actor;
+              const ts = item.timestamp
+                ? new Date(item.timestamp).toLocaleString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })
+                : "Recent";
+              return {
+                action: `${item.action} (${item.result})`,
+                user: `${actorName} → ${item.resource}`,
+                time: ts,
+              };
+            });
+            setRecentUserActivity(mappedActivity);
+          } else {
+            setRecentUserActivity([]);
+          }
+        } catch {
+          setRecentUserActivity([]);
         }
-      } catch {
-        // Fallback to mock baseline
+      } else {
+        setUsers([]);
       }
+    } catch {
+      setUsers([]);
+    } finally {
+      setIsLoading(false);
     }
-    loadLiveUsers();
-    return () => {
-      isMounted = false;
-    };
   }, []);
+
+  useEffect(() => {
+    loadLiveUsers();
+  }, [loadLiveUsers]);
 
   // New user form state
   const [newUser, setNewUser] = useState({
     full_name: "",
     email: "",
+    password: "TempPassword123!",
     role: "STUDENT" as UserRole,
     department: "Computer Science",
     two_factor_enabled: true,
   });
 
-  const roleDonutData = [
-    { label: "Students", value: 65, color: "#10b981" },
-    { label: "IT Operators", value: 28, color: "#3b82f6" },
-    { label: "Researchers", value: 26, color: "#f59e0b" },
-    { label: "Administrators", value: 18, color: "#8b5cf6" },
-    { label: "Guests", value: 5, color: "#64748b" },
-  ];
+  // Dynamic KPIs computed strictly from database users
+  const kpiStats = useMemo(() => {
+    const total = users.length;
+    const active = users.filter((u) => u.status === "ACTIVE").length;
+    const itOperators = users.filter((u) => u.role === "IT_OPERATOR").length;
+    const pendingOrInactive = users.filter((u) => u.status === "PENDING").length;
+    const suspended = users.filter((u) => u.status === "SUSPENDED").length;
+    const activeRate = total > 0 ? ((active / total) * 100).toFixed(1) : "0.0";
+    return { total, active, itOperators, pendingOrInactive, suspended, activeRate };
+  }, [users]);
 
-  const recentUserActivity = [
-    { action: "User account created", user: "Fahad Al-Khatib", time: "10 mins ago", type: "create" },
-    { action: "Password reset requested", user: "Alex Rivera", time: "1 hour ago", type: "security" },
-    { action: "Role upgraded to IT_OPERATOR", user: "Yousef Salem", time: "3 hours ago", type: "role" },
-    { action: "MFA Key Registered", user: "Dr. Tariq Al-Omari", time: "Yesterday", type: "mfa" },
-    { action: "Successful IdP SSO Login", user: "Khalid Mansoor", time: "Yesterday", type: "login" },
-  ];
+  // Dynamic Role Breakdown computed strictly from database users
+  const roleStats = useMemo(() => {
+    const total = users.length;
+    const counts = {
+      STUDENT: users.filter((u) => u.role === "STUDENT").length,
+      IT_OPERATOR: users.filter((u) => u.role === "IT_OPERATOR").length,
+      RESEARCHER: users.filter((u) => u.role === "RESEARCHER").length,
+      ADMIN: users.filter((u) => u.role === "ADMIN").length,
+    };
+    const pct = (count: number) => (total > 0 ? ((count / total) * 100).toFixed(1) : "0.0");
+    return {
+      total,
+      counts,
+      percentages: {
+        STUDENT: pct(counts.STUDENT),
+        IT_OPERATOR: pct(counts.IT_OPERATOR),
+        RESEARCHER: pct(counts.RESEARCHER),
+        ADMIN: pct(counts.ADMIN),
+      },
+      donutData: [
+        { label: "Students", value: counts.STUDENT, color: "#10b981" },
+        { label: "IT Operators", value: counts.IT_OPERATOR, color: "#3b82f6" },
+        { label: "Researchers", value: counts.RESEARCHER, color: "#f59e0b" },
+        { label: "Administrators", value: counts.ADMIN, color: "#8b5cf6" },
+      ],
+    };
+  }, [users]);
 
   const filteredUsers = useMemo(() => {
     return users.filter((u) => {
@@ -146,25 +209,31 @@ export default function UsersManagementPage() {
     });
   }, [users, activeTab, selectedRole, searchQuery]);
 
+  // Reset pagination when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab, selectedRole, searchQuery]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / pageSize));
+  const paginatedUsers = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredUsers.slice(start, start + pageSize);
+  }, [filteredUsers, currentPage]);
+
   const handleToggleStatus = async (id: string) => {
     const targetUser = users.find((u) => u.id === id);
-    const nextStatus = targetUser?.status === "ACTIVE" ? "SUSPENDED" : "ACTIVE";
+    if (!targetUser) return;
+    const nextStatus: "ACTIVE" | "SUSPENDED" =
+      targetUser.status === "ACTIVE" ? "SUSPENDED" : "ACTIVE";
     try {
-      if (id.includes("-") && id.length > 20) {
-        await updateUser(id, { status: nextStatus });
-      }
-    } catch {
-      // Non-fatal, optimistic update preserved
+      await updateUser(id, { status: nextStatus.toLowerCase() });
+      setUsers((prev) =>
+        prev.map((u) => (u.id === id ? { ...u, status: nextStatus } : u))
+      );
+      setFeedbackMsg(`User ${targetUser.full_name} status changed to ${nextStatus}`);
+    } catch (err: any) {
+      setFeedbackMsg(err?.message || `Failed to update status for ${targetUser.full_name}`);
     }
-    setUsers((prev) =>
-      prev.map((u) => {
-        if (u.id === id) {
-          return { ...u, status: nextStatus };
-        }
-        return u;
-      })
-    );
-    setFeedbackMsg(`User ${targetUser?.full_name || id} status changed to ${nextStatus}`);
     setTimeout(() => setFeedbackMsg(null), 3000);
   };
 
@@ -172,42 +241,70 @@ export default function UsersManagementPage() {
     e.preventDefault();
     if (!newUser.full_name || !newUser.email) return;
 
-    let createdId = `usr-${Date.now()}`;
+    const sanitizedUsername =
+      newUser.full_name
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]/g, "_")
+        .replace(/_+/g, "_")
+        .replace(/^_|_$/g, "")
+        .slice(0, 64) ||
+      newUser.email
+        .split("@")[0]
+        .replace(/[^a-zA-Z0-9_-]/g, "_")
+        .slice(0, 64);
+
+    const finalUsername =
+      sanitizedUsername.length >= 3 ? sanitizedUsername : `${sanitizedUsername}_usr`;
+
     try {
-      const res = await createUser({
-        username: newUser.full_name,
-        email: newUser.email,
+      await createUser({
+        username: finalUsername,
+        email: newUser.email.trim(),
+        password: newUser.password.length >= 12 ? newUser.password : "TempPassword123!",
         role: newUser.role,
+        status: "active",
       });
-      if (res?.id) {
-        createdId = String(res.id);
-      }
-    } catch {
-      // Non-fatal, optimistic fallback preserved
+      await loadLiveUsers();
+      setIsAddUserOpen(false);
+      setNewUser({
+        full_name: "",
+        email: "",
+        password: "TempPassword123!",
+        role: "STUDENT",
+        department: "Computer Science",
+        two_factor_enabled: true,
+      });
+      setFeedbackMsg(`User ${finalUsername} created in database.`);
+    } catch (err: any) {
+      setFeedbackMsg(err?.message || "Failed to create user account in database.");
     }
-
-    const created: UserManagementItem = {
-      id: createdId,
-      full_name: newUser.full_name,
-      email: newUser.email,
-      role: newUser.role,
-      department: newUser.department,
-      status: "ACTIVE",
-      last_login: "Just now",
-      two_factor_enabled: newUser.two_factor_enabled,
-    };
-
-    setUsers((prev) => [created, ...prev]);
-    setIsAddUserOpen(false);
-    setNewUser({
-      full_name: "",
-      email: "",
-      role: "STUDENT",
-      department: "Computer Science",
-      two_factor_enabled: true,
-    });
-    setFeedbackMsg(`User ${created.full_name} created successfully!`);
     setTimeout(() => setFeedbackMsg(null), 3500);
+  };
+
+  const handleExportCsv = () => {
+    const headers = ["ID", "Username", "Email", "Role", "Department", "Status", "Last Login"];
+    const rows = filteredUsers.map((u) => [
+      u.id,
+      `"${u.full_name.replace(/"/g, '""')}"`,
+      u.email,
+      u.role,
+      `"${u.department.replace(/"/g, '""')}"`,
+      u.status,
+      `"${u.last_login}"`,
+    ]);
+    const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `user_directory_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    setFeedbackMsg(`Exported ${filteredUsers.length} user record(s) to CSV.`);
+    setTimeout(() => setFeedbackMsg(null), 3000);
   };
 
   const getRoleBadge = (role: UserRole) => {
@@ -227,7 +324,8 @@ export default function UsersManagementPage() {
 
   const getInitials = (name: string) => {
     return name
-      .split(" ")
+      .split(/[\s._-]+/)
+      .filter(Boolean)
       .map((n) => n[0])
       .slice(0, 2)
       .join("")
@@ -258,8 +356,8 @@ export default function UsersManagementPage() {
               <Users className="w-3.5 h-3.5" />
             </div>
           </div>
-          <p className="text-2xl font-bold text-white mt-1">142</p>
-          <p className="text-[11px] text-emerald-400 mt-1 font-mono">+12 this month</p>
+          <p className="text-2xl font-bold text-white mt-1">{kpiStats.total}</p>
+          <p className="text-[11px] text-emerald-400 mt-1 font-mono">Database accounts</p>
         </div>
 
         <div className="glass-card p-4">
@@ -269,8 +367,8 @@ export default function UsersManagementPage() {
               <CheckCircle className="w-3.5 h-3.5" />
             </div>
           </div>
-          <p className="text-2xl font-bold text-emerald-400 mt-1">128</p>
-          <p className="text-[11px] text-emerald-400 mt-1 font-mono">90.1% active rate</p>
+          <p className="text-2xl font-bold text-emerald-400 mt-1">{kpiStats.active}</p>
+          <p className="text-[11px] text-emerald-400 mt-1 font-mono">{kpiStats.activeRate}% active rate</p>
         </div>
 
         <div className="glass-card p-4">
@@ -280,19 +378,19 @@ export default function UsersManagementPage() {
               <Shield className="w-3.5 h-3.5" />
             </div>
           </div>
-          <p className="text-2xl font-bold text-purple-400 mt-1">18</p>
+          <p className="text-2xl font-bold text-purple-400 mt-1">{kpiStats.itOperators}</p>
           <p className="text-[11px] text-slate-400 mt-1 font-mono">24/7 coverage</p>
         </div>
 
         <div className="glass-card p-4">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-400">Pending Approval</span>
+            <span className="text-xs font-medium text-slate-400">Pending / Inactive</span>
             <div className="w-7 h-7 rounded-lg bg-amber-500/15 flex items-center justify-center text-amber-400">
               <Clock className="w-3.5 h-3.5" />
             </div>
           </div>
-          <p className="text-2xl font-bold text-amber-400 mt-1">14</p>
-          <p className="text-[11px] text-amber-400 mt-1 font-mono">Requires ID verify</p>
+          <p className="text-2xl font-bold text-amber-400 mt-1">{kpiStats.pendingOrInactive}</p>
+          <p className="text-[11px] text-amber-400 mt-1 font-mono">Inactive accounts</p>
         </div>
 
         <div className="glass-card p-4">
@@ -302,8 +400,8 @@ export default function UsersManagementPage() {
               <XCircle className="w-3.5 h-3.5" />
             </div>
           </div>
-          <p className="text-2xl font-bold text-white mt-1">0</p>
-          <p className="text-[11px] text-emerald-400 mt-1 font-mono">0 policy lockouts</p>
+          <p className="text-2xl font-bold text-white mt-1">{kpiStats.suspended}</p>
+          <p className="text-[11px] text-emerald-400 mt-1 font-mono">{kpiStats.suspended} policy lockouts</p>
         </div>
       </div>
 
@@ -394,72 +492,107 @@ export default function UsersManagementPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-850">
-                  {filteredUsers.map((u) => (
-                    <tr key={u.id} className="hover:bg-slate-800/30 transition-colors">
-                      <td className="py-3">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-600 to-purple-600 flex items-center justify-center text-white font-bold text-xs shadow-sm">
-                            {getInitials(u.full_name)}
-                          </div>
-                          <div>
-                            <p className="font-semibold text-slate-200">{u.full_name}</p>
-                            <p className="text-[11px] text-slate-400 font-mono">{u.email}</p>
-                          </div>
-                        </div>
-                      </td>
-
-                      <td className="py-3">{getRoleBadge(u.role)}</td>
-
-                      <td className="py-3 text-slate-300">{u.department}</td>
-
-                      <td className="py-3">
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${u.status === "ACTIVE"
-                          ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
-                          : u.status === "PENDING"
-                            ? "bg-amber-500/15 text-amber-300 border border-amber-500/30"
-                            : "bg-rose-500/15 text-rose-300 border border-rose-500/30"
-                          }`}>
-                          {u.status}
-                        </span>
-                      </td>
-
-                      <td className="py-3 font-mono text-slate-400">{u.last_login}</td>
-
-                      <td className="py-3 text-center">
-                        {u.two_factor_enabled ? (
-                          <ShieldCheck className="w-4 h-4 text-emerald-400 inline" />
-                        ) : (
-                          <span className="text-slate-600">—</span>
-                        )}
-                      </td>
-
-                      <td className="py-3 text-right">
-                        <button
-                          onClick={() => handleToggleStatus(u.id)}
-                          title={u.status === "ACTIVE" ? "Suspend user" : "Reactivate user"}
-                          className="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors inline-flex items-center gap-1"
-                        >
-                          {u.status === "ACTIVE" ? (
-                            <Unlock className="w-3.5 h-3.5 text-emerald-400" />
-                          ) : (
-                            <Lock className="w-3.5 h-3.5 text-rose-400" />
-                          )}
-                        </button>
+                  {isLoading ? (
+                    <tr>
+                      <td colSpan={7} className="py-8 text-center text-slate-400">
+                        Loading users from database...
                       </td>
                     </tr>
-                  ))}
+                  ) : paginatedUsers.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-8 text-center text-slate-400">
+                        No users found in database matching current filters.
+                      </td>
+                    </tr>
+                  ) : (
+                    paginatedUsers.map((u) => (
+                      <tr key={u.id} className="hover:bg-slate-800/30 transition-colors">
+                        <td className="py-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-600 to-purple-600 flex items-center justify-center text-white font-bold text-xs shadow-sm">
+                              {getInitials(u.full_name)}
+                            </div>
+                            <div>
+                              <p className="font-semibold text-slate-200">{u.full_name}</p>
+                              <p className="text-[11px] text-slate-400 font-mono">{u.email}</p>
+                            </div>
+                          </div>
+                        </td>
+
+                        <td className="py-3">{getRoleBadge(u.role)}</td>
+
+                        <td className="py-3 text-slate-300">{u.department}</td>
+
+                        <td className="py-3">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${u.status === "ACTIVE"
+                            ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
+                            : u.status === "PENDING"
+                              ? "bg-amber-500/15 text-amber-300 border border-amber-500/30"
+                              : "bg-rose-500/15 text-rose-300 border border-rose-500/30"
+                            }`}>
+                            {u.status}
+                          </span>
+                        </td>
+
+                        <td className="py-3 font-mono text-slate-400">{u.last_login}</td>
+
+                        <td className="py-3 text-center">
+                          {u.two_factor_enabled ? (
+                            <ShieldCheck className="w-4 h-4 text-emerald-400 inline" />
+                          ) : (
+                            <span className="text-slate-600">—</span>
+                          )}
+                        </td>
+
+                        <td className="py-3 text-right">
+                          <button
+                            onClick={() => handleToggleStatus(u.id)}
+                            title={u.status === "ACTIVE" ? "Suspend user" : "Reactivate user"}
+                            className="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors inline-flex items-center gap-1"
+                          >
+                            {u.status === "ACTIVE" ? (
+                              <Unlock className="w-3.5 h-3.5 text-emerald-400" />
+                            ) : (
+                              <Lock className="w-3.5 h-3.5 text-rose-400" />
+                            )}
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
 
             {/* Pagination Footer */}
             <div className="flex items-center justify-between pt-4 border-t border-slate-800 text-xs text-slate-400">
-              <span>Showing 1 to {filteredUsers.length} of {filteredUsers.length} users</span>
+              <span>
+                Showing {filteredUsers.length === 0 ? 0 : (currentPage - 1) * pageSize + 1} to{" "}
+                {Math.min(currentPage * pageSize, filteredUsers.length)} of {filteredUsers.length} users
+              </span>
               <div className="flex items-center gap-1">
-                <button className="px-2.5 py-1 rounded bg-brand-blue text-white font-medium">1</button>
-                <button className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300">2</button>
-                <button className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300">3</button>
-                <button className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300">Next</button>
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                  <button
+                    key={page}
+                    onClick={() => setCurrentPage(page)}
+                    className={`px-2.5 py-1 rounded font-medium ${
+                      currentPage === page
+                        ? "bg-brand-blue text-white"
+                        : "bg-slate-800 hover:bg-slate-700 text-slate-300"
+                    }`}
+                  >
+                    {page}
+                  </button>
+                ))}
+                {totalPages > 1 && (
+                  <button
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={currentPage >= totalPages}
+                    className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-40"
+                  >
+                    Next
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -474,10 +607,10 @@ export default function UsersManagementPage() {
 
             <div className="flex justify-center my-2">
               <DonutChart
-                data={roleDonutData}
+                data={roleStats.donutData}
                 size={170}
                 strokeWidth={18}
-                centerLabel="142"
+                centerLabel={String(roleStats.total)}
                 centerSub="Total Users"
               />
             </div>
@@ -487,25 +620,33 @@ export default function UsersManagementPage() {
                 <span className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-emerald-400" /> Students
                 </span>
-                <span className="font-mono text-slate-400">45.8% (65)</span>
+                <span className="font-mono text-slate-400">
+                  {roleStats.percentages.STUDENT}% ({roleStats.counts.STUDENT})
+                </span>
               </div>
               <div className="flex justify-between text-slate-300">
                 <span className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-blue-400" /> IT Operators
                 </span>
-                <span className="font-mono text-slate-400">19.7% (28)</span>
+                <span className="font-mono text-slate-400">
+                  {roleStats.percentages.IT_OPERATOR}% ({roleStats.counts.IT_OPERATOR})
+                </span>
               </div>
               <div className="flex justify-between text-slate-300">
                 <span className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-amber-400" /> Researchers
                 </span>
-                <span className="font-mono text-slate-400">18.3% (26)</span>
+                <span className="font-mono text-slate-400">
+                  {roleStats.percentages.RESEARCHER}% ({roleStats.counts.RESEARCHER})
+                </span>
               </div>
               <div className="flex justify-between text-slate-300">
                 <span className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-purple-400" /> Administrators
                 </span>
-                <span className="font-mono text-slate-400">12.7% (18)</span>
+                <span className="font-mono text-slate-400">
+                  {roleStats.percentages.ADMIN}% ({roleStats.counts.ADMIN})
+                </span>
               </div>
             </div>
           </div>
@@ -516,18 +657,22 @@ export default function UsersManagementPage() {
             <p className="text-xs text-slate-400 mb-4">Audit stream for user accounts</p>
 
             <div className="space-y-3">
-              {recentUserActivity.map((act, i) => (
-                <div key={i} className="flex items-start gap-3 text-xs">
-                  <div className="w-6 h-6 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 flex items-center justify-center shrink-0 mt-0.5">
-                    <Clock className="w-3 h-3" />
+              {recentUserActivity.length === 0 ? (
+                <p className="text-xs text-slate-500">No recent audit events in database.</p>
+              ) : (
+                recentUserActivity.map((act, i) => (
+                  <div key={i} className="flex items-start gap-3 text-xs">
+                    <div className="w-6 h-6 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 flex items-center justify-center shrink-0 mt-0.5">
+                      <Clock className="w-3 h-3" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-slate-200 font-medium truncate">{act.action}</p>
+                      <p className="text-[11px] text-slate-400 truncate">{act.user}</p>
+                    </div>
+                    <span className="text-[10px] text-slate-500 font-mono shrink-0">{act.time}</span>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-slate-200 font-medium truncate">{act.action}</p>
-                    <p className="text-[11px] text-slate-400">{act.user}</p>
-                  </div>
-                  <span className="text-[10px] text-slate-500 font-mono shrink-0">{act.time}</span>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
 
@@ -548,8 +693,9 @@ export default function UsersManagementPage() {
               </button>
 
               <button
-                onClick={() => {
-                  setFeedbackMsg("LDAP / IdP sync initiated. 142 records refreshed.");
+                onClick={async () => {
+                  await loadLiveUsers();
+                  setFeedbackMsg(`Database user directory refreshed (${users.length} records).`);
                   setTimeout(() => setFeedbackMsg(null), 3000);
                 }}
                 className="w-full flex items-center justify-between p-2.5 rounded-lg bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-slate-200 transition-colors"
@@ -562,10 +708,7 @@ export default function UsersManagementPage() {
               </button>
 
               <button
-                onClick={() => {
-                  setFeedbackMsg("Audit log export started.");
-                  setTimeout(() => setFeedbackMsg(null), 2500);
-                }}
+                onClick={handleExportCsv}
                 className="w-full flex items-center justify-between p-2.5 rounded-lg bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-slate-200 transition-colors"
               >
                 <div className="flex items-center gap-2.5">
@@ -587,11 +730,11 @@ export default function UsersManagementPage() {
       >
         <form onSubmit={handleAddUser} className="space-y-4 text-xs">
           <div>
-            <label className="block text-slate-300 font-medium mb-1">Full Name</label>
+            <label className="block text-slate-300 font-medium mb-1">Username / Full Name</label>
             <input
               type="text"
               required
-              placeholder="e.g. Dr. Mohammed Al-Qahtani"
+              placeholder="e.g. m_qahtani"
               value={newUser.full_name}
               onChange={(e) => setNewUser({ ...newUser, full_name: e.target.value })}
               className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-200 focus:outline-none focus:border-brand-blue"
@@ -606,6 +749,18 @@ export default function UsersManagementPage() {
               placeholder="e.g. m.qahtani@university.edu"
               value={newUser.email}
               onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
+              className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-200 focus:outline-none focus:border-brand-blue"
+            />
+          </div>
+
+          <div>
+            <label className="block text-slate-300 font-medium mb-1">Initial Password (min 12 chars)</label>
+            <input
+              type="password"
+              required
+              minLength={12}
+              value={newUser.password}
+              onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
               className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-200 focus:outline-none focus:border-brand-blue"
             />
           </div>
@@ -674,3 +829,4 @@ export default function UsersManagementPage() {
     </div>
   );
 }
+

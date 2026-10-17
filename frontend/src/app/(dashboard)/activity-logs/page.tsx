@@ -1,139 +1,203 @@
 "use client";
 
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import {
-  FileCode,
   Search,
-  Filter,
   Download,
   Shield,
   CheckCircle2,
   AlertTriangle,
   XCircle,
   Info,
-  Calendar,
   Eye,
   RefreshCw,
-  Terminal,
-  Activity,
   Layers,
-  ArrowUpDown,
-  ExternalLink,
 } from "lucide-react";
-import { MOCK_FULL_AUDIT_LOGS, getAuditLogs } from "@/lib/api";
+import { getAuditLogs } from "@/lib/api";
 import { AuditLogEntry } from "@/types";
 import { DonutChart } from "@/components/charts/DonutChart";
 import { LineChart } from "@/components/charts/LineChart";
 import { Modal } from "@/components/ui/Modal";
 
 interface EnrichedAuditLogEntry extends AuditLogEntry {
+  raw_timestamp?: string;
   hash?: string;
   correlation_id?: string;
+  metadata?: Record<string, any>;
 }
 
 function mapBackendAuditLog(raw: any): EnrichedAuditLogEntry {
-  const action = raw.action || "system.action";
+  const action = String(raw.action || "system.action");
   let category: AuditLogEntry["category"] = "SYSTEM";
-  if (action.startsWith("user.") || action.startsWith("auth.")) category = "USER";
-  else if (
+  if (action.startsWith("user.") || action.startsWith("auth.")) {
+    category = "USER";
+  } else if (
     action.startsWith("incident.") ||
     action.startsWith("soar.") ||
     action.startsWith("policy.") ||
-    action.startsWith("security.")
-  )
+    action.startsWith("security.") ||
+    action.startsWith("isolation.") ||
+    action.startsWith("alert.")
+  ) {
     category = "SECURITY";
-  else if (action.startsWith("api.")) category = "API";
+  } else if (
+    action.startsWith("api.") ||
+    action.startsWith("telemetry.") ||
+    action.startsWith("agent.")
+  ) {
+    category = "API";
+  }
 
-  const res = (raw.result || "SUCCESS").toUpperCase();
+  const res = String(raw.result || "success").toLowerCase();
   const status: AuditLogEntry["status"] =
-    res === "SUCCESS" ? "SUCCESS" : res === "WARNING" ? "WARNING" : "FAILURE";
+    res === "success"
+      ? "SUCCESS"
+      : res === "warning" || res === "degraded"
+        ? "WARNING"
+        : "FAILURE";
 
   const timeStr = raw.timestamp
-    ? new Date(raw.timestamp).toLocaleTimeString("en-US", {
+    ? new Date(raw.timestamp).toLocaleString("en-US", {
+        month: "short",
+        day: "numeric",
         hour: "2-digit",
         minute: "2-digit",
         second: "2-digit",
         hour12: true,
       })
-    : "Just now";
+    : "Unknown";
 
   const hash =
     raw.metadata?.entry_hash ||
     raw.hash ||
     (raw.id
-      ? `sha256:${raw.id.replace(/-/g, "")}8f7b3c2e1d0a5f4e`
+      ? `sha256:${String(raw.id).replace(/-/g, "")}8f7b3c2e1d0a5f4e`
       : "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
 
   return {
     id: String(raw.id),
     timestamp: timeStr,
-    user_email: raw.actor || "system",
-    action: raw.action || "system.event",
+    raw_timestamp: raw.timestamp ? String(raw.timestamp) : undefined,
+    user_email: String(raw.actor || "system"),
+    action,
     category,
-    target: raw.resource || "Cluster Host",
+    target: String(raw.resource || "system"),
     status,
-    ip_address: raw.source_ip || "127.0.0.1",
+    ip_address: String(raw.source_ip || "127.0.0.1"),
     hash,
     correlation_id: raw.correlation_id ? String(raw.correlation_id) : undefined,
+    metadata: raw.metadata || undefined,
   };
 }
 
 export default function ActivityLogsPage() {
-  const [logs, setLogs] = useState<EnrichedAuditLogEntry[]>(MOCK_FULL_AUDIT_LOGS);
+  const [logs, setLogs] = useState<EnrichedAuditLogEntry[]>([]);
+  const [totalCount, setTotalCount] = useState<number>(0);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<"ALL" | "USER" | "SYSTEM" | "SECURITY" | "API" | "FAILURE">("ALL");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("ALL");
   const [selectedStatus, setSelectedStatus] = useState<string>("ALL");
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const pageSize = 15;
   const [selectedLog, setSelectedLog] = useState<EnrichedAuditLogEntry | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [exportFeedback, setExportFeedback] = useState<string | null>(null);
 
-  // Live Audit Logs Ingestion with Dual-Mode Fallback
-  useEffect(() => {
-    let isMounted = true;
-    async function loadLiveLogs() {
-      try {
-        const res = await getAuditLogs({ page: 1, pageSize: 50 });
-        if (isMounted && res && Array.isArray(res.items) && res.items.length > 0) {
-          const liveLogs = res.items.map(mapBackendAuditLog);
-          setLogs((prev) => {
-            const liveIds = new Set(liveLogs.map((l) => l.id));
-            const filtered = prev.filter((l) => !liveIds.has(l.id));
-            return [...liveLogs, ...filtered];
-          });
-        }
-      } catch {
-        // Fallback to mock baseline
+  const loadLiveLogs = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const res = await getAuditLogs({ page: 1, pageSize: 100 });
+      if (res && Array.isArray(res.items)) {
+        const liveLogs = res.items.map(mapBackendAuditLog);
+        setLogs(liveLogs);
+        setTotalCount(typeof res.total === "number" ? res.total : liveLogs.length);
+      } else {
+        setLogs([]);
+        setTotalCount(0);
       }
+    } catch {
+      setLogs([]);
+      setTotalCount(0);
+    } finally {
+      setIsLoading(false);
     }
-    loadLiveLogs();
-    return () => {
-      isMounted = false;
-    };
   }, []);
 
-  const logTrendData = [
-    { label: "Sep 10", value: 3200 },
-    { label: "Sep 11", value: 3600 },
-    { label: "Sep 12", value: 2900 },
-    { label: "Sep 13", value: 4100 },
-    { label: "Sep 14", value: 3400 },
-    { label: "Sep 15", value: 3850 },
-    { label: "Sep 16", value: 3510 },
-  ];
+  useEffect(() => {
+    loadLiveLogs();
+  }, [loadLiveLogs]);
 
-  const logOverviewDonut = [
-    { label: "Info", value: 15682, color: "#3b82f6" },
-    { label: "Success", value: 6245, color: "#10b981" },
-    { label: "Warning", value: 1983, color: "#f59e0b" },
-    { label: "Error", value: 650, color: "#ef4444" },
-  ];
+  // Dynamic KPIs & Donut distribution computed strictly from database logs
+  const auditStats = useMemo(() => {
+    const total = logs.length;
+    const dbTotal = Math.max(totalCount, total);
+    const successCount = logs.filter((l) => l.status === "SUCCESS").length;
+    const warningCount = logs.filter((l) => l.status === "WARNING").length;
+    const failureCount = logs.filter((l) => l.status === "FAILURE").length;
+    const securityCount = logs.filter((l) => l.category === "SECURITY").length;
 
-  const recentCriticalEvents = [
-    { title: "Failed Login Attempt (Brute Force)", time: "04:30 AM", ip: "194.26.29.112", status: "FAILURE" },
-    { title: "Trigger Surgical Isolation", time: "09:28 AM", ip: "10.0.1.5", status: "SUCCESS" },
-    { title: "Automated Process Containment", time: "09:22 AM", ip: "127.0.0.1", status: "SUCCESS" },
-  ];
+    const pct = (count: number) => (total > 0 ? ((count / total) * 100).toFixed(1) : "0.0");
+
+    return {
+      total,
+      dbTotal,
+      successCount,
+      warningCount,
+      failureCount,
+      securityCount,
+      percentages: {
+        success: pct(successCount),
+        warning: pct(warningCount),
+        failure: pct(failureCount),
+        security: pct(securityCount),
+      },
+      donutData: [
+        { label: "Success", value: successCount, color: "#10b981" },
+        { label: "Security", value: securityCount, color: "#3b82f6" },
+        { label: "Warning", value: warningCount, color: "#f59e0b" },
+        { label: "Error", value: failureCount, color: "#ef4444" },
+      ],
+    };
+  }, [logs, totalCount]);
+
+  // Dynamic ingestion trend computed from database log timestamps (last 7 days)
+  const logTrendData = useMemo(() => {
+    const now = new Date();
+    const buckets: { key: string; label: string; value: number }[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(now.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      const label = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      buckets.push({ key, label, value: 0 });
+    }
+    const bucketMap = new Map(buckets.map((b) => [b.key, b]));
+    for (const log of logs) {
+      if (log.raw_timestamp) {
+        const key = new Date(log.raw_timestamp).toISOString().slice(0, 10);
+        const bucket = bucketMap.get(key);
+        if (bucket) {
+          bucket.value += 1;
+        }
+      }
+    }
+    return buckets.map(({ label, value }) => ({ label, value }));
+  }, [logs]);
+
+  // Dynamic Recent Security Audits derived strictly from database logs
+  const recentCriticalEvents = useMemo(() => {
+    return logs
+      .filter((l) => l.category === "SECURITY" || l.status === "FAILURE")
+      .slice(0, 5)
+      .map((l) => ({
+        id: l.id,
+        title: `${l.action} (${l.target})`,
+        time: l.timestamp,
+        ip: l.ip_address,
+        status: l.status,
+      }));
+  }, [logs]);
 
   const filteredLogs = useMemo(() => {
     return logs.filter((log) => {
@@ -163,13 +227,65 @@ export default function ActivityLogsPage() {
     });
   }, [logs, activeTab, selectedCategory, selectedStatus, searchQuery]);
 
+  // Reset pagination when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab, selectedCategory, selectedStatus, searchQuery]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredLogs.length / pageSize));
+  const paginatedLogs = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredLogs.slice(start, start + pageSize);
+  }, [filteredLogs, currentPage]);
+
   const handleExport = (format: "csv" | "json") => {
     setIsExporting(true);
-    setTimeout(() => {
+    try {
+      const filename = `audit_logs_${new Date().toISOString().slice(0, 10)}.${format}`;
+      let blob: Blob;
+      if (format === "json") {
+        blob = new Blob([JSON.stringify(filteredLogs, null, 2)], {
+          type: "application/json;charset=utf-8;",
+        });
+      } else {
+        const headers = [
+          "ID",
+          "Timestamp",
+          "Actor",
+          "Action",
+          "Category",
+          "Target",
+          "Status",
+          "IP Address",
+          "Correlation ID",
+        ];
+        const rows = filteredLogs.map((l) => [
+          l.id,
+          `"${l.timestamp.replace(/"/g, '""')}"`,
+          `"${l.user_email.replace(/"/g, '""')}"`,
+          `"${l.action.replace(/"/g, '""')}"`,
+          l.category,
+          `"${l.target.replace(/"/g, '""')}"`,
+          l.status,
+          l.ip_address,
+          l.correlation_id || "",
+        ]);
+        const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+        blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      }
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      setExportFeedback(`Exported ${filteredLogs.length} database audit records as ${filename}`);
+    } finally {
       setIsExporting(false);
-      setExportFeedback(`Exported ${filteredLogs.length} audit records as audit_logs_${Date.now()}.${format}`);
       setTimeout(() => setExportFeedback(null), 3500);
-    }, 800);
+    }
   };
 
   const getCategoryBadge = (category: string) => {
@@ -224,19 +340,19 @@ export default function ActivityLogsPage() {
               <Layers className="w-3.5 h-3.5" />
             </div>
           </div>
-          <p className="text-2xl font-bold text-white mt-1">24,560</p>
-          <p className="text-[11px] text-emerald-400 mt-1 font-mono">+1,240 last 7d</p>
+          <p className="text-2xl font-bold text-white mt-1">{auditStats.dbTotal}</p>
+          <p className="text-[11px] text-emerald-400 mt-1 font-mono">{auditStats.total} loaded in view</p>
         </div>
 
         <div className="glass-card p-4">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-400">Info Events</span>
+            <span className="text-xs font-medium text-slate-400">Security Events</span>
             <div className="w-7 h-7 rounded-lg bg-blue-500/15 flex items-center justify-center text-blue-400">
               <Info className="w-3.5 h-3.5" />
             </div>
           </div>
-          <p className="text-2xl font-bold text-blue-400 mt-1">15,682</p>
-          <p className="text-[11px] text-slate-400 mt-1 font-mono">63.8% of volume</p>
+          <p className="text-2xl font-bold text-blue-400 mt-1">{auditStats.securityCount}</p>
+          <p className="text-[11px] text-slate-400 mt-1 font-mono">{auditStats.percentages.security}% of volume</p>
         </div>
 
         <div className="glass-card p-4">
@@ -246,8 +362,8 @@ export default function ActivityLogsPage() {
               <CheckCircle2 className="w-3.5 h-3.5" />
             </div>
           </div>
-          <p className="text-2xl font-bold text-emerald-400 mt-1">6,245</p>
-          <p className="text-[11px] text-emerald-400 mt-1 font-mono">25.4% of volume</p>
+          <p className="text-2xl font-bold text-emerald-400 mt-1">{auditStats.successCount}</p>
+          <p className="text-[11px] text-emerald-400 mt-1 font-mono">{auditStats.percentages.success}% of volume</p>
         </div>
 
         <div className="glass-card p-4">
@@ -257,8 +373,8 @@ export default function ActivityLogsPage() {
               <AlertTriangle className="w-3.5 h-3.5" />
             </div>
           </div>
-          <p className="text-2xl font-bold text-amber-400 mt-1">1,983</p>
-          <p className="text-[11px] text-amber-400 mt-1 font-mono">8.1% of volume</p>
+          <p className="text-2xl font-bold text-amber-400 mt-1">{auditStats.warningCount}</p>
+          <p className="text-[11px] text-amber-400 mt-1 font-mono">{auditStats.percentages.warning}% of volume</p>
         </div>
 
         <div className="glass-card p-4">
@@ -268,8 +384,8 @@ export default function ActivityLogsPage() {
               <XCircle className="w-3.5 h-3.5" />
             </div>
           </div>
-          <p className="text-2xl font-bold text-rose-400 mt-1">650</p>
-          <p className="text-[11px] text-rose-400 mt-1 font-mono">2.7% error rate</p>
+          <p className="text-2xl font-bold text-rose-400 mt-1">{auditStats.failureCount}</p>
+          <p className="text-[11px] text-rose-400 mt-1 font-mono">{auditStats.percentages.failure}% error rate</p>
         </div>
       </div>
 
@@ -285,6 +401,31 @@ export default function ActivityLogsPage() {
                 <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono">
                   {filteredLogs.length} events
                 </span>
+                <button
+                  onClick={loadLiveLogs}
+                  className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-400 hover:text-slate-200 transition-colors"
+                  title="Refresh database audit logs"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => handleExport("csv")}
+                  disabled={isExporting}
+                  className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs text-slate-300 inline-flex items-center gap-1.5 transition-colors"
+                  title="Export filtered logs to CSV"
+                >
+                  <Download className="w-3.5 h-3.5 text-brand-purple" />
+                  <span>CSV</span>
+                </button>
+                <button
+                  onClick={() => handleExport("json")}
+                  disabled={isExporting}
+                  className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs text-slate-300 inline-flex items-center gap-1.5 transition-colors"
+                  title="Export filtered logs to JSON"
+                >
+                  <Download className="w-3.5 h-3.5 text-brand-cyan" />
+                  <span>JSON</span>
+                </button>
               </div>
 
               {/* Tabs */}
@@ -361,44 +502,79 @@ export default function ActivityLogsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-850 font-mono">
-                  {filteredLogs.map((log) => (
-                    <tr key={log.id} className="hover:bg-slate-800/30 transition-colors">
-                      <td className="py-3 text-slate-400 whitespace-nowrap">{log.timestamp}</td>
-                      <td className="py-3 font-sans">
-                        <span className="text-slate-200 font-medium block truncate max-w-[130px]">
-                          {log.user_email}
-                        </span>
-                      </td>
-                      <td className="py-3 font-sans">
-                        <p className="text-slate-200 font-semibold">{log.action}</p>
-                        <p className="text-[11px] text-slate-400 font-mono truncate max-w-[200px]">{log.target}</p>
-                      </td>
-                      <td className="py-3 font-sans">{getCategoryBadge(log.category)}</td>
-                      <td className="py-3 font-sans">{getStatusBadge(log.status)}</td>
-                      <td className="py-3 text-slate-400">{log.ip_address}</td>
-                      <td className="py-3 text-right font-sans">
-                        <button
-                          onClick={() => setSelectedLog(log)}
-                          className="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-brand-blue transition-colors"
-                          title="Inspect full audit record"
-                        >
-                          <Eye className="w-3.5 h-3.5" />
-                        </button>
+                  {isLoading ? (
+                    <tr>
+                      <td colSpan={7} className="py-8 text-center text-slate-400 font-sans">
+                        Loading audit logs from database...
                       </td>
                     </tr>
-                  ))}
+                  ) : paginatedLogs.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-8 text-center text-slate-400 font-sans">
+                        No audit log entries found in database matching current filters.
+                      </td>
+                    </tr>
+                  ) : (
+                    paginatedLogs.map((log) => (
+                      <tr key={log.id} className="hover:bg-slate-800/30 transition-colors">
+                        <td className="py-3 text-slate-400 whitespace-nowrap">{log.timestamp}</td>
+                        <td className="py-3 font-sans">
+                          <span className="text-slate-200 font-medium block truncate max-w-[130px]">
+                            {log.user_email}
+                          </span>
+                        </td>
+                        <td className="py-3 font-sans">
+                          <p className="text-slate-200 font-semibold">{log.action}</p>
+                          <p className="text-[11px] text-slate-400 font-mono truncate max-w-[200px]">{log.target}</p>
+                        </td>
+                        <td className="py-3 font-sans">{getCategoryBadge(log.category)}</td>
+                        <td className="py-3 font-sans">{getStatusBadge(log.status)}</td>
+                        <td className="py-3 text-slate-400">{log.ip_address}</td>
+                        <td className="py-3 text-right font-sans">
+                          <button
+                            onClick={() => setSelectedLog(log)}
+                            className="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-brand-blue transition-colors"
+                            title="Inspect full audit record"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
 
             {/* Pagination */}
             <div className="flex items-center justify-between pt-4 border-t border-slate-800 text-xs text-slate-400">
-              <span>Showing 1 to {filteredLogs.length} of {filteredLogs.length} records</span>
+              <span>
+                Showing {filteredLogs.length === 0 ? 0 : (currentPage - 1) * pageSize + 1} to{" "}
+                {Math.min(currentPage * pageSize, filteredLogs.length)} of {filteredLogs.length} records
+              </span>
               <div className="flex items-center gap-1">
-                <button className="px-2.5 py-1 rounded bg-brand-blue text-white font-medium">1</button>
-                <button className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300">2</button>
-                <button className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300">3</button>
-                <button className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300">Next</button>
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                  <button
+                    key={page}
+                    onClick={() => setCurrentPage(page)}
+                    className={`px-2.5 py-1 rounded font-medium ${
+                      currentPage === page
+                        ? "bg-brand-blue text-white"
+                        : "bg-slate-800 hover:bg-slate-700 text-slate-300"
+                    }`}
+                  >
+                    {page}
+                  </button>
+                ))}
+                {totalPages > 1 && (
+                  <button
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={currentPage >= totalPages}
+                    className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-40"
+                  >
+                    Next
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -409,42 +585,50 @@ export default function ActivityLogsPage() {
           {/* Logs Volume Overview Donut */}
           <div className="glass-card p-5">
             <h3 className="text-base font-semibold text-white mb-1">Logs Distribution</h3>
-            <p className="text-xs text-slate-400 mb-4">Volume grouped by event level</p>
+            <p className="text-xs text-slate-400 mb-4">Volume grouped by event outcome</p>
 
             <div className="flex justify-center my-2">
               <DonutChart
-                data={logOverviewDonut}
+                data={auditStats.donutData}
                 size={170}
                 strokeWidth={18}
-                centerLabel="24.5k"
-                centerSub="Total Logs"
+                centerLabel={String(auditStats.total)}
+                centerSub="Loaded Logs"
               />
             </div>
 
             <div className="mt-4 pt-3 border-t border-slate-800 space-y-2 text-xs">
               <div className="flex justify-between text-slate-300">
                 <span className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-blue-400" /> Info
+                  <span className="w-2 h-2 rounded-full bg-emerald-400" /> Success
                 </span>
-                <span className="font-mono text-slate-400">63.8% (15,682)</span>
+                <span className="font-mono text-slate-400">
+                  {auditStats.percentages.success}% ({auditStats.successCount})
+                </span>
               </div>
               <div className="flex justify-between text-slate-300">
                 <span className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400" /> Success
+                  <span className="w-2 h-2 rounded-full bg-blue-400" /> Security Events
                 </span>
-                <span className="font-mono text-slate-400">25.4% (6,245)</span>
+                <span className="font-mono text-slate-400">
+                  {auditStats.percentages.security}% ({auditStats.securityCount})
+                </span>
               </div>
               <div className="flex justify-between text-slate-300">
                 <span className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-amber-400" /> Warning
                 </span>
-                <span className="font-mono text-slate-400">8.1% (1,983)</span>
+                <span className="font-mono text-slate-400">
+                  {auditStats.percentages.warning}% ({auditStats.warningCount})
+                </span>
               </div>
               <div className="flex justify-between text-slate-300">
                 <span className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-rose-400" /> Error / Failures
                 </span>
-                <span className="font-mono text-slate-400">2.7% (650)</span>
+                <span className="font-mono text-slate-400">
+                  {auditStats.percentages.failure}% ({auditStats.failureCount})
+                </span>
               </div>
             </div>
           </div>
@@ -452,36 +636,40 @@ export default function ActivityLogsPage() {
           {/* Logs Trend Chart */}
           <div className="glass-card p-5">
             <h3 className="text-base font-semibold text-white mb-1">Audit Ingestion Trend</h3>
-            <p className="text-xs text-slate-400 mb-3">Daily log ingestion volume</p>
+            <p className="text-xs text-slate-400 mb-3">Daily log ingestion volume (last 7 days)</p>
             <LineChart
               data={logTrendData}
               color="#8b5cf6"
               height={140}
-              unit=" msgs"
+              unit=" events"
             />
           </div>
 
           {/* Recent Critical Events Feed */}
           <div className="glass-card p-5">
             <h3 className="text-base font-semibold text-white mb-1">Recent Security Audits</h3>
-            <p className="text-xs text-slate-400 mb-3">High-priority compliance events</p>
+            <p className="text-xs text-slate-400 mb-3">High-priority compliance & failure events</p>
 
             <div className="space-y-2.5">
-              {recentCriticalEvents.map((evt, i) => (
-                <div
-                  key={i}
-                  className="p-2.5 rounded-lg bg-slate-900/70 border border-slate-800 text-xs flex items-center justify-between"
-                >
-                  <div className="flex items-center gap-2">
-                    <Shield className="w-4 h-4 text-rose-400 shrink-0" />
-                    <div>
-                      <p className="text-slate-200 font-medium">{evt.title}</p>
-                      <p className="text-[11px] text-slate-500 font-mono">IP: {evt.ip}</p>
+              {recentCriticalEvents.length === 0 ? (
+                <p className="text-xs text-slate-500">No recent security or failure audit events in database.</p>
+              ) : (
+                recentCriticalEvents.map((evt) => (
+                  <div
+                    key={evt.id}
+                    className="p-2.5 rounded-lg bg-slate-900/70 border border-slate-800 text-xs flex items-center justify-between gap-2"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Shield className="w-4 h-4 text-rose-400 shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-slate-200 font-medium truncate">{evt.title}</p>
+                        <p className="text-[11px] text-slate-500 font-mono">IP: {evt.ip}</p>
+                      </div>
                     </div>
+                    <span className="text-[10px] text-slate-400 font-mono shrink-0">{evt.time}</span>
                   </div>
-                  <span className="text-[10px] text-slate-400 font-mono">{evt.time}</span>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
         </div>
@@ -498,7 +686,7 @@ export default function ActivityLogsPage() {
             <div className="grid grid-cols-2 gap-3 p-3 rounded-lg bg-slate-950/70 border border-slate-800">
               <div>
                 <span className="text-slate-500 block">Log ID:</span>
-                <span className="font-mono text-slate-200">{selectedLog.id}</span>
+                <span className="font-mono text-slate-200 break-all">{selectedLog.id}</span>
               </div>
               <div>
                 <span className="text-slate-500 block">Timestamp:</span>
@@ -522,10 +710,19 @@ export default function ActivityLogsPage() {
               </div>
             </div>
 
+            {selectedLog.metadata && Object.keys(selectedLog.metadata).length > 0 && (
+              <div>
+                <span className="text-slate-400 font-medium block mb-1">Audit Metadata</span>
+                <pre className="p-2.5 rounded bg-slate-950 border border-slate-800 font-mono text-[11px] text-slate-300 overflow-x-auto">
+                  {JSON.stringify(selectedLog.metadata, null, 2)}
+                </pre>
+              </div>
+            )}
+
             <div>
               <span className="text-slate-400 font-medium block mb-1">Verification Hash (SHA-256)</span>
               <div className="p-2 rounded bg-slate-950 border border-slate-800 font-mono text-[11px] text-emerald-400 break-all">
-                {selectedLog.hash || "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+                {selectedLog.hash}
               </div>
             </div>
 
@@ -552,3 +749,4 @@ export default function ActivityLogsPage() {
     </div>
   );
 }
+

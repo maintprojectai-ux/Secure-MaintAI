@@ -1804,8 +1804,9 @@ export async function getUsers(params?: {
 export async function createUser(payload: {
   username: string;
   email: string;
-  password?: string;
+  password: string;
   role: string;
+  status?: string;
 }): Promise<any> {
   return apiFetch<any>("/users", {
     method: "POST",
@@ -1815,7 +1816,7 @@ export async function createUser(payload: {
 
 export async function updateUser(
   userId: string,
-  payload: { status?: string; role_id?: string }
+  payload: { status?: string; role?: string; email?: string }
 ): Promise<any> {
   return apiFetch<any>(`/users/${userId}`, {
     method: "PATCH",
