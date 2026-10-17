@@ -1948,17 +1948,45 @@ export async function updateMaintenanceTaskStatus(
 // Live Executive Reports API
 // -------------------------------------------------------------
 
+export interface ReportThreatRow {
+  id: string;
+  threat_name: string;
+  severity: string;
+  occurrences: number;
+  status: string;
+  first_detected: string;
+}
+
+export interface ReportUptimeTrendPoint {
+  date: string;
+  label: string;
+  value: number;
+}
+
 export interface ExecutiveReportSummary {
   generated_at: string;
   fleet_total_workstations: number;
   fleet_online_workstations: number;
+  fleet_offline_workstations: number;
+  fleet_warning_workstations: number;
+  fleet_new_workstations_7d: number;
   fleet_uptime_percentage: number;
+  uptime_trend: ReportUptimeTrendPoint[];
   total_incidents: number;
   active_security_threats: number;
   resolved_incidents: number;
   maintenance_advisories: number;
   total_alerts: number;
   critical_alerts: number;
+  high_alerts: number;
+  medium_alerts: number;
+  low_alerts: number;
+  alert_categories: Record<string, number>;
+  top_threats: ReportThreatRow[];
+  avg_cpu_usage: number;
+  avg_memory_usage: number;
+  avg_disk_activity: number;
+  avg_network_activity: number;
   mean_time_to_resolution_minutes: number;
   threat_distribution: Record<string, number>;
   system_health_rating: string;
@@ -1991,14 +2019,33 @@ export async function downloadReportExport(format: "csv" | "json" = "csv"): Prom
 export interface SystemSettingsData {
   app_name: string;
   app_env: string;
+  org_name: string;
+  primary_domain: string;
+  timezone: string;
+  date_format: string;
+  session_timeout_minutes: number;
+  mfa_enabled: boolean;
+  strong_password_policy: boolean;
+  ip_whitelisting: boolean;
   kill_switch_active: boolean;
   smd_threshold: number;
   sysmon_confidence: number;
   auto_surgical_isolation: boolean;
   notify_critical: boolean;
+  notify_sms: boolean;
   notify_daily_report: boolean;
+  selected_theme: string;
+  accent_color: string;
   idp_mode: string;
   idp_status: string;
+  db_users_count: number;
+  db_workstations_count: number;
+  db_online_workstations_count: number;
+  db_incidents_count: number;
+  db_alerts_count: number;
+  db_telemetry_count: number;
+  db_audit_logs_count: number;
+  last_backup_at?: string | null;
 }
 
 export interface IdPHealthCheck {
@@ -2014,7 +2061,9 @@ export async function getSystemSettings(): Promise<SystemSettingsData> {
   return apiFetch<SystemSettingsData>("/system/settings");
 }
 
-export async function updateSystemSettings(payload: Partial<SystemSettingsData>): Promise<SystemSettingsData> {
+export async function updateSystemSettings(
+  payload: Partial<SystemSettingsData> & { trigger_backup?: boolean }
+): Promise<SystemSettingsData> {
   return apiFetch<SystemSettingsData>("/system/settings", {
     method: "PATCH",
     body: JSON.stringify(payload),

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import Link from "next/link";
 import {
   FileText,
@@ -21,68 +21,55 @@ import {
   Mail,
   Check,
   X,
+  RefreshCw,
 } from "lucide-react";
 import { DonutChart } from "@/components/charts/DonutChart";
 import { LineChart } from "@/components/charts/LineChart";
 import {
-  MOCK_EXECUTIVE_REPORT_KPIS,
-  MOCK_REPORT_HEALTH_OVERVIEW,
-  MOCK_REPORT_UPTIME_TREND,
-  MOCK_REPORT_ALERTS_OVERVIEW,
-  MOCK_REPORT_SECURITY_KPIS,
-  MOCK_TOP_THREATS_WEEK,
-  MOCK_TOP_ALERT_CATEGORIES,
-  MOCK_RESOURCE_UTILIZATION,
-  MOCK_REPORT_RECOMMENDATIONS,
+  ExecutiveReportSummary,
   getReportSummary,
   downloadReportExport,
 } from "@/lib/api";
 
+const EMPTY_SUMMARY: ExecutiveReportSummary = {
+  generated_at: new Date().toISOString(),
+  fleet_total_workstations: 0,
+  fleet_online_workstations: 0,
+  fleet_offline_workstations: 0,
+  fleet_warning_workstations: 0,
+  fleet_new_workstations_7d: 0,
+  fleet_uptime_percentage: 0,
+  uptime_trend: [],
+  total_incidents: 0,
+  active_security_threats: 0,
+  resolved_incidents: 0,
+  maintenance_advisories: 0,
+  total_alerts: 0,
+  critical_alerts: 0,
+  high_alerts: 0,
+  medium_alerts: 0,
+  low_alerts: 0,
+  alert_categories: {},
+  top_threats: [],
+  avg_cpu_usage: 0,
+  avg_memory_usage: 0,
+  avg_disk_activity: 0,
+  avg_network_activity: 0,
+  mean_time_to_resolution_minutes: 0,
+  threat_distribution: {},
+  system_health_rating: "Loading...",
+};
+
 export default function ReportsPage() {
-  // Sub-toolbar state
-  const [dateRange, setDateRange] = useState("Sep 10, 2026 - Sep 16, 2026");
+  const [summary, setSummary] = useState<ExecutiveReportSummary>(EMPTY_SUMMARY);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [dateRange, setDateRange] = useState("Last 7 Days");
   const [showDateDropdown, setShowDateDropdown] = useState(false);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [showExportDropdown, setShowExportDropdown] = useState(false);
   const [feedbackToast, setFeedbackToast] = useState<string | null>(null);
-  const [kpis, setKpis] = useState(MOCK_EXECUTIVE_REPORT_KPIS);
-
-  // Live Executive Summary data fetch with dual-mode fallback
-  useEffect(() => {
-    let isMounted = true;
-    async function loadReportSummary() {
-      try {
-        const summary = await getReportSummary();
-        if (isMounted && summary) {
-          setKpis({
-            total_devices: summary.fleet_total_workstations,
-            total_devices_change: "+12 from last week",
-            system_uptime: summary.fleet_uptime_percentage,
-            system_uptime_change: "+1.02% vs SLA",
-            critical_alerts: summary.critical_alerts,
-            critical_alerts_change: "-3 from last week",
-            security_score: Math.min(
-              100,
-              Math.round(
-                summary.fleet_uptime_percentage * 0.7 +
-                  Math.max(0, 100 - summary.active_security_threats * 5) * 0.3
-              )
-            ),
-            security_score_change: "+8 points from last week",
-          });
-        }
-      } catch {
-        // Retain default mock baseline
-      }
-    }
-    loadReportSummary();
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
-  // Uptime trend filter state
   const [uptimeWindow, setUptimeWindow] = useState<"7 Days" | "14 Days" | "30 Days">("7 Days");
+  const [selectedUptimePointIdx, setSelectedUptimePointIdx] = useState<number | null>(null);
 
   // Schedule Report Form
   const [scheduleEmail, setScheduleEmail] = useState("admin@university.edu, secops@university.edu");
@@ -91,79 +78,222 @@ export default function ReportsPage() {
   const [scheduleIncludePdf, setScheduleIncludePdf] = useState(true);
   const [scheduleIncludeCsv, setScheduleIncludeCsv] = useState(true);
 
-  // Donut chart data matching users/page.tsx pattern
-  const alertsDonutData = MOCK_REPORT_ALERTS_OVERVIEW.slices.map((slice) => ({
-    label: slice.label,
-    value: slice.count,
-    color: slice.color,
-  }));
+  const loadReportSummary = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const res = await getReportSummary();
+      if (res) {
+        setSummary(res);
+      }
+    } catch {
+      setSummary(EMPTY_SUMMARY);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
-  // Handle Export Download (live streaming CSV with graceful client fallback)
-  const handleTriggerExport = async (format: "pdf" | "excel" | "powerpoint" | "csv") => {
+  useEffect(() => {
+    loadReportSummary();
+  }, [loadReportSummary]);
+
+  // Derived Executive KPIs strictly from database summary
+  const kpis = useMemo(() => {
+    const totalWs = summary.fleet_total_workstations;
+    const uptime = summary.fleet_uptime_percentage;
+    const critAlerts = summary.critical_alerts;
+    const securityScore =
+      totalWs === 0 && summary.total_incidents === 0 && summary.total_alerts === 0
+        ? 100
+        : Math.max(
+            0,
+            Math.min(
+              100,
+              Math.round(
+                uptime * 0.6 +
+                  Math.max(0, 100 - summary.active_security_threats * 10 - critAlerts * 5) * 0.4
+              )
+            )
+          );
+    return {
+      total_devices: totalWs,
+      total_devices_sub: `${summary.fleet_new_workstations_7d} added this week`,
+      system_uptime: uptime,
+      system_uptime_sub: `${summary.fleet_online_workstations} / ${totalWs} online`,
+      critical_alerts: critAlerts,
+      critical_alerts_sub: `${summary.total_alerts} total alerts in DB`,
+      security_score: securityScore,
+      security_score_sub: summary.system_health_rating,
+    };
+  }, [summary]);
+
+  // Section 1: Fleet percentages & Uptime Trend
+  const healthStats = useMemo(() => {
+    const total = summary.fleet_total_workstations;
+    const pct = (count: number) => (total > 0 ? Math.round((count / total) * 1000) / 10 : 0);
+    return {
+      online_devices: summary.fleet_online_workstations,
+      online_percentage: pct(summary.fleet_online_workstations),
+      offline_devices: summary.fleet_offline_workstations,
+      offline_percentage: pct(summary.fleet_offline_workstations),
+      warning_devices: summary.fleet_warning_workstations,
+      warning_percentage: pct(summary.fleet_warning_workstations),
+      new_devices: summary.fleet_new_workstations_7d,
+    };
+  }, [summary]);
+
+  const uptimeTrendPoints = useMemo(() => {
+    const count = uptimeWindow === "7 Days" ? 7 : uptimeWindow === "14 Days" ? 14 : 30;
+    if (Array.isArray(summary.uptime_trend) && summary.uptime_trend.length > 0) {
+      return summary.uptime_trend.slice(-count).map((pt) => ({
+        label: pt.label,
+        value: pt.value,
+      }));
+    }
+    const now = new Date();
+    const pts: { label: string; value: number }[] = [];
+    for (let i = count - 1; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(now.getDate() - i);
+      const label = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      pts.push({ label, value: summary.fleet_uptime_percentage });
+    }
+    return pts;
+  }, [summary.uptime_trend, summary.fleet_uptime_percentage, uptimeWindow]);
+
+  const uptimeWindowStats = useMemo(() => {
+    if (uptimeTrendPoints.length === 0) return { avg: 0, min: 0, max: 0 };
+    const vals = uptimeTrendPoints.map((p) => p.value);
+    const sum = vals.reduce((acc, v) => acc + v, 0);
+    return {
+      avg: Math.round((sum / vals.length) * 100) / 100,
+      min: Math.min(...vals),
+      max: Math.max(...vals),
+    };
+  }, [uptimeTrendPoints]);
+
+  // Section 2: Alerts Overview Donut strictly from database alert severity counts
+  const alertsDonutData = useMemo(() => {
+    return [
+      { label: "Critical", value: summary.critical_alerts, color: "#ef4444" },
+      { label: "High", value: summary.high_alerts, color: "#f97316" },
+      { label: "Medium", value: summary.medium_alerts, color: "#f59e0b" },
+      { label: "Low", value: summary.low_alerts, color: "#3b82f6" },
+    ];
+  }, [summary]);
+
+  // Section 4: Top Alert Categories strictly from database alert source_type counts
+  const alertCategoryRows = useMemo(() => {
+    const labelMap: Record<string, { label: string; color: string }> = {
+      CYBERSECURITY_THREAT: { label: "Cybersecurity Threat", color: "#ef4444" },
+      TECHNICAL_ANOMALY: { label: "Technical Anomaly", color: "#3b82f6" },
+      PREDICTIVE_MAINTENANCE: { label: "Predictive Maintenance", color: "#f59e0b" },
+      HUMAN_INTERVENTION_REQUIRED: { label: "Human Intervention Required", color: "#a855f7" },
+    };
+    const entries = Object.entries(summary.alert_categories || {});
+    if (entries.length === 0) {
+      return Object.entries(labelMap).map(([, meta]) => ({
+        category: meta.label,
+        count: 0,
+        color: meta.color,
+      }));
+    }
+    return entries
+      .map(([key, count]) => ({
+        category: labelMap[key]?.label || key,
+        count: Number(count || 0),
+        color: labelMap[key]?.color || "#3b82f6",
+      }))
+      .sort((a, b) => b.count - a.count);
+  }, [summary.alert_categories]);
+
+  const maxCategoryCount = useMemo(
+    () => Math.max(1, ...alertCategoryRows.map((c) => c.count)),
+    [alertCategoryRows]
+  );
+
+  // Section 5: Resource Utilization strictly from database telemetry averages
+  const resourceUtilization = useMemo(() => {
+    return [
+      { name: "CPU Usage", average: summary.avg_cpu_usage, color: "#3b82f6" },
+      { name: "Memory Usage", average: summary.avg_memory_usage, color: "#8b5cf6" },
+      { name: "Disk Activity", average: summary.avg_disk_activity, color: "#10b981" },
+      { name: "Network I/O", average: summary.avg_network_activity, color: "#f59e0b" },
+    ];
+  }, [summary]);
+
+  // Section 6: Dynamic Recommendations derived from live database findings
+  const dynamicRecommendations = useMemo(() => {
+    const recs: string[] = [];
+    if (summary.critical_alerts > 0) {
+      recs.push(
+        `Investigate and resolve ${summary.critical_alerts} active CRITICAL alert(s) in the Alert Center.`
+      );
+    }
+    if (summary.active_security_threats > 0) {
+      recs.push(
+        `Review ${summary.active_security_threats} security threat/policy incident(s) and verify SOAR surgical containment status.`
+      );
+    }
+    if (summary.fleet_offline_workstations > 0) {
+      recs.push(
+        `Restore agent connectivity on ${summary.fleet_offline_workstations} offline workstation(s).`
+      );
+    }
+    if (summary.maintenance_advisories > 0) {
+      recs.push(
+        `Complete ${summary.maintenance_advisories} scheduled predictive maintenance task(s) to prevent hardware degradation.`
+      );
+    }
+    if (summary.avg_cpu_usage >= 80) {
+      recs.push(
+        `Fleet average CPU utilization is elevated (${summary.avg_cpu_usage}%). Inspect compute workloads across lab nodes.`
+      );
+    }
+    if (recs.length === 0) {
+      recs.push(
+        "All monitored workstations, security policies, and telemetry pipelines are operating within nominal parameters."
+      );
+    }
+    return recs;
+  }, [summary]);
+
+  const generatedTimestampStr = useMemo(() => {
+    if (!summary.generated_at) return "Recent";
+    return new Date(summary.generated_at).toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }, [summary.generated_at]);
+
+  // Handle Export Download (live streaming CSV / JSON / Print PDF from backend)
+  const handleTriggerExport = async (format: "pdf" | "json" | "csv") => {
     setShowExportDropdown(false);
 
-    if (format === "csv") {
+    if (format === "csv" || format === "json") {
       try {
-        const blob = await downloadReportExport("csv");
+        const blob = await downloadReportExport(format);
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement("a");
         link.href = url;
-        link.download = `secure-maintai-executive-report-${new Date().toISOString().slice(0, 10)}.csv`;
+        link.download = `secure-maintai-executive-report-${new Date().toISOString().slice(0, 10)}.${format}`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
         window.URL.revokeObjectURL(url);
-        setFeedbackToast("Live CSV Forensic Report downloaded successfully from backend.");
-      } catch {
-        // Fallback to client-side CSV generator if offline
-        const csvRows = [
-          ["Secure-MaintAI Infrastructure & Security Report"],
-          ["Report Period", dateRange],
-          ["Generated On", "Sep 16, 2026 - 10:30 AM AST"],
-          ["Generated By", "Secure-MaintAI Platform"],
-          [],
-          ["Executive KPI", "Value", "Delta"],
-          ["Total Devices", kpis.total_devices.toString(), kpis.total_devices_change],
-          ["System Uptime", `${kpis.system_uptime}%`, kpis.system_uptime_change],
-          ["Critical Alerts", kpis.critical_alerts.toString(), kpis.critical_alerts_change],
-          ["Security Score", `${kpis.security_score} / 100`, kpis.security_score_change],
-          [],
-          ["Top Threat Name", "Severity", "Occurrences", "Status", "First Detected"],
-          ...MOCK_TOP_THREATS_WEEK.map((t) => [
-            t.threat_name,
-            t.severity,
-            t.occurrences.toString(),
-            t.status,
-            t.first_detected,
-          ]),
-          [],
-          ["Alert Category", "Alert Count"],
-          ...MOCK_TOP_ALERT_CATEGORIES.map((c) => [c.category, c.count.toString()]),
-        ];
-
-        const csvContent =
-          "data:text/csv;charset=utf-8," +
-          csvRows.map((e) => e.map((val) => `"${val}"`).join(",")).join("\n");
-        const encodedUri = encodeURI(csvContent);
-        const link = document.createElement("a");
-        link.setAttribute("href", encodedUri);
-        link.setAttribute(
-          "download",
-          `secure-maintai-executive-report-${new Date().toISOString().slice(0, 10)}.csv`
+        setFeedbackToast(
+          `Database ${format.toUpperCase()} forensic report downloaded from backend.`
         );
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-
-        setFeedbackToast("CSV Report downloaded successfully.");
+      } catch (err: any) {
+        setFeedbackToast(
+          err?.message || `Failed to export ${format.toUpperCase()} report from backend.`
+        );
       }
     } else if (format === "pdf") {
       window.print();
       setFeedbackToast("Print / PDF compilation dialog opened.");
-    } else {
-      setFeedbackToast(
-        `Compiled and initiated download for ${format.toUpperCase()} executive summary.`
-      );
     }
 
     setTimeout(() => setFeedbackToast(null), 4000);
@@ -191,47 +321,57 @@ export default function ReportsPage() {
         </div>
       )}
 
-      {/* In-Page Sub-Toolbar matching Reports page.jpeg */}
+      {/* In-Page Sub-Toolbar */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
         {/* Date Range Selector Dropdown */}
-        <div className="relative">
-          <button
-            onClick={() => setShowDateDropdown(!showDateDropdown)}
-            className="px-3.5 py-2 rounded-xl bg-slate-900/80 border border-slate-800 hover:border-slate-700 text-xs font-medium text-slate-200 flex items-center gap-2 transition-colors cursor-pointer"
-          >
-            <Calendar className="w-3.5 h-3.5 text-slate-400" />
-            <span>{dateRange}</span>
-            <ChevronDown className="w-3.5 h-3.5 text-slate-400 ml-1" />
-          </button>
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <button
+              onClick={() => setShowDateDropdown(!showDateDropdown)}
+              className="px-3.5 py-2 rounded-xl bg-slate-900/80 border border-slate-800 hover:border-slate-700 text-xs font-medium text-slate-200 flex items-center gap-2 transition-colors cursor-pointer"
+            >
+              <Calendar className="w-3.5 h-3.5 text-slate-400" />
+              <span>{dateRange}</span>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400 ml-1" />
+            </button>
 
-          {showDateDropdown && (
-            <div className="absolute left-0 top-11 w-64 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-30 py-1.5 text-xs animate-fade-in">
-              {[
-                "Sep 10, 2026 - Sep 16, 2026",
-                "Sep 03, 2026 - Sep 16, 2026",
-                "Aug 17, 2026 - Sep 16, 2026",
-                "Sep 01, 2026 - Sep 16, 2026",
-              ].map((range) => (
-                <button
-                  key={range}
-                  onClick={() => {
-                    setDateRange(range);
-                    setShowDateDropdown(false);
-                    setFeedbackToast(`Report period updated to ${range}.`);
-                    setTimeout(() => setFeedbackToast(null), 3000);
-                  }}
-                  className={`w-full px-3.5 py-2 text-left transition-colors flex items-center justify-between cursor-pointer ${
-                    dateRange === range
-                      ? "text-blue-400 bg-blue-500/10 font-semibold"
-                      : "text-slate-300 hover:bg-slate-800 hover:text-white"
-                  }`}
-                >
-                  <span>{range}</span>
-                  {dateRange === range && <Check className="w-3.5 h-3.5" />}
-                </button>
-              ))}
-            </div>
-          )}
+            {showDateDropdown && (
+              <div className="absolute left-0 top-11 w-56 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-30 py-1.5 text-xs animate-fade-in">
+                {["Last 7 Days", "Last 14 Days", "Last 30 Days", "All Time (Database)"].map(
+                  (range) => (
+                    <button
+                      key={range}
+                      onClick={() => {
+                        setDateRange(range);
+                        setShowDateDropdown(false);
+                        loadReportSummary();
+                        setFeedbackToast(`Report refreshed for period: ${range}.`);
+                        setTimeout(() => setFeedbackToast(null), 3000);
+                      }}
+                      className={`w-full px-3.5 py-2 text-left transition-colors flex items-center justify-between cursor-pointer ${
+                        dateRange === range
+                          ? "text-blue-400 bg-blue-500/10 font-semibold"
+                          : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                      }`}
+                    >
+                      <span>{range}</span>
+                      {dateRange === range && <Check className="w-3.5 h-3.5" />}
+                    </button>
+                  )
+                )}
+              </div>
+            )}
+          </div>
+
+          <button
+            onClick={loadReportSummary}
+            disabled={isLoading}
+            className="px-3 py-2 rounded-xl bg-slate-900/80 border border-slate-800 hover:border-slate-700 text-xs font-medium text-slate-300 hover:text-white flex items-center gap-1.5 transition-colors cursor-pointer"
+            title="Refresh live database report"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? "animate-spin text-blue-400" : "text-slate-400"}`} />
+            <span>Refresh</span>
+          </button>
         </div>
 
         {/* Action Buttons: Schedule Report + Export Report */}
@@ -255,7 +395,7 @@ export default function ReportsPage() {
             </button>
 
             {showExportDropdown && (
-              <div className="absolute right-0 top-11 w-48 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-30 py-1.5 text-xs animate-fade-in">
+              <div className="absolute right-0 top-11 w-52 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-30 py-1.5 text-xs animate-fade-in">
                 <button
                   onClick={() => handleTriggerExport("pdf")}
                   className="w-full px-3.5 py-2 text-left text-slate-200 hover:bg-slate-800 flex items-center gap-2.5 transition-colors cursor-pointer"
@@ -263,25 +403,7 @@ export default function ReportsPage() {
                   <span className="w-5 h-5 rounded bg-rose-500/15 border border-rose-500/30 text-rose-400 flex items-center justify-center font-bold text-[10px]">
                     PDF
                   </span>
-                  <span>Export as PDF Document</span>
-                </button>
-                <button
-                  onClick={() => handleTriggerExport("excel")}
-                  className="w-full px-3.5 py-2 text-left text-slate-200 hover:bg-slate-800 flex items-center gap-2.5 transition-colors cursor-pointer"
-                >
-                  <span className="w-5 h-5 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center font-bold text-[10px]">
-                    XLS
-                  </span>
-                  <span>Export as Excel Sheet</span>
-                </button>
-                <button
-                  onClick={() => handleTriggerExport("powerpoint")}
-                  className="w-full px-3.5 py-2 text-left text-slate-200 hover:bg-slate-800 flex items-center gap-2.5 transition-colors cursor-pointer"
-                >
-                  <span className="w-5 h-5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center font-bold text-[10px]">
-                    PPT
-                  </span>
-                  <span>Export as PowerPoint</span>
+                  <span>Print / Save as PDF</span>
                 </button>
                 <button
                   onClick={() => handleTriggerExport("csv")}
@@ -290,7 +412,16 @@ export default function ReportsPage() {
                   <span className="w-5 h-5 rounded bg-blue-500/15 border border-blue-500/30 text-blue-400 flex items-center justify-center font-bold text-[10px]">
                     CSV
                   </span>
-                  <span>Export as CSV Data</span>
+                  <span>Export Database CSV</span>
+                </button>
+                <button
+                  onClick={() => handleTriggerExport("json")}
+                  className="w-full px-3.5 py-2 text-left text-slate-200 hover:bg-slate-800 flex items-center gap-2.5 transition-colors cursor-pointer"
+                >
+                  <span className="w-5 h-5 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center font-bold text-[10px]">
+                    JSON
+                  </span>
+                  <span>Export Database JSON</span>
                 </button>
               </div>
             )}
@@ -298,7 +429,7 @@ export default function ReportsPage() {
         </div>
       </div>
 
-      {/* Top Banner: Executive Summary (Weekly Infrastructure Report) */}
+      {/* Top Banner: Executive Summary */}
       <div className="glass-card p-6 rounded-2xl border border-slate-800 relative overflow-hidden bg-gradient-to-r from-slate-900/90 via-slate-900/75 to-blue-950/30">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
           {/* Left Metadata Block */}
@@ -309,7 +440,7 @@ export default function ReportsPage() {
             <div className="space-y-2">
               <div>
                 <h2 className="text-lg font-bold text-white tracking-tight">Executive Summary</h2>
-                <p className="text-xs text-slate-400">Weekly Infrastructure Report</p>
+                <p className="text-xs text-slate-400">Live Database Infrastructure & Security Report</p>
               </div>
               <div className="space-y-1 text-xs text-slate-400">
                 <div className="flex items-center gap-2">
@@ -318,7 +449,7 @@ export default function ReportsPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-slate-500 w-24">Generated On</span>
-                  <span className="font-medium text-slate-200 font-mono">Sep 16, 2026 - 10:30 AM</span>
+                  <span className="font-medium text-slate-200 font-mono">{generatedTimestampStr}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-slate-500 w-24">Generated By</span>
@@ -337,7 +468,7 @@ export default function ReportsPage() {
                 {kpis.total_devices}
               </div>
               <div className="text-[11px] font-medium text-emerald-400 flex items-center gap-1">
-                <span>{kpis.total_devices_change}</span>
+                <span>{kpis.total_devices_sub}</span>
               </div>
             </div>
 
@@ -348,7 +479,7 @@ export default function ReportsPage() {
                 {kpis.system_uptime}%
               </div>
               <div className="text-[11px] font-medium text-emerald-400 flex items-center gap-1">
-                <span>{kpis.system_uptime_change}</span>
+                <span>{kpis.system_uptime_sub}</span>
               </div>
             </div>
 
@@ -359,7 +490,7 @@ export default function ReportsPage() {
                 {kpis.critical_alerts}
               </div>
               <div className="text-[11px] font-medium text-rose-400 flex items-center gap-1">
-                <span>{kpis.critical_alerts_change}</span>
+                <span>{kpis.critical_alerts_sub}</span>
               </div>
             </div>
 
@@ -373,7 +504,7 @@ export default function ReportsPage() {
                 <span className="text-xs text-slate-500 font-medium">/100</span>
               </div>
               <div className="text-[11px] font-medium text-emerald-400 flex items-center gap-1">
-                <span>{kpis.security_score_change}</span>
+                <span>{kpis.security_score_sub}</span>
               </div>
             </div>
           </div>
@@ -427,10 +558,10 @@ export default function ReportsPage() {
                   <span className="text-[11px] text-slate-400 block">Online Devices</span>
                   <div className="flex items-baseline gap-1.5 mt-0.5">
                     <span className="text-lg font-bold text-white">
-                      {MOCK_REPORT_HEALTH_OVERVIEW.online_devices}
+                      {healthStats.online_devices}
                     </span>
                     <span className="text-[11px] text-emerald-400 font-semibold">
-                      {MOCK_REPORT_HEALTH_OVERVIEW.online_percentage}%
+                      {healthStats.online_percentage}%
                     </span>
                   </div>
                 </div>
@@ -445,10 +576,10 @@ export default function ReportsPage() {
                   <span className="text-[11px] text-slate-400 block">Offline Devices</span>
                   <div className="flex items-baseline gap-1.5 mt-0.5">
                     <span className="text-lg font-bold text-white">
-                      {MOCK_REPORT_HEALTH_OVERVIEW.offline_devices}
+                      {healthStats.offline_devices}
                     </span>
                     <span className="text-[11px] text-rose-400 font-semibold">
-                      {MOCK_REPORT_HEALTH_OVERVIEW.offline_percentage}%
+                      {healthStats.offline_percentage}%
                     </span>
                   </div>
                 </div>
@@ -463,10 +594,10 @@ export default function ReportsPage() {
                   <span className="text-[11px] text-slate-400 block">Warning Devices</span>
                   <div className="flex items-baseline gap-1.5 mt-0.5">
                     <span className="text-lg font-bold text-white">
-                      {MOCK_REPORT_HEALTH_OVERVIEW.warning_devices}
+                      {healthStats.warning_devices}
                     </span>
                     <span className="text-[11px] text-amber-400 font-semibold">
-                      {MOCK_REPORT_HEALTH_OVERVIEW.warning_percentage}%
+                      {healthStats.warning_percentage}%
                     </span>
                   </div>
                 </div>
@@ -481,7 +612,7 @@ export default function ReportsPage() {
                   <span className="text-[11px] text-slate-400 block">New Devices</span>
                   <div className="flex items-baseline gap-1.5 mt-0.5">
                     <span className="text-lg font-bold text-white">
-                      {MOCK_REPORT_HEALTH_OVERVIEW.new_devices}
+                      {healthStats.new_devices}
                     </span>
                     <span className="text-[11px] text-blue-400 font-medium">This Week</span>
                   </div>
@@ -489,15 +620,31 @@ export default function ReportsPage() {
               </div>
             </div>
 
-            {/* System Uptime Trend using Reusable LineChart */}
+            {/* System Uptime Trend */}
             <div className="space-y-2 pt-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-300">System Uptime Trend</span>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-3">
+                  <span className="text-xs font-semibold text-slate-300">System Uptime Trend</span>
+                  <div className="flex items-center gap-2 text-[11px] font-mono text-slate-400">
+                    <span>
+                      Avg: <strong className="text-emerald-400">{uptimeWindowStats.avg}%</strong>
+                    </span>
+                    <span>•</span>
+                    <span>
+                      Min: <strong className="text-slate-200">{uptimeWindowStats.min}%</strong>
+                    </span>
+                    <span>•</span>
+                    <span>
+                      Max: <strong className="text-slate-200">{uptimeWindowStats.max}%</strong>
+                    </span>
+                  </div>
+                </div>
                 <select
                   value={uptimeWindow}
                   onChange={(e) => {
-                    const newWin = e.target.value as any;
+                    const newWin = e.target.value as "7 Days" | "14 Days" | "30 Days";
                     setUptimeWindow(newWin);
+                    setSelectedUptimePointIdx(null);
                     setFeedbackToast(`Uptime trend window switched to ${newWin}.`);
                     setTimeout(() => setFeedbackToast(null), 2500);
                   }}
@@ -511,16 +658,23 @@ export default function ReportsPage() {
 
               <div className="pt-2">
                 <LineChart
-                  labels={MOCK_REPORT_UPTIME_TREND.days}
-                  data={MOCK_REPORT_UPTIME_TREND.days.map((d, i) => ({
-                    label: d,
-                    value: MOCK_REPORT_UPTIME_TREND.values[i],
-                  }))}
+                  labels={uptimeTrendPoints.map((p) => p.label)}
+                  series={[
+                    {
+                      id: "fleet-uptime",
+                      name: "Fleet Uptime",
+                      color: "#3b82f6",
+                      data: uptimeTrendPoints.map((p) => p.value),
+                    },
+                  ]}
+                  yMin={0}
+                  yMax={100}
                   height={170}
                   unit="%"
-                  color="#3b82f6"
+                  selectedPointIndex={selectedUptimePointIdx}
                   onPointClick={(label, idx) => {
-                    setFeedbackToast(`Uptime on ${label}: ${MOCK_REPORT_UPTIME_TREND.values[idx]}% (SLA Target met)`);
+                    setSelectedUptimePointIdx(idx);
+                    setFeedbackToast(`Uptime on ${label}: ${uptimeTrendPoints[idx]?.value ?? 0}%`);
                     setTimeout(() => setFeedbackToast(null), 3000);
                   }}
                 />
@@ -543,74 +697,47 @@ export default function ReportsPage() {
               </Link>
             </div>
 
-            {/* 3 Sparkline Stat Cards */}
+            {/* 3 Stat Cards from Database */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {/* Security Score Trend */}
+              {/* Security Score */}
               <div className="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800 space-y-2">
-                <span className="text-xs text-slate-400 block">Security Score Trend</span>
+                <span className="text-xs text-slate-400 block">Security Score</span>
                 <div className="flex items-baseline gap-1">
                   <span className="text-xl font-bold text-white tracking-tight">
-                    {MOCK_REPORT_SECURITY_KPIS.security_score}
+                    {kpis.security_score}
                   </span>
                   <span className="text-xs text-slate-500 font-medium">/100</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] text-emerald-400 font-medium">
-                    {MOCK_REPORT_SECURITY_KPIS.security_score_change}
+                    {summary.system_health_rating}
                   </span>
-                  <svg className="w-20 h-5" viewBox="0 0 80 20">
-                    <path
-                      d="M 0 16 Q 15 14, 25 12 T 50 8 T 80 4"
-                      fill="none"
-                      stroke="#3b82f6"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                    />
-                  </svg>
                 </div>
               </div>
 
-              {/* Threats Detected */}
+              {/* Active Security Threats */}
               <div className="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800 space-y-2">
                 <span className="text-xs text-slate-400 block">Threats Detected</span>
                 <div className="text-xl font-bold text-white tracking-tight">
-                  {MOCK_REPORT_SECURITY_KPIS.threats_detected}
+                  {summary.active_security_threats}
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] text-rose-400 font-medium">
-                    {MOCK_REPORT_SECURITY_KPIS.threats_detected_change}
+                    {summary.total_incidents} total incidents
                   </span>
-                  <svg className="w-20 h-5" viewBox="0 0 80 20">
-                    <path
-                      d="M 0 18 Q 15 15, 30 14 T 55 10 T 80 3"
-                      fill="none"
-                      stroke="#ef4444"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                    />
-                  </svg>
                 </div>
               </div>
 
-              {/* Vulnerabilities */}
+              {/* Resolved Incidents / Maintenance */}
               <div className="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800 space-y-2">
-                <span className="text-xs text-slate-400 block">Vulnerabilities</span>
+                <span className="text-xs text-slate-400 block">Resolved Incidents</span>
                 <div className="text-xl font-bold text-white tracking-tight">
-                  {MOCK_REPORT_SECURITY_KPIS.vulnerabilities}
+                  {summary.resolved_incidents}
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] text-emerald-400 font-medium">
-                    {MOCK_REPORT_SECURITY_KPIS.vulnerabilities_change}
+                    {summary.maintenance_advisories} maintenance tasks
                   </span>
-                  <svg className="w-20 h-5" viewBox="0 0 80 20">
-                    <path
-                      d="M 0 4 Q 20 8, 40 10 T 60 14 T 80 18"
-                      fill="none"
-                      stroke="#a855f7"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                    />
-                  </svg>
                 </div>
               </div>
             </div>
@@ -618,60 +745,59 @@ export default function ReportsPage() {
             {/* Top Threats This Week Table */}
             <div className="pt-1">
               <span className="text-xs font-semibold text-slate-300 block mb-2">
-                Top Threats This Week
+                Top Incidents & Threats in Database
               </span>
               <div className="overflow-x-auto rounded-xl border border-slate-800/80">
                 <table className="w-full text-left text-xs">
                   <thead>
                     <tr className="text-slate-400 border-b border-slate-800 bg-slate-900/50">
-                      <th className="py-2.5 px-3 font-semibold">Threat Name</th>
+                      <th className="py-2.5 px-3 font-semibold">Incident / Threat</th>
                       <th className="py-2.5 px-3 font-semibold">Severity</th>
                       <th className="py-2.5 px-3 font-semibold">Occurrences</th>
                       <th className="py-2.5 px-3 font-semibold">Status</th>
-                      <th className="py-2.5 px-3 font-semibold">First Detected</th>
+                      <th className="py-2.5 px-3 font-semibold">Detected</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/50 font-sans">
-                    {MOCK_TOP_THREATS_WEEK.map((threat) => (
-                      <tr key={threat.id} className="hover:bg-slate-800/30 transition-colors">
-                        <td className="py-2.5 px-3 font-medium text-white">
-                          <div className="flex items-center gap-2">
-                            <Shield className="w-3.5 h-3.5 text-slate-500" />
-                            <span>{threat.threat_name}</span>
-                          </div>
-                        </td>
-                        <td className="py-2.5 px-3 whitespace-nowrap">
-                          <span
-                            className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                              threat.severity === "High"
-                                ? "bg-rose-500/15 text-rose-300 border border-rose-500/30"
-                                : "bg-amber-500/15 text-amber-300 border border-amber-500/30"
-                            }`}
-                          >
-                            {threat.severity}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3 text-slate-300 font-mono">{threat.occurrences}</td>
-                        <td className="py-2.5 px-3 whitespace-nowrap">
-                          <span
-                            className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${
-                              threat.status === "Investigating"
-                                ? "bg-blue-500/15 text-blue-300 border border-blue-500/30"
-                                : threat.status === "Active"
-                                ? "bg-amber-500/15 text-amber-300 border border-amber-500/30"
-                                : threat.status === "Blocked"
-                                ? "bg-rose-500/15 text-rose-300 border border-rose-500/30"
-                                : "bg-cyan-500/15 text-cyan-300 border border-cyan-500/30"
-                            }`}
-                          >
-                            {threat.status}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3 text-slate-400 whitespace-nowrap">
-                          {threat.first_detected}
+                    {summary.top_threats.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="py-6 text-center text-slate-500">
+                          No incidents or threats recorded in the database.
                         </td>
                       </tr>
-                    ))}
+                    ) : (
+                      summary.top_threats.map((threat) => (
+                        <tr key={threat.id} className="hover:bg-slate-800/30 transition-colors">
+                          <td className="py-2.5 px-3 font-medium text-white">
+                            <div className="flex items-center gap-2">
+                              <Shield className="w-3.5 h-3.5 text-slate-500" />
+                              <span>{threat.threat_name}</span>
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-3 whitespace-nowrap">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                                threat.severity.toUpperCase() === "HIGH" ||
+                                threat.severity.toUpperCase() === "CRITICAL"
+                                  ? "bg-rose-500/15 text-rose-300 border border-rose-500/30"
+                                  : "bg-amber-500/15 text-amber-300 border border-amber-500/30"
+                              }`}
+                            >
+                              {threat.severity}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-300 font-mono">{threat.occurrences}</td>
+                          <td className="py-2.5 px-3 whitespace-nowrap">
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-500/15 text-blue-300 border border-blue-500/30">
+                              {threat.status}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-400 whitespace-nowrap">
+                            {threat.first_detected}
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -682,12 +808,12 @@ export default function ReportsPage() {
           <div className="glass-card p-5 rounded-2xl border border-slate-800 space-y-3">
             <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
               <h3 className="text-sm font-bold text-white tracking-tight">
-                5. Resource Utilization
+                5. Resource Utilization (Telemetry Averages)
               </h3>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-              {MOCK_RESOURCE_UTILIZATION.map((item) => (
+              {resourceUtilization.map((item) => (
                 <div
                   key={item.name}
                   className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-between"
@@ -706,7 +832,7 @@ export default function ReportsPage() {
                         <Cpu className="w-3.5 h-3.5" />
                       ) : item.name === "Memory Usage" ? (
                         <Layers className="w-3.5 h-3.5" />
-                      ) : item.name === "Disk Usage" ? (
+                      ) : item.name === "Disk Activity" ? (
                         <HardDrive className="w-3.5 h-3.5" />
                       ) : (
                         <Activity className="w-3.5 h-3.5" />
@@ -716,19 +842,6 @@ export default function ReportsPage() {
                   </div>
 
                   <div className="flex items-center gap-3">
-                    <svg className="w-16 h-4" viewBox="0 0 60 16">
-                      <path
-                        d={`M 0 ${16 - (item.sparkline[0] / 100) * 14} Q 15 ${
-                          16 - (item.sparkline[2] / 100) * 14
-                        }, 30 ${16 - (item.sparkline[4] / 100) * 14} T 60 ${
-                          16 - (item.sparkline[6] / 100) * 14
-                        }`}
-                        fill="none"
-                        stroke={item.color}
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                      />
-                    </svg>
                     <span className="font-mono text-slate-300 font-bold whitespace-nowrap">
                       Avg. {item.average}%
                     </span>
@@ -741,14 +854,14 @@ export default function ReportsPage() {
 
         {/* ================= RIGHT COLUMN (5 COLS) ================= */}
         <div className="lg:col-span-5 space-y-5">
-          {/* Section 2: Alerts Overview (Clean DonutChart matching users/page.tsx) */}
+          {/* Section 2: Alerts Overview */}
           <div className="glass-card p-5 rounded-2xl border border-slate-800 space-y-4">
             <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
               <h3 className="text-sm font-bold text-white tracking-tight">
                 2. Alerts Overview
               </h3>
               <span className="text-[10px] text-slate-400 font-mono">
-                {MOCK_REPORT_ALERTS_OVERVIEW.total_alerts} Total Events
+                {summary.total_alerts} Total Events
               </span>
             </div>
 
@@ -757,13 +870,28 @@ export default function ReportsPage() {
                 data={alertsDonutData}
                 size={170}
                 strokeWidth={18}
-                centerLabel={MOCK_REPORT_ALERTS_OVERVIEW.total_alerts}
+                centerLabel={String(summary.total_alerts)}
                 centerSub="Total Alerts"
                 onSegmentClick={(segment) => {
                   setFeedbackToast(`Selected ${segment.label} alerts (${segment.value} events).`);
                   setTimeout(() => setFeedbackToast(null), 3000);
                 }}
               />
+            </div>
+
+            <div className="pt-2 border-t border-slate-800 space-y-1.5 text-xs">
+              {alertsDonutData.map((s) => (
+                <div key={s.label} className="flex justify-between text-slate-300">
+                  <span className="flex items-center gap-2">
+                    <span
+                      className="w-2 h-2 rounded-full"
+                      style={{ backgroundColor: s.color }}
+                    />
+                    {s.label}
+                  </span>
+                  <span className="font-mono text-slate-400">{s.value}</span>
+                </div>
+              ))}
             </div>
           </div>
 
@@ -776,7 +904,7 @@ export default function ReportsPage() {
             </div>
 
             <div className="space-y-3 pt-1 text-xs">
-              {MOCK_TOP_ALERT_CATEGORIES.map((cat) => (
+              {alertCategoryRows.map((cat) => (
                 <div key={cat.category} className="space-y-1">
                   <div className="flex items-center justify-between">
                     <span className="text-slate-300 font-medium">{cat.category}</span>
@@ -786,7 +914,7 @@ export default function ReportsPage() {
                     <div
                       className="h-full rounded-full transition-all duration-500"
                       style={{
-                        width: `${(cat.count / 20) * 100}%`,
+                        width: `${summary.total_alerts > 0 ? (cat.count / maxCategoryCount) * 100 : 0}%`,
                         backgroundColor: cat.color,
                       }}
                     />
@@ -805,12 +933,20 @@ export default function ReportsPage() {
             </div>
 
             <p className="text-xs text-slate-300 leading-relaxed">
-              Overall, your infrastructure is performing well with high availability and stable
-              resources. However, attention is required on high CPU usage and multiple failed login
-              attempts to prevent potential risks.
+              Database summary across{" "}
+              <span className="text-white font-semibold">{summary.fleet_total_workstations}</span>{" "}
+              managed workstations:{" "}
+              <span className="text-emerald-400 font-semibold">
+                {summary.fleet_online_workstations} online
+              </span>{" "}
+              ({summary.fleet_uptime_percentage}% availability),{" "}
+              <span className="text-white font-semibold">{summary.total_incidents}</span> recorded
+              incidents ({summary.resolved_incidents} resolved), and{" "}
+              <span className="text-rose-400 font-semibold">{summary.critical_alerts}</span>{" "}
+              critical alerts.
             </p>
 
-            {/* Recommendations Card matching mockup */}
+            {/* Recommendations Card */}
             <div className="p-4 rounded-xl bg-blue-950/20 border border-blue-500/30 space-y-2.5">
               <div className="flex items-center gap-2 text-blue-400 text-xs font-bold">
                 <ShieldCheck className="w-4 h-4 text-blue-400" />
@@ -818,7 +954,7 @@ export default function ReportsPage() {
               </div>
 
               <div className="space-y-2 text-xs">
-                {MOCK_REPORT_RECOMMENDATIONS.map((rec, i) => (
+                {dynamicRecommendations.map((rec, i) => (
                   <div key={i} className="flex items-start gap-2 text-slate-200">
                     <Check className="w-3.5 h-3.5 text-emerald-400 mt-0.5 flex-shrink-0" />
                     <span>{rec}</span>
@@ -840,10 +976,10 @@ export default function ReportsPage() {
           <div className="space-y-0.5 text-xs">
             <h4 className="font-bold text-white">Report Distribution</h4>
             <p className="text-slate-400">
-              This report is scheduled to be sent to 5 recipients every week.
+              Cadence: <span className="text-slate-200 font-medium">{scheduleCadence}</span> ({scheduleTime})
             </p>
             <p className="text-slate-300 font-mono text-[11px] pt-1">
-              Next scheduled report: <span className="text-blue-400 font-semibold">Sep 23, 2026</span>
+              Recipients: <span className="text-blue-400 font-semibold">{scheduleEmail}</span>
             </p>
           </div>
         </div>
@@ -851,7 +987,7 @@ export default function ReportsPage() {
         {/* Right: Export Options */}
         <div className="md:col-span-6 glass-card p-5 rounded-2xl border border-slate-800 flex flex-col justify-between space-y-2.5">
           <h4 className="text-xs font-bold text-white tracking-tight">Export Options</h4>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+          <div className="grid grid-cols-3 gap-2.5">
             <button
               onClick={() => handleTriggerExport("pdf")}
               className="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700/80 hover:bg-slate-800 text-slate-200 text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
@@ -863,26 +999,6 @@ export default function ReportsPage() {
             </button>
 
             <button
-              onClick={() => handleTriggerExport("excel")}
-              className="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700/80 hover:bg-slate-800 text-slate-200 text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
-            >
-              <span className="w-4 h-4 rounded bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-[9px]">
-                XLS
-              </span>
-              <span>Excel</span>
-            </button>
-
-            <button
-              onClick={() => handleTriggerExport("powerpoint")}
-              className="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700/80 hover:bg-slate-800 text-slate-200 text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
-            >
-              <span className="w-4 h-4 rounded bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-[9px]">
-                PPT
-              </span>
-              <span>PowerPoint</span>
-            </button>
-
-            <button
               onClick={() => handleTriggerExport("csv")}
               className="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700/80 hover:bg-slate-800 text-slate-200 text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
             >
@@ -890,6 +1006,16 @@ export default function ReportsPage() {
                 CSV
               </span>
               <span>CSV</span>
+            </button>
+
+            <button
+              onClick={() => handleTriggerExport("json")}
+              className="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700/80 hover:bg-slate-800 text-slate-200 text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
+            >
+              <span className="w-4 h-4 rounded bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-[9px]">
+                JSON
+              </span>
+              <span>JSON</span>
             </button>
           </div>
         </div>
@@ -1002,3 +1128,4 @@ export default function ReportsPage() {
     </div>
   );
 }
+

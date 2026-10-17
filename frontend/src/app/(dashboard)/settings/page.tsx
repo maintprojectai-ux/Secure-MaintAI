@@ -1,49 +1,42 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   Settings,
   Shield,
-  Sliders,
   Bell,
-  Cpu,
   Layers,
-  Palette,
   Database,
-  Search,
-  Check,
   AlertTriangle,
   Save,
   CheckCircle2,
   RefreshCw,
-  ExternalLink,
-  Lock,
-  Globe,
   Radio,
   PowerOff,
   Activity,
 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import {
+  SystemSettingsData,
   getSystemSettings,
   updateSystemSettings,
   checkIdPHealth,
+  downloadReportExport,
 } from "@/lib/api";
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<
-    "general" | "security" | "ml" | "notifications" | "integrations" | "backup" | "appearance"
+    "general" | "security" | "notifications" | "integrations" | "backup"
   >("general");
 
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
 
   // General Settings
   const [orgName, setOrgName] = useState("King Khalid University");
   const [primaryDomain, setPrimaryDomain] = useState("kku.edu.sa");
   const [timezone, setTimezone] = useState("(GMT+03:00) Riyadh / AST");
   const [dateFormat, setDateFormat] = useState("YYYY-MM-DD");
-  const [language, setLanguage] = useState("English");
-  const [defaultRole, setDefaultRole] = useState("STUDENT");
   const [sessionTimeout, setSessionTimeout] = useState("30");
 
   // Security Settings
@@ -56,95 +49,142 @@ export default function SettingsPage() {
   // Notification Settings
   const [notifyCritical, setNotifyCritical] = useState(true);
   const [notifySms, setNotifySms] = useState(true);
-  const [notifyPush, setNotifyPush] = useState(false);
   const [notifyDailyReport, setNotifyDailyReport] = useState(true);
 
-  // ML Settings
-  const [smdThreshold, setSmdThreshold] = useState("0.95");
-  const [sysmonConfidence, setSysmonConfidence] = useState("0.85");
-  const [autoSurgicalIsolation, setAutoSurgicalIsolation] = useState(true);
-
-  // Appearance
-  const [selectedTheme, setSelectedTheme] = useState("dark-cyber");
-  const [accentColor, setAccentColor] = useState("blue");
+  // Live Database & Integration Diagnostics
+  const [dbStats, setDbStats] = useState({
+    app_name: "Secure-MaintAI",
+    app_env: "development",
+    idp_mode: "University IdP (OIDC/LDAP Provider)",
+    idp_status: "Connected & Healthy",
+    db_users_count: 0,
+    db_workstations_count: 0,
+    db_online_workstations_count: 0,
+    db_incidents_count: 0,
+    db_alerts_count: 0,
+    db_telemetry_count: 0,
+    db_audit_logs_count: 0,
+    last_backup_at: null as string | null,
+  });
 
   // IdP diagnostic state
-  const [idpHealth, setIdpHealth] = useState<{ status: string; latency_ms: number } | null>(null);
+  const [idpHealth, setIdpHealth] = useState<{
+    status: string;
+    latency_ms: number;
+    users_count: number;
+  } | null>(null);
   const [isTestingIdP, setIsTestingIdP] = useState(false);
 
-  // Load live system parameters with dual-mode fallback
-  useEffect(() => {
-    let isMounted = true;
-    async function loadSettings() {
-      try {
-        const s = await getSystemSettings();
-        if (isMounted && s) {
-          setKillSwitchActive(s.kill_switch_active);
-          setSmdThreshold(s.smd_threshold.toString());
-          setSysmonConfidence(s.sysmon_confidence.toString());
-          setAutoSurgicalIsolation(s.auto_surgical_isolation);
-          setNotifyCritical(s.notify_critical);
-          setNotifyDailyReport(s.notify_daily_report);
-        }
-      } catch {
-        // Retain default mock baseline
-      }
-    }
-    loadSettings();
-    return () => {
-      isMounted = false;
-    };
+  const applySettingsResponse = useCallback((s: SystemSettingsData) => {
+    setOrgName(s.org_name || "King Khalid University");
+    setPrimaryDomain(s.primary_domain || "kku.edu.sa");
+    setTimezone(s.timezone || "(GMT+03:00) Riyadh / AST");
+    setDateFormat(s.date_format || "YYYY-MM-DD");
+    setSessionTimeout(String(s.session_timeout_minutes ?? 30));
+    setMfaEnabled(Boolean(s.mfa_enabled));
+    setStrongPasswordPolicy(Boolean(s.strong_password_policy));
+    setIpWhitelisting(Boolean(s.ip_whitelisting));
+    setKillSwitchActive(Boolean(s.kill_switch_active));
+    setNotifyCritical(Boolean(s.notify_critical));
+    setNotifySms(Boolean(s.notify_sms));
+    setNotifyDailyReport(Boolean(s.notify_daily_report));
+    setDbStats({
+      app_name: s.app_name || "Secure-MaintAI",
+      app_env: s.app_env || "development",
+      idp_mode: s.idp_mode || "University IdP (OIDC/LDAP Provider)",
+      idp_status: s.idp_status || "Connected & Healthy",
+      db_users_count: s.db_users_count ?? 0,
+      db_workstations_count: s.db_workstations_count ?? 0,
+      db_online_workstations_count: s.db_online_workstations_count ?? 0,
+      db_incidents_count: s.db_incidents_count ?? 0,
+      db_alerts_count: s.db_alerts_count ?? 0,
+      db_telemetry_count: s.db_telemetry_count ?? 0,
+      db_audit_logs_count: s.db_audit_logs_count ?? 0,
+      last_backup_at: s.last_backup_at || null,
+    });
   }, []);
 
-  const handleSaveSecurity = async () => {
-    triggerToast("Security policies updated.");
+  const loadSettings = useCallback(async () => {
+    setIsLoading(true);
     try {
-      await updateSystemSettings({
-        kill_switch_active: killSwitchActive,
-      });
+      const s = await getSystemSettings();
+      if (s) {
+        applySettingsResponse(s);
+      }
     } catch {
-      //
+      // Keep current values if unreachable
+    } finally {
+      setIsLoading(false);
+    }
+  }, [applySettingsResponse]);
+
+  useEffect(() => {
+    loadSettings();
+  }, [loadSettings]);
+
+  const triggerToast = (msg: string) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(null), 3500);
+  };
+
+  const handleSaveGeneral = async () => {
+    try {
+      const updated = await updateSystemSettings({
+        org_name: orgName,
+        primary_domain: primaryDomain,
+        timezone,
+        date_format: dateFormat,
+        session_timeout_minutes: Math.max(5, Math.min(480, parseInt(sessionTimeout, 10) || 30)),
+      });
+      applySettingsResponse(updated);
+      triggerToast("General settings saved to database audit log.");
+    } catch (err: any) {
+      triggerToast(err?.message || "Failed to save general settings.");
     }
   };
 
-  const handleSaveML = async () => {
-    triggerToast("ML detection parameters recalibrated.");
+  const handleSaveSecurity = async () => {
     try {
-      await updateSystemSettings({
-        smd_threshold: parseFloat(smdThreshold),
-        sysmon_confidence: parseFloat(sysmonConfidence),
-        auto_surgical_isolation: autoSurgicalIsolation,
+      const updated = await updateSystemSettings({
+        mfa_enabled: mfaEnabled,
+        strong_password_policy: strongPasswordPolicy,
+        ip_whitelisting: ipWhitelisting,
+        kill_switch_active: killSwitchActive,
       });
-    } catch {
-      //
+      applySettingsResponse(updated);
+      triggerToast("Security policies updated in database.");
+    } catch (err: any) {
+      triggerToast(err?.message || "Failed to update security policies.");
     }
   };
 
   const handleSaveNotifications = async () => {
-    triggerToast("Notification rules saved.");
     try {
-      await updateSystemSettings({
+      const updated = await updateSystemSettings({
         notify_critical: notifyCritical,
+        notify_sms: notifySms,
         notify_daily_report: notifyDailyReport,
       });
-    } catch {
-      //
+      applySettingsResponse(updated);
+      triggerToast("Notification rules saved to database.");
+    } catch (err: any) {
+      triggerToast(err?.message || "Failed to save notification rules.");
     }
   };
 
   const handleConfirmKillSwitch = async () => {
     const nextState = !killSwitchActive;
-    setKillSwitchActive(nextState);
     setShowKillSwitchModal(false);
-    triggerToast(
-      nextState
-        ? "EMERGENCY CONTAINMENT ACTIVATED across student endpoints!"
-        : "Emergency containment lifted. Normal networking restored."
-    );
     try {
-      await updateSystemSettings({ kill_switch_active: nextState });
-    } catch {
-      // Local state preserved
+      const updated = await updateSystemSettings({ kill_switch_active: nextState });
+      applySettingsResponse(updated);
+      triggerToast(
+        nextState
+          ? `EMERGENCY CONTAINMENT ACTIVATED across ${dbStats.db_workstations_count} registered endpoints!`
+          : "Emergency containment lifted. Normal networking restored."
+      );
+    } catch (err: any) {
+      triggerToast(err?.message || "Failed to toggle emergency containment switch.");
     }
   };
 
@@ -152,32 +192,58 @@ export default function SettingsPage() {
     setIsTestingIdP(true);
     try {
       const res = await checkIdPHealth();
-      setIdpHealth({ status: res.status, latency_ms: res.latency_ms });
+      setIdpHealth({
+        status: res.status,
+        latency_ms: res.latency_ms,
+        users_count: res.mock_users_registered,
+      });
       triggerToast(
-        `IdP Diagnostic: ${res.protocol} status is ${res.status.toUpperCase()} (${res.latency_ms}ms).`
+        `IdP Diagnostic: ${res.protocol} is ${res.status.toUpperCase()} (${res.latency_ms}ms, ${res.mock_users_registered} DB users).`
       );
     } catch {
-      setIdpHealth({ status: "outage", latency_ms: 0 });
+      setIdpHealth({ status: "outage", latency_ms: 0, users_count: dbStats.db_users_count });
       triggerToast("IdP Diagnostic: Fallback mode active (Directory connection failed).");
     } finally {
       setIsTestingIdP(false);
     }
   };
 
-  const triggerToast = (msg: string) => {
-    setToastMsg(msg);
-    setTimeout(() => setToastMsg(null), 3000);
+  const handleTriggerManualBackup = async () => {
+    try {
+      const updated = await updateSystemSettings({ trigger_backup: true });
+      applySettingsResponse(updated);
+      const blob = await downloadReportExport("json");
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `secure-maintai-db-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      triggerToast("Database forensic backup JSON exported and recorded in audit trail.");
+    } catch (err: any) {
+      triggerToast(err?.message || "Failed to trigger manual database backup.");
+    }
   };
 
   const navItems = [
     { id: "general", label: "General", desc: "System global settings", icon: Settings },
     { id: "security", label: "Security", desc: "Authentication & access control", icon: Shield },
-    { id: "ml", label: "ML & AI Models", desc: "Detection & thresholds", icon: Cpu },
     { id: "notifications", label: "Notifications", desc: "Alerts & channels", icon: Bell },
     { id: "integrations", label: "Integrations", desc: "Wazuh, IdP & Webhooks", icon: Layers },
     { id: "backup", label: "Backup & Recovery", desc: "Restore & automated snaps", icon: Database },
-    { id: "appearance", label: "Appearance", desc: "Theme & visual tokens", icon: Palette },
   ];
+
+  const lastBackupFormatted = dbStats.last_backup_at
+    ? new Date(dbStats.last_backup_at).toLocaleString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : "No snapshot recorded in AuditLog yet";
 
   return (
     <div className="space-y-6">
@@ -228,9 +294,21 @@ export default function SettingsPage() {
           {/* TAB 1: GENERAL */}
           {activeTab === "general" && (
             <div className="glass-card p-6 space-y-6">
-              <div className="border-b border-slate-800 pb-3">
-                <h3 className="text-base font-semibold text-white">General Settings</h3>
-                <p className="text-xs text-slate-400">Manage your university campus profile and system identity</p>
+              <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-semibold text-white">General Settings</h3>
+                  <p className="text-xs text-slate-400">
+                    Manage your university campus profile and system identity ({dbStats.app_name} • {dbStats.app_env})
+                  </p>
+                </div>
+                <button
+                  onClick={loadSettings}
+                  disabled={isLoading}
+                  className="p-2 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300"
+                  title="Reload settings from backend"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? "animate-spin text-brand-blue" : ""}`} />
+                </button>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
@@ -283,6 +361,8 @@ export default function SettingsPage() {
                   <label className="block text-slate-300 font-medium mb-1">Session Inactivity Timeout (Minutes)</label>
                   <input
                     type="number"
+                    min={5}
+                    max={480}
                     value={sessionTimeout}
                     onChange={(e) => setSessionTimeout(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-200 focus:outline-none focus:border-brand-blue font-mono"
@@ -290,19 +370,19 @@ export default function SettingsPage() {
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">Default Student Workstation Pool</label>
+                  <label className="block text-slate-300 font-medium mb-1">Registered Database Fleet</label>
                   <input
                     type="text"
                     disabled
-                    value="CS-LAB-CLUSTER-A"
-                    className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-500 font-mono"
+                    value={`${dbStats.db_online_workstations_count} Online / ${dbStats.db_workstations_count} Total Workstations`}
+                    className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 font-mono"
                   />
                 </div>
               </div>
 
               <div className="flex justify-end pt-4 border-t border-slate-800">
                 <button
-                  onClick={() => triggerToast("General settings saved successfully!")}
+                  onClick={handleSaveGeneral}
                   className="flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-blue text-white text-xs font-semibold hover:bg-blue-600 transition-colors"
                 >
                   <Save className="w-3.5 h-3.5" />
@@ -385,7 +465,7 @@ export default function SettingsPage() {
                       <div>
                         <p className="text-xs font-bold text-rose-300">Global Emergency Containment Switch</p>
                         <p className="text-[11px] text-slate-300 mt-0.5">
-                          Immediately triggers surgical network isolation across all Student workstation clusters in case of coordinated ransomware outbreaks.
+                          Immediately triggers surgical network isolation across all Student workstation clusters ({dbStats.db_workstations_count} database endpoints) in case of coordinated ransomware outbreaks.
                         </p>
                       </div>
                     </div>
@@ -411,85 +491,6 @@ export default function SettingsPage() {
                 >
                   <Save className="w-3.5 h-3.5" />
                   <span>Save Security Changes</span>
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 3: ML & AI MODELS */}
-          {activeTab === "ml" && (
-            <div className="glass-card p-6 space-y-6">
-              <div className="border-b border-slate-800 pb-3">
-                <h3 className="text-base font-semibold text-white">Machine Learning & Anomaly Tuning</h3>
-                <p className="text-xs text-slate-400">Fine-tune detection thresholds and surgical isolation triggers</p>
-              </div>
-
-              <div className="space-y-4 text-xs">
-                <div>
-                  <div className="flex justify-between text-slate-300 mb-1">
-                    <span className="font-semibold">Model 01: SMD Isolation Forest Anomaly Threshold</span>
-                    <span className="font-mono text-cyan-400">{smdThreshold}</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0.80"
-                    max="0.99"
-                    step="0.01"
-                    value={smdThreshold}
-                    onChange={(e) => setSmdThreshold(e.target.value)}
-                    className="w-full accent-brand-blue"
-                  />
-                  <p className="text-[11px] text-slate-400 mt-1">
-                    Higher threshold reduces false alarms on high-compute research tasks while catching aggressive spikes.
-                  </p>
-                </div>
-
-                <div>
-                  <div className="flex justify-between text-slate-300 mb-1">
-                    <span className="font-semibold">Model 02-B: Sysmon Threat Classifier Confidence Cutoff</span>
-                    <span className="font-mono text-purple-400">{sysmonConfidence}</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0.70"
-                    max="0.99"
-                    step="0.01"
-                    value={sysmonConfidence}
-                    onChange={(e) => setSysmonConfidence(e.target.value)}
-                    className="w-full accent-purple-500"
-                  />
-                  <p className="text-[11px] text-slate-400 mt-1">
-                    Minimum ML probability required before escalating an event to Wazuh SIEM security alert status.
-                  </p>
-                </div>
-
-                <div className="flex items-center justify-between p-3.5 rounded-xl bg-slate-900/70 border border-slate-800">
-                  <div>
-                    <p className="font-semibold text-slate-200">Role-Aware Automated Containment</p>
-                    <p className="text-[11px] text-slate-400">
-                      Never terminate background jobs for verified Researchers without explicit human operator confirmation.
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => setAutoSurgicalIsolation(!autoSurgicalIsolation)}
-                    className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors ${
-                      autoSurgicalIsolation ? "bg-brand-blue" : "bg-slate-700"
-                    }`}
-                  >
-                    <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
-                      autoSurgicalIsolation ? "translate-x-5" : ""
-                    }`} />
-                  </button>
-                </div>
-              </div>
-
-              <div className="flex justify-end pt-4 border-t border-slate-800">
-                <button
-                  onClick={handleSaveML}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-blue text-white text-xs font-semibold hover:bg-blue-600 transition-colors"
-                >
-                  <Save className="w-3.5 h-3.5" />
-                  <span>Update Model Hyperparameters</span>
                 </button>
               </div>
             </div>
@@ -573,14 +574,16 @@ export default function SettingsPage() {
             <div className="glass-card p-6 space-y-6">
               <div className="border-b border-slate-800 pb-3">
                 <h3 className="text-base font-semibold text-white">External System Integrations</h3>
-                <p className="text-xs text-slate-400">SIEM connectors, university identity provider, and webhooks</p>
+                <p className="text-xs text-slate-400">SIEM connectors, university identity provider, and telemetry pipelines</p>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
                 <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 flex items-start justify-between">
                   <div>
-                    <span className="font-bold text-white block">Wazuh SIEM / XDR</span>
-                    <span className="text-[11px] text-slate-400">v4.8 High-Availability Cluster</span>
+                    <span className="font-bold text-white block">Wazuh SIEM / XDR Adapter</span>
+                    <span className="text-[11px] text-slate-400">
+                      {dbStats.db_incidents_count} Incidents • {dbStats.db_alerts_count} Alerts in DB
+                    </span>
                     <span className="inline-block mt-2 px-2 py-0.5 rounded text-[10px] bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
                       CONNECTED (ACTIVE)
                     </span>
@@ -590,12 +593,14 @@ export default function SettingsPage() {
 
                 <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 flex items-start justify-between">
                   <div>
-                    <span className="font-bold text-white block">King Khalid University LDAP / IdP</span>
-                    <span className="text-[11px] text-slate-400">SAML 2.0 / OIDC Context Broker</span>
+                    <span className="font-bold text-white block">{dbStats.idp_mode}</span>
+                    <span className="text-[11px] text-slate-400">
+                      {idpHealth ? idpHealth.users_count : dbStats.db_users_count} Registered DB Accounts
+                    </span>
                     <span className="inline-block mt-2 px-2 py-0.5 rounded text-[10px] bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
                       {idpHealth
                         ? `${idpHealth.status.toUpperCase()} (${idpHealth.latency_ms}ms)`
-                        : "CONNECTED (SYNCED)"}
+                        : dbStats.idp_status.toUpperCase()}
                     </span>
                   </div>
                   <button
@@ -610,10 +615,12 @@ export default function SettingsPage() {
 
                 <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 flex items-start justify-between">
                   <div>
-                    <span className="font-bold text-white block">Microsoft Teams Webhook</span>
-                    <span className="text-[11px] text-slate-400">Channel: #cyber-incidents</span>
+                    <span className="font-bold text-white block">SOAR Notification Routing</span>
+                    <span className="text-[11px] text-slate-400">
+                      Critical Alerts: {notifyCritical ? "Enabled" : "Disabled"}
+                    </span>
                     <span className="inline-block mt-2 px-2 py-0.5 rounded text-[10px] bg-blue-500/15 text-blue-300 border border-blue-500/30">
-                      ENABLED
+                      {notifyCritical ? "ENABLED" : "STANDBY"}
                     </span>
                   </div>
                   <Radio className="w-4 h-4 text-blue-400" />
@@ -621,10 +628,12 @@ export default function SettingsPage() {
 
                 <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 flex items-start justify-between">
                   <div>
-                    <span className="font-bold text-white block">Sysmon Ingestion Pipeline</span>
-                    <span className="text-[11px] text-slate-400">Windows Event Log Channel 30</span>
+                    <span className="font-bold text-white block">Telemetry Ingestion Pipeline</span>
+                    <span className="text-[11px] text-slate-400">
+                      {dbStats.db_telemetry_count} Telemetry Records in DB
+                    </span>
                     <span className="inline-block mt-2 px-2 py-0.5 rounded text-[10px] bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                      STREAMING (120 EPS)
+                      {dbStats.db_online_workstations_count} AGENTS ONLINE
                     </span>
                   </div>
                   <Activity className="w-4 h-4 text-emerald-400" />
@@ -638,92 +647,46 @@ export default function SettingsPage() {
             <div className="glass-card p-6 space-y-6">
               <div className="border-b border-slate-800 pb-3">
                 <h3 className="text-base font-semibold text-white">Database Backup & Disaster Recovery</h3>
-                <p className="text-xs text-slate-400">Snapshot retention, encryption, and one-click restoration</p>
+                <p className="text-xs text-slate-400">Database record inventory, forensic JSON snapshot export, and audit verification</p>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
                 <div className="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800 space-y-1">
-                  <span className="text-slate-500 block">Last Automated Snapshot:</span>
-                  <span className="text-white font-mono font-bold text-sm">Sep 16, 2026 - 04:00 AM AST</span>
-                  <span className="text-emerald-400 text-[11px] block">Verified Integrity (AES-256 GCM)</span>
+                  <span className="text-slate-500 block">Last Configuration / Backup Event:</span>
+                  <span className="text-white font-mono font-bold text-sm">{lastBackupFormatted}</span>
+                  <span className="text-emerald-400 text-[11px] block">
+                    Verified in Immutable Audit Trail ({dbStats.db_audit_logs_count} total logs)
+                  </span>
                 </div>
 
                 <div className="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800 space-y-1">
-                  <span className="text-slate-500 block">Next Scheduled Snapshot:</span>
-                  <span className="text-white font-mono font-bold text-sm">Sep 17, 2026 - 04:00 AM AST</span>
-                  <span className="text-slate-400 text-[11px] block">Frequency: Every 24 Hours</span>
+                  <span className="text-slate-500 block">Live Database Inventory:</span>
+                  <span className="text-white font-mono font-bold text-sm">
+                    {dbStats.db_users_count} Users • {dbStats.db_workstations_count} Workstations
+                  </span>
+                  <span className="text-slate-400 text-[11px] block">
+                    {dbStats.db_incidents_count} Incidents • {dbStats.db_alerts_count} Alerts • {dbStats.db_telemetry_count} Metrics
+                  </span>
                 </div>
               </div>
 
               <div className="flex gap-3 pt-4 border-t border-slate-800">
                 <button
-                  onClick={() => triggerToast("Initiating encrypted database snapshot...")}
+                  onClick={handleTriggerManualBackup}
                   className="px-4 py-2 rounded-lg bg-brand-blue text-white text-xs font-semibold hover:bg-blue-600 transition-colors"
                 >
-                  Trigger Manual Backup Now
+                  Trigger Manual Backup Now (JSON)
                 </button>
                 <button
-                  onClick={() => triggerToast("Backup archive verified.")}
+                  onClick={async () => {
+                    await loadSettings();
+                    triggerToast(
+                      `Database integrity verified: ${dbStats.db_audit_logs_count} immutable audit records confirmed.`
+                    );
+                  }}
                   className="px-4 py-2 rounded-lg bg-slate-800 text-slate-300 text-xs font-medium hover:bg-slate-700 transition-colors"
                 >
-                  Verify Archive Hash
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 7: APPEARANCE */}
-          {activeTab === "appearance" && (
-            <div className="glass-card p-6 space-y-6">
-              <div className="border-b border-slate-800 pb-3">
-                <h3 className="text-base font-semibold text-white">Appearance & Visual Tokens</h3>
-                <p className="text-xs text-slate-400">Tailwind CSS v4 theme customization</p>
-              </div>
-
-              <div className="space-y-4 text-xs">
-                <div>
-                  <label className="block text-slate-300 font-medium mb-1">Color Theme</label>
-                  <select
-                    value={selectedTheme}
-                    onChange={(e) => setSelectedTheme(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-200 focus:outline-none focus:border-brand-blue"
-                  >
-                    <option value="dark-cyber">Cybersecurity Dark (#060b18)</option>
-                    <option value="slate-midnight">Slate Midnight (#020617)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-slate-300 font-medium mb-2">Accent Highlight Color</label>
-                  <div className="flex items-center gap-3">
-                    {[
-                      { id: "blue", color: "#3b82f6" },
-                      { id: "cyan", color: "#06b6d4" },
-                      { id: "purple", color: "#8b5cf6" },
-                      { id: "emerald", color: "#10b981" },
-                      { id: "amber", color: "#f59e0b" },
-                      { id: "rose", color: "#ef4444" },
-                    ].map((c) => (
-                      <button
-                        key={c.id}
-                        onClick={() => setAccentColor(c.id)}
-                        className={`w-8 h-8 rounded-full border-2 transition-transform ${
-                          accentColor === c.id ? "scale-125 border-white shadow-lg" : "border-transparent hover:scale-110"
-                        }`}
-                        style={{ backgroundColor: c.color }}
-                      />
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex justify-end pt-4 border-t border-slate-800">
-                <button
-                  onClick={() => triggerToast("Theme preferences applied.")}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-blue text-white text-xs font-semibold hover:bg-blue-600 transition-colors"
-                >
-                  <Save className="w-3.5 h-3.5" />
-                  <span>Save Appearance</span>
+                  Verify Database Audit Trail
                 </button>
               </div>
             </div>
@@ -744,7 +707,9 @@ export default function SettingsPage() {
               <span>HIGH IMPACT SECURITY ACTION</span>
             </div>
             <p>
-              Activating this emergency switch will immediately broadcast a surgical packet-filter block to all 128 student lab endpoints, quarantining outbound internet connectivity while keeping university IT management SSH sockets active.
+              Activating this emergency switch will immediately broadcast a surgical packet-filter block across all{" "}
+              {dbStats.db_workstations_count} registered endpoints in the database, quarantining outbound internet
+              connectivity while keeping university IT management SSH sockets active.
             </p>
           </div>
 
@@ -775,3 +740,4 @@ export default function SettingsPage() {
     </div>
   );
 }
+

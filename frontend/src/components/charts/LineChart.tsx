@@ -120,10 +120,12 @@ export const LineChart: React.FC<LineChartProps> = ({
           </defs>
 
           {/* Horizontal Grid lines */}
-          {[0, 25, 50, 75, 100].map((tick) => {
-            const y = paddingTop + chartHeight - (tick / 100) * chartHeight;
+          {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
+            const y = paddingTop + chartHeight - ratio * chartHeight;
+            const rawVal = yMin + ratio * (yMax - yMin);
+            const tickVal = Number.isInteger(rawVal) ? rawVal : Math.round(rawVal * 10) / 10;
             return (
-              <g key={tick}>
+              <g key={ratio}>
                 <line
                   x1={paddingLeft}
                   y1={y}
@@ -139,7 +141,7 @@ export const LineChart: React.FC<LineChartProps> = ({
                   textAnchor="end"
                   className="text-[9px] fill-slate-500 font-mono"
                 >
-                  {tick}
+                  {tickVal}
                   {unit}
                 </text>
               </g>
@@ -201,21 +203,25 @@ export const LineChart: React.FC<LineChartProps> = ({
           })()}
 
           {/* X Axis Labels */}
-          {labels.map((lbl, idx) => {
-            const x = paddingLeft + idx * xStep;
-            return (
-              <text
-                key={idx}
-                x={x}
-                y={viewBoxHeight - 8}
-                textAnchor="middle"
-                className="text-[10px] fill-slate-500 font-mono cursor-pointer hover:fill-blue-400"
-                onClick={() => onPointClick?.(lbl, idx)}
-              >
-                {lbl}
-              </text>
-            );
-          })}
+          {(() => {
+            const labelStride = numPoints > 20 ? 4 : numPoints > 10 ? 2 : 1;
+            return labels.map((lbl, idx) => {
+              if (idx % labelStride !== 0 && idx !== numPoints - 1) return null;
+              const x = paddingLeft + idx * xStep;
+              return (
+                <text
+                  key={idx}
+                  x={x}
+                  y={viewBoxHeight - 8}
+                  textAnchor="middle"
+                  className="text-[10px] fill-slate-500 font-mono cursor-pointer hover:fill-blue-400"
+                  onClick={() => onPointClick?.(lbl, idx)}
+                >
+                  {lbl}
+                </text>
+              );
+            });
+          })()}
 
           {/* Transparent Hover Hit Boxes */}
           {labels.map((lbl, idx) => {
