@@ -50,6 +50,8 @@ def _map_incident_to_task(inc: Incident, ws: Workstation | None = None) -> Maint
         if stat in ("RESOLVED", "CLOSED", "COMPLETED")
         else "In Progress"
         if stat in ("IN_PROGRESS", "INVESTIGATING")
+        else "Overdue"
+        if stat == "OVERDUE"
         else "Scheduled"
     )
 
@@ -70,6 +72,10 @@ def _map_incident_to_task(inc: Incident, ws: Workstation | None = None) -> Maint
         if "backup" in title_lower or "storage" in title_lower
         else "Network"
         if "network" in title_lower or "switch" in title_lower
+        else "Virtualization"
+        if "vm" in title_lower or "hypervisor" in title_lower or "virtual" in title_lower
+        else "Application"
+        if "application" in title_lower or "app" in title_lower or "lms" in title_lower
         else "System"
     )
 
@@ -147,6 +153,7 @@ async def get_maintenance_kpis(
     scheduled = counts.get("OPEN", 0) + counts.get("SCHEDULED", 0)
     in_progress = counts.get("IN_PROGRESS", 0) + counts.get("INVESTIGATING", 0)
     completed = counts.get("RESOLVED", 0) + counts.get("CLOSED", 0)
+    overdue = counts.get("OVERDUE", 0)
 
     # Count workstations online ratio as system health indicator
     ws_res = await session.execute(
@@ -159,10 +166,10 @@ async def get_maintenance_kpis(
     health_score = round((online_ws / total_ws * 100), 1) if (total_ws and total_ws > 0) else 98.4
 
     return MaintenanceKPIsResponse(
-        scheduled_today=max(scheduled, 4),
-        in_progress=max(in_progress, 2),
-        completed_this_week=max(completed, 8),
-        overdue=0,
+        scheduled_today=scheduled,
+        in_progress=in_progress,
+        completed_this_week=completed,
+        overdue=overdue,
         system_health_score=health_score,
     )
 
@@ -251,6 +258,8 @@ async def update_maintenance_task_status(
         inc.closed_at = datetime.now(timezone.utc)
     elif new_stat in ("IN_PROGRESS", "IN PROGRESS"):
         inc.status = "IN_PROGRESS"
+    elif new_stat == "OVERDUE":
+        inc.status = "OVERDUE"
     else:
         inc.status = "OPEN"
 

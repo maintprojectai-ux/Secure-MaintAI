@@ -284,9 +284,10 @@ The system implements strict, server-authoritative RBAC (Rule 8):
 | **System & Audit**| `GET` | `/api/v1/system/settings` | Yes | Inspect runtime ML thresholds and IdP diagnostics |
 | | `GET` | `/api/v1/audit` | IT/Admin | Query immutable SHA-256 hash-chained audit logs |
 | **Users** | `GET` | `/api/v1/users` | Admin | List all registered user accounts and IdP statuses |
-| **Demonstration** | `POST` | `/api/v1/demo/trigger-scenario` | Yes | Dispatch authentic 10-stage simulation across 7 scenarios |
+| **Demonstration** | `POST` | `/api/v1/demo/simulate` | Yes | Dispatch authentic 10-stage simulation across 6 scenarios (with role-sensitive `CYBER_THREAT`: `STUDENT` vs `RESEARCHER`) |
 
 ---
+
 
 ## 8. Research Integrity & Context
 

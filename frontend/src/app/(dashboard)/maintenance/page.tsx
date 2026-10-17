@@ -8,7 +8,6 @@ import {
   AlertTriangle,
   Plus,
   Search,
-  Filter,
   Download,
   ChevronLeft,
   ChevronRight,
@@ -16,7 +15,6 @@ import {
   Eye,
   Edit3,
   MoreVertical,
-  Server,
   Shield,
   Database,
   Network,
@@ -34,17 +32,24 @@ import {
   MaintenanceCategory,
   MaintenancePriority,
   MaintenanceStatus,
+  Workstation,
 } from "@/types";
 import {
-  MOCK_MAINTENANCE_KPIS,
-  MOCK_UPCOMING_TASKS,
-  MOCK_ALL_MAINTENANCE_SCHEDULE,
   getMaintenanceTasks,
-  getMaintenanceKPIs,
+  getWorkstations,
   createMaintenanceTask,
   updateMaintenanceTaskStatus,
   MaintenanceTaskItem,
 } from "@/lib/api";
+
+function parseDurationToMinutes(dur: string): number {
+  const hMatch = dur.match(/(\d+)\s*h/i);
+  const mMatch = dur.match(/(\d+)\s*m/i);
+  let total = 0;
+  if (hMatch) total += parseInt(hMatch[1], 10) * 60;
+  if (mMatch) total += parseInt(mMatch[1], 10);
+  return total > 0 ? total : 60;
+}
 
 function mapBackendTaskToItem(task: MaintenanceTaskItem): ScheduledTaskItem {
   let formattedDate = task.scheduled_time;
@@ -189,70 +194,86 @@ const getStatusBadge = (status: MaintenanceStatus) => {
 };
 
 export default function MaintenanceSchedulePage() {
-  // Master state
-  const [allTasks, setAllTasks] = useState<ScheduledTaskItem[]>(MOCK_ALL_MAINTENANCE_SCHEDULE);
-  const [kpis, setKpis] = useState(MOCK_MAINTENANCE_KPIS);
+  // Master state — strictly from database
+  const [allTasks, setAllTasks] = useState<ScheduledTaskItem[]>([]);
+  const [workstations, setWorkstations] = useState<Workstation[]>([]);
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
 
-  // Load live tasks and KPIs with dual-mode fallback
-  useEffect(() => {
-    let isMounted = true;
-    async function loadMaintenanceData() {
-      try {
-        const [tasksRes, kpisRes] = await Promise.allSettled([
-          getMaintenanceTasks(),
-          getMaintenanceKPIs(),
-        ]);
+  // Load live tasks and workstations directly from database
+  const loadMaintenanceData = async () => {
+    try {
+      const [tasksRes, wsRes] = await Promise.allSettled([
+        getMaintenanceTasks(),
+        getWorkstations({ pageSize: 100 }),
+      ]);
 
-        if (isMounted) {
-          if (tasksRes.status === "fulfilled" && tasksRes.value.length > 0) {
-            setAllTasks(tasksRes.value.map(mapBackendTaskToItem));
-          }
-          if (kpisRes.status === "fulfilled") {
-            const k = kpisRes.value;
-            setKpis({
-              total_scheduled: k.scheduled_today,
-              total_scheduled_change: "+2 today",
-              completed: k.completed_this_week,
-              completed_change: "+4 this week",
-              in_progress: k.in_progress,
-              in_progress_change: "active",
-              upcoming: k.scheduled_today,
-              upcoming_change: "scheduled",
-              overdue: k.overdue,
-              overdue_change: "0 overdue",
-            });
-          }
-        }
-      } catch {
-        // Retain default mock baseline
+      if (tasksRes.status === "fulfilled" && Array.isArray(tasksRes.value)) {
+        setAllTasks(tasksRes.value.map(mapBackendTaskToItem));
       }
+      if (wsRes.status === "fulfilled" && wsRes.value?.items) {
+        setWorkstations(wsRes.value.items);
+        if (wsRes.value.items.length > 0) {
+          setFormSystem((prev) => prev || wsRes.value.items[0].hostname);
+        }
+      }
+    } catch {
+      // Keep current database state
     }
+  };
+
+  useEffect(() => {
     loadMaintenanceData();
+
+    const handleUpdate = () => {
+      loadMaintenanceData();
+    };
+    window.addEventListener("alerts-updated", handleUpdate);
     return () => {
-      isMounted = false;
+      window.removeEventListener("alerts-updated", handleUpdate);
     };
   }, []);
+
+  // Derive top 5 KPIs directly from database tasks
+  const kpis = useMemo(() => {
+    const total = allTasks.length;
+    const completed = allTasks.filter((t) => t.status === "Completed").length;
+    const inProgress = allTasks.filter((t) => t.status === "In Progress").length;
+    const upcoming = allTasks.filter((t) => t.status === "Upcoming").length;
+    const overdue = allTasks.filter((t) => t.status === "Overdue").length;
+
+    return {
+      total_scheduled: total,
+      total_scheduled_change: `${upcoming + inProgress} active windows`,
+      completed,
+      completed_change: `${total > 0 ? Math.round((completed / total) * 100) : 0}% completion rate`,
+      in_progress: inProgress,
+      in_progress_change: inProgress > 0 ? "Executing now" : "Idle",
+      upcoming,
+      upcoming_change: "Scheduled queue",
+      overdue,
+      overdue_change: overdue > 0 ? "Requires attention" : "0 overdue",
+    };
+  }, [allTasks]);
 
   // Global search & filters toggle
   const [globalSearch, setGlobalSearch] = useState("");
   const [showFiltersBar, setShowFiltersBar] = useState(false);
 
-  // Middle section tab: "Upcoming Maintenance" | "In Progress" | "Overdue" | "Completed"
+  // Middle section tab: "Upcoming" | "In Progress" | "Overdue" | "Completed"
   const [middleTab, setMiddleTab] = useState<MaintenanceStatus>("Upcoming");
   const [activeActionMenuId, setActiveActionMenuId] = useState<string | null>(null);
 
-  // Calendar state (Default to current date: September 2026)
-  const [currentYear, setCurrentYear] = useState(2026);
-  const [currentMonthIndex, setCurrentMonthIndex] = useState(8); // 0-indexed, 8 = September
-  const [selectedDay, setSelectedDay] = useState<number | null>(16); // Today: Sep 16, 2026
+  // Calendar state (Default to current system date; null selectedDay means no day filter active)
+  const [currentYear, setCurrentYear] = useState(() => new Date().getFullYear());
+  const [currentMonthIndex, setCurrentMonthIndex] = useState(() => new Date().getMonth());
+  const [selectedDay, setSelectedDay] = useState<number | null>(null);
 
   // Bottom table filters & search
   const [tableSearch, setTableSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("All Categories");
   const [selectedPriority, setSelectedPriority] = useState<string>("All Priorities");
   const [selectedStatus, setSelectedStatus] = useState<string>("All Statuses");
-  const [sortAscending, setSortAscending] = useState(true);
+  const [sortAscending, setSortAscending] = useState(false);
 
   // Bottom table pagination
   const [currentPage, setCurrentPage] = useState(1);
@@ -264,10 +285,18 @@ export default function MaintenanceSchedulePage() {
   const [editTask, setEditTask] = useState<ScheduledTaskItem | null>(null);
 
   // Schedule Modal Form
-  const [formSystem, setFormSystem] = useState("DB-Server-01");
+  const [formSystem, setFormSystem] = useState("SRV-ACA-01");
   const [formTaskName, setFormTaskName] = useState("");
-  const [formCategory, setFormCategory] = useState<MaintenanceCategory>("Database");
-  const [formDateTime, setFormDateTime] = useState("Sep 20, 2026 03:00 AM");
+  const [formCategory, setFormCategory] = useState<MaintenanceCategory>("System");
+  const [formDateTime, setFormDateTime] = useState(() =>
+    new Date().toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+  );
   const [formDuration, setFormDuration] = useState("1h 30m");
   const [formPriority, setFormPriority] = useState<MaintenancePriority>("High");
   const [formCreator, setFormCreator] = useState("Admin");
@@ -279,7 +308,16 @@ export default function MaintenanceSchedulePage() {
   const [editPriority, setEditPriority] = useState<MaintenancePriority>("Medium");
   const [editStatus, setEditStatus] = useState<MaintenanceStatus>("Upcoming");
 
-  // Middle Upcoming List filtered by middleTab and search
+  // Helper to check if a task falls on (currentYear, currentMonthIndex, day)
+  const taskMatchesCalendarDay = (task: ScheduledTaskItem, year: number, monthIdx: number, day: number) => {
+    const d = new Date(task.scheduled_date_time);
+    if (!isNaN(d.getTime())) {
+      return d.getFullYear() === year && d.getMonth() === monthIdx && d.getDate() === day;
+    }
+    return false;
+  };
+
+  // Middle Upcoming List filtered by middleTab, globalSearch, and optional selectedDay
   const middleUpcomingFiltered = useMemo(() => {
     return allTasks.filter((task) => {
       const matchesTab = task.status === middleTab;
@@ -288,19 +326,22 @@ export default function MaintenanceSchedulePage() {
         task.task_name.toLowerCase().includes(globalSearch.toLowerCase()) ||
         task.target_system.toLowerCase().includes(globalSearch.toLowerCase()) ||
         task.category.toLowerCase().includes(globalSearch.toLowerCase());
-      return matchesTab && matchesSearch;
+      const matchesDay =
+        selectedDay === null || taskMatchesCalendarDay(task, currentYear, currentMonthIndex, selectedDay);
+      return matchesTab && matchesSearch && matchesDay;
     });
-  }, [allTasks, middleTab, globalSearch]);
+  }, [allTasks, middleTab, globalSearch, selectedDay, currentYear, currentMonthIndex]);
 
-  // Bottom table filtered & sorted
+  // Bottom table filtered & sorted chronologically
   const bottomTableFiltered = useMemo(() => {
-    let result = allTasks.filter((task) => {
+    const combinedQuery = (tableSearch || globalSearch).trim().toLowerCase();
+    const result = allTasks.filter((task) => {
       const matchesSearch =
-        !tableSearch ||
-        task.task_name.toLowerCase().includes(tableSearch.toLowerCase()) ||
-        task.target_system.toLowerCase().includes(tableSearch.toLowerCase()) ||
-        task.category.toLowerCase().includes(tableSearch.toLowerCase()) ||
-        (task.created_by && task.created_by.toLowerCase().includes(tableSearch.toLowerCase()));
+        !combinedQuery ||
+        task.task_name.toLowerCase().includes(combinedQuery) ||
+        task.target_system.toLowerCase().includes(combinedQuery) ||
+        task.category.toLowerCase().includes(combinedQuery) ||
+        (task.created_by && task.created_by.toLowerCase().includes(combinedQuery));
 
       const matchesCat =
         selectedCategory === "All Categories" || task.category === selectedCategory;
@@ -308,19 +349,37 @@ export default function MaintenanceSchedulePage() {
         selectedPriority === "All Priorities" || task.priority === selectedPriority;
       const matchesStat =
         selectedStatus === "All Statuses" || task.status === selectedStatus;
+      const matchesDay =
+        selectedDay === null || taskMatchesCalendarDay(task, currentYear, currentMonthIndex, selectedDay);
 
-      return matchesSearch && matchesCat && matchesPrio && matchesStat;
+      return matchesSearch && matchesCat && matchesPrio && matchesStat && matchesDay;
     });
 
-    // Sort by scheduled_date_time string
+    // Sort by actual Date timestamp (with string fallback)
     result.sort((a, b) => {
+      const timeA = new Date(a.scheduled_date_time).getTime();
+      const timeB = new Date(b.scheduled_date_time).getTime();
+      if (!isNaN(timeA) && !isNaN(timeB)) {
+        return sortAscending ? timeA - timeB : timeB - timeA;
+      }
       return sortAscending
         ? a.scheduled_date_time.localeCompare(b.scheduled_date_time)
         : b.scheduled_date_time.localeCompare(a.scheduled_date_time);
     });
 
     return result;
-  }, [allTasks, tableSearch, selectedCategory, selectedPriority, selectedStatus, sortAscending]);
+  }, [
+    allTasks,
+    tableSearch,
+    globalSearch,
+    selectedCategory,
+    selectedPriority,
+    selectedStatus,
+    sortAscending,
+    selectedDay,
+    currentYear,
+    currentMonthIndex,
+  ]);
 
   // Pagination calculation
   const totalItems = bottomTableFiltered.length;
@@ -334,13 +393,18 @@ export default function MaintenanceSchedulePage() {
   const handleScheduleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const title = formTaskName.trim() || "Automated Infrastructure Maintenance";
+    const matchedWs = workstations.find(
+      (w) => w.hostname.toLowerCase() === formSystem.toLowerCase() || String(w.id) === formSystem
+    );
+    const durationMin = parseDurationToMinutes(formDuration);
 
     try {
       const created = await createMaintenanceTask({
         title,
+        workstation_id: matchedWs ? String(matchedWs.id) : undefined,
         category: formCategory,
         priority: formPriority,
-        duration_minutes: formDuration.includes("h") ? 90 : 60,
+        duration_minutes: durationMin,
         description: formPlaybook
           ? "SOAR automated pre-maintenance health check & isolation snapshot verified."
           : "Standard manual maintenance schedule window.",
@@ -348,34 +412,14 @@ export default function MaintenanceSchedulePage() {
       });
       const mapped = mapBackendTaskToItem(created);
       setAllTasks((prev) => [mapped, ...prev]);
+      setShowScheduleModal(false);
+      setFormTaskName("");
+      setFeedbackMsg(`Successfully scheduled "${title}" for ${mapped.target_system}.`);
+      setTimeout(() => setFeedbackMsg(null), 4500);
     } catch {
-      // Dual-mode fallback if backend is offline / demo mode
-      const newTask: ScheduledTaskItem = {
-        id: `sch-${Date.now().toString().slice(-4)}`,
-        task_name: title,
-        category: formCategory,
-        target_system: formSystem,
-        scheduled_date_time: formDateTime,
-        duration: formDuration,
-        priority: formPriority,
-        status: "Upcoming",
-        created_by: formCreator,
-        description: formPlaybook
-          ? "SOAR automated pre-maintenance health check & isolation snapshot verified."
-          : "Standard manual maintenance schedule window.",
-      };
-      setAllTasks((prev) => [newTask, ...prev]);
+      setFeedbackMsg("Failed to create maintenance task in database.");
+      setTimeout(() => setFeedbackMsg(null), 4500);
     }
-
-    setKpis((prev) => ({
-      ...prev,
-      total_scheduled: prev.total_scheduled + 1,
-      upcoming: prev.upcoming + 1,
-    }));
-    setShowScheduleModal(false);
-    setFormTaskName("");
-    setFeedbackMsg(`Successfully scheduled "${title}" for ${formSystem}.`);
-    setTimeout(() => setFeedbackMsg(null), 4500);
   };
 
   const handleUpdateTask = async (e: React.FormEvent) => {
@@ -477,27 +521,30 @@ export default function MaintenanceSchedulePage() {
     setTimeout(() => setFeedbackMsg(null), 3500);
   };
 
-  // Month data calculation (Current: September 2026)
+  // Month data calculation
   const monthNames = [
     "January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December"
   ];
 
-  // Days with active maintenance events in September 2026
-  const septemberTaskEvents: Record<number, { count: number; statuses: MaintenanceStatus[] }> = {
-    5: { count: 1, statuses: ["Completed"] },
-    7: { count: 1, statuses: ["Overdue"] },
-    8: { count: 1, statuses: ["Completed"] },
-    10: { count: 2, statuses: ["Overdue", "Completed"] },
-    12: { count: 1, statuses: ["Completed"] },
-    15: { count: 1, statuses: ["In Progress"] },
-    16: { count: 2, statuses: ["In Progress"] },
-    18: { count: 2, statuses: ["Upcoming"] },
-    20: { count: 2, statuses: ["Upcoming"] },
-    22: { count: 1, statuses: ["Upcoming"] },
-    25: { count: 1, statuses: ["Upcoming"] },
-    28: { count: 1, statuses: ["Upcoming"] },
-  };
+  // Dynamic calendar events computed from allTasks for the active (currentYear, currentMonthIndex)
+  const activeMonthTaskEvents = useMemo(() => {
+    const map: Record<number, { count: number; statuses: MaintenanceStatus[] }> = {};
+    for (const task of allTasks) {
+      const d = new Date(task.scheduled_date_time);
+      if (!isNaN(d.getTime()) && d.getFullYear() === currentYear && d.getMonth() === currentMonthIndex) {
+        const day = d.getDate();
+        if (!map[day]) {
+          map[day] = { count: 0, statuses: [] };
+        }
+        map[day].count += 1;
+        if (!map[day].statuses.includes(task.status)) {
+          map[day].statuses.push(task.status);
+        }
+      }
+    }
+    return map;
+  }, [allTasks, currentYear, currentMonthIndex]);
 
   return (
     <div className="space-y-6">
@@ -571,6 +618,7 @@ export default function MaintenanceSchedulePage() {
               setSelectedStatus("All Statuses");
               setSelectedCategory("All Categories");
               setSelectedPriority("All Priorities");
+              setSelectedDay(null);
               setGlobalSearch("");
               setTableSearch("");
             }}
@@ -957,9 +1005,10 @@ export default function MaintenanceSchedulePage() {
                 </button>
                 <button
                   onClick={() => {
-                    setCurrentMonthIndex(8);
-                    setCurrentYear(2026);
-                    setSelectedDay(16);
+                    const now = new Date();
+                    setCurrentMonthIndex(now.getMonth());
+                    setCurrentYear(now.getFullYear());
+                    setSelectedDay(now.getDate());
                   }}
                   className="ml-1 px-2 py-0.5 text-[11px] font-semibold text-blue-400 hover:text-white rounded hover:bg-slate-800 transition-colors"
                 >
@@ -993,8 +1042,6 @@ export default function MaintenanceSchedulePage() {
               const nextDaysCount = (7 - (totalGridCells % 7)) % 7;
               const nextDays = Array.from({ length: nextDaysCount }, (_, i) => i + 1);
 
-              const isCurrentSeptember2026 = currentYear === 2026 && currentMonthIndex === 8;
-
               return (
                 <div className="grid grid-cols-7 gap-1 text-center text-xs">
                   {/* Offset days from previous month */}
@@ -1010,7 +1057,7 @@ export default function MaintenanceSchedulePage() {
                   {/* Current month days */}
                   {currentMonthDays.map((day) => {
                     const isSelected = selectedDay === day;
-                    const eventInfo = isCurrentSeptember2026 ? septemberTaskEvents[day] : undefined;
+                    const eventInfo = activeMonthTaskEvents[day];
 
                     let dotColorClass = "";
                     if (eventInfo) {
@@ -1024,10 +1071,16 @@ export default function MaintenanceSchedulePage() {
                       <div
                         key={`day-${day}`}
                         onClick={() => {
-                          setSelectedDay(day);
-                          setFeedbackMsg(
-                            `${monthNames[currentMonthIndex]} ${day}, ${currentYear}: Filtered to tasks on this date.`
-                          );
+                          if (selectedDay === day) {
+                            setSelectedDay(null);
+                            setFeedbackMsg("Cleared calendar date filter — showing all dates.");
+                          } else {
+                            setSelectedDay(day);
+                            setFeedbackMsg(
+                              `${monthNames[currentMonthIndex]} ${day}, ${currentYear}: Filtered to tasks on this date (click again to clear).`
+                            );
+                          }
+                          setTimeout(() => setFeedbackMsg(null), 3500);
                         }}
                         className={`h-8 rounded-lg cursor-pointer transition-all relative flex flex-col items-center justify-center text-xs font-medium ${isSelected
                           ? "bg-blue-600 text-white font-bold shadow-md shadow-blue-600/30"
@@ -1098,6 +1151,18 @@ export default function MaintenanceSchedulePage() {
 
           {/* Filter Dropdowns + Search + Export */}
           <div className="flex flex-wrap items-center gap-2.5">
+            {selectedDay !== null && (
+              <button
+                onClick={() => setSelectedDay(null)}
+                className="px-2.5 py-1.5 rounded-xl bg-blue-500/15 text-blue-300 border border-blue-500/30 text-xs font-mono flex items-center gap-1.5 hover:bg-blue-500/25 cursor-pointer"
+              >
+                <span>
+                  {monthNames[currentMonthIndex].slice(0, 3)} {selectedDay}, {currentYear}
+                </span>
+                <X className="w-3 h-3" />
+              </button>
+            )}
+
             {/* Search tasks... */}
             <div className="relative">
               <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -1374,14 +1439,11 @@ export default function MaintenanceSchedulePage() {
                   onChange={(e) => setFormSystem(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-blue-500"
                 >
-                  <option value="DB-Server-01">DB-Server-01 (Database Cluster Primary)</option>
-                  <option value="Web-Server-02">Web-Server-02 (University Web Portal)</option>
-                  <option value="Core-Switch-01">Core-Switch-01 (Campus Backbone)</option>
-                  <option value="Backup-Server-01">Backup-Server-01 (LTO Tape Vault)</option>
-                  <option value="App-Server-01">App-Server-01 (LMS & Grading System)</option>
-                  <option value="Firewall-01">Firewall-01 (Perimeter Security Appliance)</option>
-                  <option value="VM-Host-01">VM-Host-01 (ESXi Hypervisor Node)</option>
-                  <option value="HPC-RESEARCH-NODE-04">HPC-RESEARCH-NODE-04 (GPU Cluster)</option>
+                  {workstations.map((ws) => (
+                    <option key={String(ws.id)} value={ws.hostname}>
+                      {ws.hostname} ({ws.department || ws.os_type || "University Node"})
+                    </option>
+                  ))}
                 </select>
               </div>
 

@@ -78,6 +78,8 @@ class ValidationMetricsResponse(BaseModel):
         "agent_max_rss": "< 50 MB",
         "agent_max_cpu": "< 2.0%",
         "screening_latency": "< 10 ms",
+        "model_02a_f1": ">= 85.0%",
+        "model_02b_f1": ">= 90.0%",
         "soar_mttr": "< 2.0 s",
     }
 
@@ -236,7 +238,7 @@ async def get_validation_metrics(
         dataset="RCAEval Benchmark",
         models=m02a_models,
         confusion_matrix=m02a_cm if m02a_cm else None,
-        labels=["CPU Contention", "Memory Leak", "Disk Bottleneck", "Network Contention"],
+        labels=["cpu", "delay", "disk", "loss", "mem"],
     )
 
     # 3. Load Model 02-B (Windows-APT Cyber Attack)

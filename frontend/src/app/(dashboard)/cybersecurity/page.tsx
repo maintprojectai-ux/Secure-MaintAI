@@ -7,7 +7,6 @@ import {
   Target,
   Monitor,
   CheckCircle2,
-  ExternalLink,
   Search,
   ChevronDown,
   Radio,
@@ -15,8 +14,6 @@ import {
   Lock,
   Globe,
   ArrowUpRight,
-  Filter,
-  Eye,
   X,
   RotateCcw,
   ChevronLeft,
@@ -46,11 +43,26 @@ import {
 
 function mapBackendIncidentToThreat(raw: any, wsMap?: Map<string, Workstation>): ActiveThreatItem {
   const cat = (raw.category || "OTHER").toUpperCase();
+  const titleUpper = (raw.title || "").toUpperCase();
+  const descUpper = (raw.description || "").toUpperCase();
+  const combined = `${cat} ${titleUpper} ${descUpper}`;
+
   let category: ActiveThreatItem["category"] = "SUSPICIOUS";
-  if (cat.includes("MALWARE") || cat.includes("SECURITY")) category = "MALWARE";
-  else if (cat.includes("DDOS")) category = "DDOS";
-  else if (cat.includes("BRUTE")) category = "BRUTE_FORCE";
-  else if (cat.includes("SQL")) category = "SQLI";
+  if (combined.includes("DDOS") || combined.includes("FLOOD")) {
+    category = "DDOS";
+  } else if (combined.includes("BRUTE") || combined.includes("UNAUTHORIZED") || combined.includes("AUTH")) {
+    category = "BRUTE_FORCE";
+  } else if (combined.includes("SQL") || combined.includes("PRIVILEGE") || combined.includes("EXPLOIT")) {
+    category = "SQLI";
+  } else if (
+    combined.includes("MALWARE") ||
+    combined.includes("CRYPTO") ||
+    combined.includes("MINER") ||
+    combined.includes("SECURITY") ||
+    combined.includes("CYBER")
+  ) {
+    category = "MALWARE";
+  }
 
   const sev = (raw.severity || "MEDIUM").toUpperCase();
   const risk: ActiveThreatItem["risk"] =
@@ -136,10 +148,17 @@ function mapBackendSecurityEvent(raw: any, wsMap?: Map<string, Workstation>): Se
     ? new Date(raw.created_at || raw.timestamp).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true })
     : "Just now";
 
-  const status: SecurityEventItem["status"] =
-    severity === "Critical" ? "Active" : severity === "High" ? "Investigating" : "Blocked";
-
   const ws = raw.workstation_id && wsMap ? wsMap.get(String(raw.workstation_id)) : null;
+  const isHostIsolated = ws?.status === "ISOLATED";
+
+  const status: SecurityEventItem["status"] = isHostIsolated
+    ? "Blocked"
+    : severity === "Critical"
+      ? "Active"
+      : severity === "High"
+        ? "Investigating"
+        : "Blocked";
+
   const eventTitle = formatEventTitle(raw.event_type, raw.description);
   const src = formatEventSource(raw.source);
 
@@ -152,7 +171,7 @@ function mapBackendSecurityEvent(raw: any, wsMap?: Map<string, Workstation>): Se
     destination: ws ? `${ws.ip_address} (${ws.hostname})` : (raw.destination || "10.10.1.0/24"),
     severity,
     status,
-    statusColor: severity === "Critical" ? "rose" : severity === "High" ? "amber" : "emerald",
+    statusColor: status === "Blocked" ? "emerald" : severity === "Critical" ? "rose" : severity === "High" ? "amber" : "emerald",
     workstation_id: raw.workstation_id ? String(raw.workstation_id) : undefined,
     workstation_hostname: ws?.hostname || undefined,
     event_type: raw.event_type || undefined,
@@ -184,16 +203,28 @@ export default function CybersecurityPage() {
   const [isolationTargetId, setIsolationTargetId] = useState<string | null>(null);
   const [isolationTargetLabel, setIsolationTargetLabel] = useState<string>("");
 
-  // Dynamic attack distribution computed from live threats
+  // Dynamic attack distribution computed from live security events & threats
   const attackDistributionData: DonutSegment[] = useMemo(() => {
     const counts: Record<string, number> = {
-      Malware: 0,
+      "Malware / Mining": 0,
       DDoS: 0,
       "Brute Force": 0,
       Exploits: 0,
     };
+    for (const e of securityEvents) {
+      const evUpper = `${e.event_type || ""} ${e.event || ""} ${e.description || ""}`.toUpperCase();
+      if (evUpper.includes("CRYPTO") || evUpper.includes("MINING") || evUpper.includes("MALWARE")) {
+        counts["Malware / Mining"] += 1;
+      } else if (evUpper.includes("DDOS") || evUpper.includes("FLOOD")) {
+        counts.DDoS += 1;
+      } else if (evUpper.includes("BRUTE") || evUpper.includes("UNAUTHORIZED") || evUpper.includes("LOGIN")) {
+        counts["Brute Force"] += 1;
+      } else {
+        counts.Exploits += 1;
+      }
+    }
     for (const t of activeThreats) {
-      if (t.category === "MALWARE") counts.Malware += 1;
+      if (t.category === "MALWARE") counts["Malware / Mining"] += 1;
       else if (t.category === "DDOS") counts.DDoS += 1;
       else if (t.category === "BRUTE_FORCE") counts["Brute Force"] += 1;
       else counts.Exploits += 1;
@@ -201,19 +232,19 @@ export default function CybersecurityPage() {
     const hasData = Object.values(counts).some((v) => v > 0);
     if (!hasData) {
       return [
-        { label: "Malware", value: 156, color: "#06b6d4" },
+        { label: "Malware / Mining", value: 156, color: "#06b6d4" },
         { label: "DDoS", value: 93, color: "#3b82f6" },
         { label: "Brute Force", value: 41, color: "#f59e0b" },
         { label: "Exploits", value: 22, color: "#8b5cf6" },
       ];
     }
     return [
-      { label: "Malware", value: counts.Malware, color: "#06b6d4" },
+      { label: "Malware / Mining", value: counts["Malware / Mining"], color: "#06b6d4" },
       { label: "DDoS", value: counts.DDoS, color: "#3b82f6" },
       { label: "Brute Force", value: counts["Brute Force"], color: "#f59e0b" },
       { label: "Exploits", value: counts.Exploits, color: "#8b5cf6" },
     ];
-  }, [activeThreats]);
+  }, [activeThreats, securityEvents]);
 
   // Dynamic KPIs derived from live threat intelligence, SIEM events, and workstation status
   const currentKpi = useMemo(() => {
@@ -297,8 +328,13 @@ export default function CybersecurityPage() {
         Array.isArray(incidentsRes.value) &&
         incidentsRes.value.length > 0
       ) {
-        const liveThreats = incidentsRes.value.map((raw) => mapBackendIncidentToThreat(raw, wsMap));
-        setActiveThreats(liveThreats);
+        const secIncidents = incidentsRes.value.filter(
+          (raw) => String(raw.category || "").toUpperCase() !== "MAINTENANCE"
+        );
+        if (secIncidents.length > 0) {
+          const liveThreats = secIncidents.map((raw) => mapBackendIncidentToThreat(raw, wsMap));
+          setActiveThreats(liveThreats);
+        }
       }
 
       if (
@@ -516,10 +552,11 @@ export default function CybersecurityPage() {
 
           <button
             onClick={() => {
+              loadCyberData();
               setFeedback("Refreshed SIEM and live anomaly intelligence feeds.");
               setTimeout(() => setFeedback(null), 4000);
             }}
-            className="flex items-center gap-1.5 px-3 py-2 bg-slate-800/80 hover:bg-slate-700 text-xs font-medium text-slate-300 rounded-lg border border-slate-700/80 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-2 bg-slate-800/80 hover:bg-slate-700 text-xs font-medium text-slate-300 rounded-lg border border-slate-700/80 transition-colors cursor-pointer"
           >
             <RotateCcw className="w-3.5 h-3.5" />
             <span className="hidden md:inline">Sync</span>
@@ -1325,30 +1362,62 @@ export default function CybersecurityPage() {
               </div>
 
               <div className="p-3 bg-blue-950/40 border border-blue-800/40 rounded-xl text-[11px] text-blue-200">
-                <strong>SIEM/XDR Rule Verification:</strong> This event matched Wazuh Rule ID <code>100204</code>{" "}
-                (Outbound Connection to Known Mining Pool / C2). University IdP verified active session without
-                authorized research approval.
+                <strong>SIEM/XDR Rule Verification:</strong> Correlated via{" "}
+                <code>{selectedEvent.source}</code> (Type:{" "}
+                <code>{selectedEvent.event_type || selectedEvent.event}</code>). Evaluated against{" "}
+                <code>Model 02-B</code> (Windows-APT Specialist) and University IdP role context before SOAR dispatch.
               </div>
             </div>
 
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
               <button
                 onClick={() => setSelectedEvent(null)}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium"
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium cursor-pointer"
               >
                 Dismiss
               </button>
-              <button
-                onClick={() => {
-                  const targetId = selectedEvent.workstation_id;
-                  const label = selectedEvent.workstation_hostname || selectedEvent.source;
-                  setSelectedEvent(null);
-                  handleIsolateClick(targetId, label);
-                }}
-                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-bold transition-colors"
-              >
-                Isolate Host Source
-              </button>
+              {(() => {
+                const targetWs = selectedEvent.workstation_id
+                  ? workstations.find((w) => String(w.id) === selectedEvent.workstation_id)
+                  : workstations.find(
+                      (w) =>
+                        w.hostname.toLowerCase() ===
+                        (selectedEvent.workstation_hostname || "").toLowerCase()
+                    );
+                const isIsolated = targetWs?.status === "ISOLATED";
+                const targetId = targetWs ? String(targetWs.id) : selectedEvent.workstation_id;
+                const label = targetWs
+                  ? `${targetWs.hostname} (${targetWs.ip_address})`
+                  : selectedEvent.workstation_hostname || selectedEvent.destination;
+
+                if (isIsolated && targetId) {
+                  return (
+                    <button
+                      disabled={isProcessingAction}
+                      onClick={() => {
+                        setSelectedEvent(null);
+                        handleRollbackIsolation(targetId, label);
+                      }}
+                      className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      Rollback Isolation
+                    </button>
+                  );
+                }
+
+                return (
+                  <button
+                    disabled={isProcessingAction}
+                    onClick={() => {
+                      setSelectedEvent(null);
+                      handleIsolateClick(targetId, label);
+                    }}
+                    className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    Isolate Host Endpoint
+                  </button>
+                );
+              })()}
             </div>
           </div>
         </div>
