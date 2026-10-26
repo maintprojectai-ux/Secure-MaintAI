@@ -76,7 +76,7 @@ const INITIAL_TICKETS: SupportTicketItem[] = [
     status: "Open",
     priority: "High",
     created_at: "Sep 14, 2026",
-    author: "Ziyad Hassan (IT Operator)",
+    author: "Dr. Sarah Al-Rashid (Admin)",
     description: "Intermittent query timeouts observed during high telemetry ingestion batches from Lab 3 workstations.",
   },
   {
@@ -87,7 +87,7 @@ const INITIAL_TICKETS: SupportTicketItem[] = [
     status: "In Progress",
     priority: "Medium",
     created_at: "Sep 12, 2026",
-    author: "Alex Rivera (IT Operator)",
+    author: "Prof. Tariq Al-Omari (Researcher)",
     description: "Host SRV-AI-03 sustained >95% CPU for 25 minutes without generating a Level 3 warning alert.",
   },
   {
@@ -117,8 +117,8 @@ const INITIAL_TICKETS: SupportTicketItem[] = [
 const INITIAL_FAQS: FAQItem[] = [
   {
     id: "faq-1",
-    question: "How do I add a new user?",
-    answer: "Navigate to the Users Management page and click '+ Add User'. Enter the user's full name, academic email, department, and assign one of the 4 RBAC roles (Admin, IT Operator, Researcher, or Student). Role permissions are enforced cryptographically server-side across all endpoints.",
+    question: "How are user roles managed?",
+    answer: "Navigate to the Users Management page to inspect institutional accounts across the 3 RBAC roles (Admin, Researcher, or Student). Role permissions are enforced cryptographically server-side across all endpoints.",
     category: "Account & Access",
   },
   {
@@ -1072,7 +1072,7 @@ export default function HelpSupportPage() {
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-400">Target Audience:</span>
-                <span className="text-white">Administrators, IT Operators, and Researchers</span>
+                <span className="text-white">Administrators, Researchers, and Students</span>
               </div>
             </div>
           </div>

@@ -2,7 +2,7 @@
 Unit Tests — Identity Provider (IdP) Context Resolver Service.
 
 Tests:
-- Directory profile resolution for STUDENT, RESEARCHER, IT_OPERATOR.
+- Directory profile resolution for STUDENT, RESEARCHER, ADMIN.
 - TTL-based caching boundaries and cache eviction.
 - Active research workload registration and preservation metadata.
 - Safe fail-soft fallback behavior during simulated IdP outages.
@@ -113,7 +113,7 @@ async def test_outage_mode_returns_safe_fallback_context(clean_idp: IdPService) 
 async def test_get_user_role(clean_idp: IdPService) -> None:
     """
     Identity resolution: Query known mock users and test fallback behaviour.
-    Test Input: Mock Student, Researcher, and IT Operator accounts, simulated identity-provider unavailability.
+    Test Input: Mock Student, Researcher, and Admin accounts, simulated identity-provider unavailability.
     Expected Result: The service returns the expected context or a conservative fallback profile.
     """
     # 1. Mock Student Account
@@ -148,21 +148,21 @@ async def test_get_user_role(clean_idp: IdPService) -> None:
     assert ctx_researcher.role == "RESEARCHER"
     assert ctx_researcher.is_fallback is False
 
-    # 3. Mock IT Operator Account
-    it_op_id = str(uuid.uuid4())
+    # 3. Mock Admin Account
+    admin_id = str(uuid.uuid4())
     clean_idp.register_mock_user(
         IdPIdentityContext(
-            user_id=it_op_id,
-            username="it_operator_01",
-            email="it_operator_01@kku.edu.sa",
-            role="IT_OPERATOR",
+            user_id=admin_id,
+            username="admin_01",
+            email="admin_01@kku.edu.sa",
+            role="ADMIN",
             department="Central IT Infrastructure",
         )
     )
-    ctx_it_op = await clean_idp.get_user_context(it_op_id)
-    print(f"[Identity Resolution] IT Operator: user={ctx_it_op.username}, role={ctx_it_op.role}, dept={ctx_it_op.department}")
-    assert ctx_it_op.role == "IT_OPERATOR"
-    assert ctx_it_op.is_fallback is False
+    ctx_admin = await clean_idp.get_user_context(admin_id)
+    print(f"[Identity Resolution] Admin: user={ctx_admin.username}, role={ctx_admin.role}, dept={ctx_admin.department}")
+    assert ctx_admin.role == "ADMIN"
+    assert ctx_admin.is_fallback is False
 
     # 4. Simulated Identity-Provider Unavailability (Outage Fallback)
     import logging

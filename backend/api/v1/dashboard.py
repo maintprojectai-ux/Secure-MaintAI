@@ -141,24 +141,49 @@ async def get_dashboard_kpis(
     else:
         posture = 100.0
 
-    # 5. Compute fleet-wide average telemetry metrics (CPU, RAM, Disk)
-    tel_query = select(
-        func.avg(TelemetryMetric.cpu_usage),
-        func.avg(TelemetryMetric.memory_usage),
-        func.avg(TelemetryMetric.disk_read + TelemetryMetric.disk_write),
+    # 5. Compute fleet-wide average telemetry metrics from latest snapshot per workstation
+    latest_tel_stmt = (
+        select(TelemetryMetric)
+        .order_by(TelemetryMetric.workstation_id, TelemetryMetric.timestamp.desc())
     )
-    tel_res = await session.execute(tel_query)
-    avg_cpu, avg_ram, avg_disk = tel_res.one_or_none() or (None, None, None)
+    tel_rows = (await session.execute(latest_tel_stmt)).scalars().all()
+    latest_by_ws: dict[Any, TelemetryMetric] = {}
+    for m in tel_rows:
+        if m.workstation_id not in latest_by_ws:
+            latest_by_ws[m.workstation_id] = m
 
-    avg_cpu_val = round(float(avg_cpu), 1) if avg_cpu is not None else 35.0
-    avg_ram_val = round(float(avg_ram), 1) if avg_ram is not None else 48.0
-    avg_disk_val = round(float(avg_disk) % 100 if avg_disk is not None else 52.0, 1)
+    if latest_by_ws:
+        n_reporting = len(latest_by_ws)
+        avg_cpu_val = round(sum(float(m.cpu_usage) for m in latest_by_ws.values()) / n_reporting, 1)
+        avg_ram_val = round(sum(float(m.memory_usage) for m in latest_by_ws.values()) / n_reporting, 1)
+
+        # Fetch hardware_specs disk_usage_pct for reporting workstations, falling back to normalized MB/s I/O
+        ws_specs_res = await session.execute(
+            select(Workstation.id, Workstation.hardware_specs).where(
+                Workstation.id.in_(list(latest_by_ws.keys()))
+            )
+        )
+        specs_by_ws = {row[0]: row[1] for row in ws_specs_res.all()}
+        disk_vals: list[float] = []
+        for ws_id, m in latest_by_ws.items():
+            hw = specs_by_ws.get(ws_id)
+            hw_disk = (hw.get("disk_usage_pct") or hw.get("disk_usage")) if isinstance(hw, dict) else None
+            if hw_disk is not None:
+                disk_vals.append(float(hw_disk))
+            else:
+                io_mb_s = (float(m.disk_read) + float(m.disk_write)) / (1024**2)
+                disk_vals.append(min(100.0, io_mb_s))
+        avg_disk_val = round(sum(disk_vals) / n_reporting, 1)
+    else:
+        avg_cpu_val = 0.0
+        avg_ram_val = 0.0
+        avg_disk_val = 0.0
 
     response = DashboardKpisResponse(
         total_workstations=total_ws,
         online_workstations=online_ws,
         warning_workstations=warning_ws,
-        critical_workstations=critical_ws + isolated_ws,
+        critical_workstations=critical_ws,
         isolated_workstations=isolated_ws,
         offline_workstations=offline_ws,
         active_threats=active_threats,

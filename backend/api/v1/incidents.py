@@ -94,7 +94,7 @@ async def create_incident(
     session: Annotated[AsyncSession, Depends(get_async_session)],
     current_user: Annotated[UserAccount, Depends(get_current_active_user)],
 ) -> IncidentResponse:
-    """Create an incident manually. Requires IT_OPERATOR or ADMIN role."""
+    """Create an incident manually. Requires ADMIN role."""
     import uuid
 
     inc_num = f"INC-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"

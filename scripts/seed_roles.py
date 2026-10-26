@@ -1,8 +1,8 @@
 """
 Secure-MaintAI — Database Role Seeder.
 
-Creates the four canonical roles defined in the project report:
-ADMIN, IT_OPERATOR, RESEARCHER, STUDENT.
+Creates the three canonical roles defined in the project:
+ADMIN, RESEARCHER, STUDENT.
 
 Usage:
     python scripts/seed_roles.py
@@ -34,17 +34,6 @@ ROLES = [
             "devices.read": True,
             "telemetry.read": True,
             "alerts.manage": True,
-            "maintenance.manage": True,
-        },
-    },
-    {
-        "name": "IT_OPERATOR",
-        "description": "Operational access: device monitoring, telemetry, alerts, incidents, maintenance.",
-        "permissions": {
-            "devices.read": True,
-            "telemetry.read": True,
-            "alerts.manage": True,
-            "incidents.manage": True,
             "maintenance.manage": True,
         },
     },

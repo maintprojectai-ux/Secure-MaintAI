@@ -4,7 +4,7 @@ Integration Tests — Maintenance Subsystem API Endpoints.
 Tests:
 - Listing maintenance tasks (GET /api/v1/maintenance/tasks)
 - Aggregated maintenance KPIs (GET /api/v1/maintenance/kpis)
-- Task creation by ADMIN and IT_OPERATOR with audit logging (POST /api/v1/maintenance/tasks)
+- Task creation by ADMIN with audit logging (POST /api/v1/maintenance/tasks)
 - RBAC enforcement: STUDENT role rejected (403) from scheduling tasks
 - Status transitions: OPEN -> IN_PROGRESS -> COMPLETED (PATCH /api/v1/maintenance/tasks/{id}/status)
 """
@@ -118,10 +118,10 @@ async def test_create_maintenance_task_student_forbidden(
 @pytest.mark.asyncio
 async def test_get_maintenance_kpis(
     async_client: AsyncClient,
-    operator_headers: dict[str, str],
+    admin_headers: dict[str, str],
 ) -> None:
     """Retrieve maintenance KPIs with system health indicator."""
-    res = await async_client.get("/api/v1/maintenance/kpis", headers=operator_headers)
+    res = await async_client.get("/api/v1/maintenance/kpis", headers=admin_headers)
     assert res.status_code == 200
     data = res.json()
     assert "scheduled_today" in data

@@ -11,6 +11,7 @@ Per engineering rules Section 7, 21, and 30: zero-polling real-time updates.
 
 import asyncio
 import json
+import signal
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -23,12 +24,45 @@ class AlertBroadcaster:
     """In-memory pub-sub broadcaster for SSE alert streams."""
 
     def __init__(self) -> None:
-        self._subscribers: set[asyncio.Queue[str]] = set()
+        self._subscribers: set[asyncio.Queue[str | None]] = set()
         self._lock = asyncio.Lock()
+        self._shutting_down = False
+        self._signals_hooked = False
+
+    def _ensure_signal_hooks(self) -> None:
+        """Chain onto Uvicorn's SIGINT/SIGTERM handlers so SSE streams close immediately on reload."""
+        if self._signals_hooked:
+            return
+        self._signals_hooked = True
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                prev_handler = signal.getsignal(sig)
+                if callable(prev_handler):
+                    def _wrapped(s: int, f: Any, _prev: Any = prev_handler) -> None:
+                        self.trigger_shutdown()
+                        _prev(s, f)
+
+                    signal.signal(sig, _wrapped)
+            except Exception:
+                pass
+
+    def trigger_shutdown(self) -> None:
+        """Signal all active SSE streams to close immediately so Uvicorn can reload cleanly."""
+        self._shutting_down = True
+        for q in list(self._subscribers):
+            try:
+                q.put_nowait(None)
+            except asyncio.QueueFull:
+                try:
+                    q.get_nowait()
+                    q.put_nowait(None)
+                except Exception:
+                    pass
 
     async def subscribe(self) -> AsyncIterator[str]:
         """Subscribe a new client to the SSE event stream."""
-        queue: asyncio.Queue[str] = asyncio.Queue(maxsize=100)
+        self._ensure_signal_hooks()
+        queue: asyncio.Queue[str | None] = asyncio.Queue(maxsize=100)
         async with self._lock:
             self._subscribers.add(queue)
             logger.info("sse_client_connected", total_clients=len(self._subscribers))
@@ -37,12 +71,16 @@ class AlertBroadcaster:
             # Yield initial connection confirmation
             yield f"event: ping\ndata: {json.dumps({'status': 'connected'})}\n\n"
 
-            while True:
+            while not self._shutting_down:
                 try:
-                    # Wait for next event or send keep-alive every 20 seconds
-                    msg = await asyncio.wait_for(queue.get(), timeout=20.0)
+                    # Wait for next event or send keep-alive every 15 seconds
+                    msg = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    if msg is None or self._shutting_down:
+                        break
                     yield msg
                 except asyncio.TimeoutError:
+                    if self._shutting_down:
+                        break
                     # Keep-alive heartbeat ping to prevent proxy/browser timeout
                     yield ": keep-alive\n\n"
         except asyncio.CancelledError:

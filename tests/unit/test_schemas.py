@@ -86,12 +86,11 @@ class TestRoleEnum:
 
     def test_all_roles_defined(self) -> None:
         assert RoleEnum.ADMIN == "ADMIN"
-        assert RoleEnum.IT_OPERATOR == "IT_OPERATOR"
         assert RoleEnum.RESEARCHER == "RESEARCHER"
         assert RoleEnum.STUDENT == "STUDENT"
 
     def test_role_count(self) -> None:
-        assert len(RoleEnum) == 4
+        assert len(RoleEnum) == 3
 
 
 # ============================================================================

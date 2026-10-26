@@ -46,9 +46,7 @@ export default function DashboardPage() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastUpdatedTime, setLastUpdatedTime] = useState<Date>(new Date());
 
-  const [selectedTimeframe, setSelectedTimeframe] = useState("Real-time");
   const [selectedResource, setSelectedResource] = useState<"CPU" | "Memory" | "Disk">("CPU");
-  const [selectedThreatPeriod, setSelectedThreatPeriod] = useState<"Today" | "Yesterday" | "Last 7 Days">("Today");
 
   // Dynamic live state from backend APIs
   const [kpi, setKpi] = useState<DashboardKpis>({
@@ -170,12 +168,16 @@ export default function DashboardPage() {
   const healthyCount = kpi.online_workstations;
   const warningCount = kpi.warning_workstations;
   const criticalCount = kpi.critical_workstations;
+  const isolatedCount =
+    kpi.isolated_workstations ??
+    workstations.filter((w) => w.is_isolated || w.status === "ISOLATED").length;
   const offlineCount = kpi.offline_workstations;
   const threatCount = kpi.active_threats;
 
   const healthyPct = total > 0 ? ((healthyCount / total) * 100).toFixed(1) : "0.0";
   const warningPct = total > 0 ? ((warningCount / total) * 100).toFixed(1) : "0.0";
   const criticalPct = total > 0 ? ((criticalCount / total) * 100).toFixed(1) : "0.0";
+  const isolatedPct = total > 0 ? ((isolatedCount / total) * 100).toFixed(1) : "0.0";
   const offlinePct = total > 0 ? ((offlineCount / total) * 100).toFixed(1) : "0.0";
 
   // Top KPI metrics
@@ -190,7 +192,7 @@ export default function DashboardPage() {
       href: "/devices",
     },
     {
-      title: "Healthy Devices",
+      title: "Online Devices",
       value: String(healthyCount),
       delta: `${healthyPct}% of fleet`,
       deltaColor: "text-emerald-400",
@@ -219,18 +221,18 @@ export default function DashboardPage() {
     {
       title: "Active Threats",
       value: String(threatCount),
-      delta: `${Math.round(kpi.system_resilience_score ?? kpi.security_posture ?? 100)}% resilience`,
+      delta: `${isolatedCount} isolated • ${Math.round(kpi.system_resilience_score ?? kpi.security_posture ?? 100)}% posture`,
       deltaColor: "text-purple-400",
       icon: <ShieldAlert className="w-5 h-5 text-purple-400" />,
       iconBg: "bg-purple-600/20 border-purple-500/30",
-      href: "/cybersecurity",
+      href: "/alerts",
     },
   ];
 
-  // Devices health distribution for donut chart
+  // Devices health distribution for donut chart (all 5 operational states)
   const deviceStatus = [
     {
-      label: "Healthy",
+      label: "Online",
       count: healthyCount,
       percent: `${healthyPct}%`,
       color: "#10b981",
@@ -254,6 +256,14 @@ export default function DashboardPage() {
       href: "/devices?status=CRITICAL",
     },
     {
+      label: "Isolated (SOAR)",
+      count: isolatedCount,
+      percent: `${isolatedPct}%`,
+      color: "#a855f7",
+      bg: "bg-purple-500",
+      href: "/devices?status=ISOLATED",
+    },
+    {
       label: "Offline",
       count: offlineCount,
       percent: `${offlinePct}%`,
@@ -264,55 +274,61 @@ export default function DashboardPage() {
   ];
 
   const deviceStatusDonutData: DonutSegment[] = [
-    { label: "Healthy", value: healthyCount || (total === 0 ? 1 : 0), color: "#10b981" },
+    { label: "Online", value: healthyCount || (total === 0 ? 1 : 0), color: "#10b981" },
     { label: "Warning", value: warningCount, color: "#f59e0b" },
     { label: "Critical", value: criticalCount, color: "#ef4444" },
+    { label: "Isolated", value: isolatedCount, color: "#a855f7" },
     { label: "Offline", value: offlineCount, color: "#64748b" },
   ];
 
-  // Alerts Summary rows
+  // Alerts Summary rows strictly matching the 4 canonical AlertSeverity values (CRITICAL, HIGH, MEDIUM, LOW)
   const safeAlerts = Array.isArray(alerts) ? alerts : [];
-  const criticalAlertsCount = safeAlerts.filter((a) => a.severity === "CRITICAL").length;
-  const warningAlertsCount = safeAlerts.filter(
-    (a) => a.severity === "HIGH" || a.severity === "MEDIUM" || (a.severity as string) === "WARNING"
+  const criticalAlertsCount = safeAlerts.filter(
+    (a) => (a.severity || "").toUpperCase() === "CRITICAL"
   ).length;
-  const infoAlertsCount = safeAlerts.filter(
-    (a) => a.severity === "LOW" || (a.severity as string) === "INFO"
+  const highAlertsCount = safeAlerts.filter(
+    (a) => (a.severity || "").toUpperCase() === "HIGH"
+  ).length;
+  const mediumAlertsCount = safeAlerts.filter(
+    (a) => (a.severity || "").toUpperCase() === "MEDIUM"
+  ).length;
+  const lowAlertsCount = safeAlerts.filter(
+    (a) => (a.severity || "").toUpperCase() === "LOW"
   ).length;
   const totalAlertsCount = safeAlerts.length;
 
   const alertsSummary = [
     {
-      title: "Critical Alerts",
+      title: "Critical",
       count: criticalAlertsCount,
       color: "text-rose-400",
       icon: <AlertCircle className="w-4 h-4 text-rose-400" />,
       href: "/alerts?severity=CRITICAL",
     },
     {
-      title: "Warning Alerts",
-      count: warningAlertsCount,
-      color: "text-amber-400",
-      icon: <AlertTriangle className="w-4 h-4 text-amber-400" />,
-      href: "/alerts?severity=WARNING",
+      title: "High",
+      count: highAlertsCount,
+      color: "text-orange-400",
+      icon: <AlertTriangle className="w-4 h-4 text-orange-400" />,
+      href: "/alerts?severity=HIGH",
     },
     {
-      title: "Informational",
-      count: infoAlertsCount,
-      color: "text-blue-400",
-      icon: <Info className="w-4 h-4 text-blue-400" />,
-      href: "/alerts?severity=INFO",
+      title: "Medium",
+      count: mediumAlertsCount,
+      color: "text-amber-300",
+      icon: <AlertTriangle className="w-4 h-4 text-amber-300" />,
+      href: "/alerts?severity=MEDIUM",
     },
     {
-      title: "Total Alerts",
-      count: totalAlertsCount,
+      title: "Low",
+      count: lowAlertsCount,
       color: "text-cyan-400",
-      icon: <Shield className="w-4 h-4 text-cyan-400" />,
-      href: "/alerts",
+      icon: <Info className="w-4 h-4 text-cyan-400" />,
+      href: "/alerts?severity=LOW",
     },
   ];
 
-  // Recent Alerts list derived from live alerts
+  // Recent Alerts list derived from live alerts (preserving canonical severities)
   const recentAlerts = useMemo(() => {
     if (!safeAlerts || safeAlerts.length === 0) {
       return [];
@@ -322,15 +338,19 @@ export default function DashboardPage() {
       const severity =
         sev === "CRITICAL"
           ? "Critical"
-          : sev === "HIGH" || sev === "MEDIUM" || sev === "WARNING"
-            ? "Warning"
-            : "Info";
+          : sev === "HIGH"
+            ? "High"
+            : sev === "LOW"
+              ? "Low"
+              : "Medium";
       const severityColor =
         severity === "Critical"
           ? "bg-rose-500/15 text-rose-400 border-rose-500/30"
-          : severity === "Warning"
-            ? "bg-amber-500/15 text-amber-400 border-amber-500/30"
-            : "bg-blue-500/15 text-blue-400 border-blue-500/30";
+          : severity === "High"
+            ? "bg-orange-500/15 text-orange-400 border-orange-500/30"
+            : severity === "Medium"
+              ? "bg-amber-500/15 text-amber-300 border-amber-500/30"
+              : "bg-cyan-500/15 text-cyan-400 border-cyan-500/30";
 
       const matchedWs = workstations.find(
         (w) => w.id === a.workstation_id || w.hostname === a.workstation_id
@@ -351,7 +371,7 @@ export default function DashboardPage() {
     });
   }, [safeAlerts, workstations]);
 
-  // Top Devices by Resource Usage (sorted dynamically from live workstations)
+  // Top Devices by Resource Usage (sorted dynamically from live workstations, showing real workstation status)
   const currentTopDevices = useMemo(() => {
     if (!workstations || workstations.length === 0) return [];
 
@@ -371,20 +391,32 @@ export default function DashboardPage() {
           ? w.cpu_usage
           : selectedResource === "Memory"
             ? w.memory_usage
-            : w.disk_usage) ??
-        (w.status === "CRITICAL" || w.status === "ISOLATED"
-          ? 94
-          : w.status === "WARNING"
-            ? 76
-            : w.status === "ONLINE"
-              ? 34
-              : 0);
+            : w.disk_usage) ?? 0;
       const usage = Math.round(rawVal);
-      const isCritical = usage >= 80 || w.status === "CRITICAL" || w.status === "ISOLATED";
-      const isWarning = usage >= 60 || w.status === "WARNING";
-      const barColor = isCritical ? "bg-rose-500" : isWarning ? "bg-amber-500" : "bg-emerald-500";
-      const status = isCritical ? "Critical" : isWarning ? "Warning" : "Healthy";
-      const statusDot = isCritical ? "bg-rose-500" : isWarning ? "bg-amber-500" : "bg-emerald-500";
+      const barColor =
+        usage >= 80 ? "bg-rose-500" : usage >= 60 ? "bg-amber-500" : "bg-emerald-500";
+
+      const rawStatus = (w.status || "ONLINE").toUpperCase();
+      const status =
+        rawStatus === "ISOLATED"
+          ? "Isolated"
+          : rawStatus === "CRITICAL"
+            ? "Critical"
+            : rawStatus === "WARNING"
+              ? "Warning"
+              : rawStatus === "OFFLINE"
+                ? "Offline"
+                : "Online";
+      const statusDot =
+        rawStatus === "ISOLATED"
+          ? "bg-purple-500"
+          : rawStatus === "CRITICAL"
+            ? "bg-rose-500"
+            : rawStatus === "WARNING"
+              ? "bg-amber-500"
+              : rawStatus === "OFFLINE"
+                ? "bg-slate-500"
+                : "bg-emerald-500";
 
       return {
         id: w.id,
@@ -397,67 +429,13 @@ export default function DashboardPage() {
     });
   }, [workstations, selectedResource]);
 
-  // System gauges values based on live KPI & selected timeframe
+  // System gauges values based on live KPI
   const liveAvgCpu = Math.round(kpi.average_cpu || 0);
   const liveAvgRam = Math.round(kpi.average_ram || 0);
   const liveAvgDisk = Math.round(kpi.average_disk || 0);
 
-  const systemMetricsByTimeframe: Record<
-    string,
-    {
-      cpu: number;
-      ram: number;
-      disk: number;
-      cpuDelta: string;
-      ramDelta: string;
-      diskDelta: string;
-      cpuTrend: string;
-      ramTrend: string;
-      diskTrend: string;
-    }
-  > = {
-    "Real-time": {
-      cpu: liveAvgCpu,
-      ram: liveAvgRam,
-      disk: liveAvgDisk,
-      cpuDelta: "Live telemetry",
-      ramDelta: "Live telemetry",
-      diskDelta: "Live telemetry",
-      cpuTrend: "M1 9L10 4L20 8L30 2L39 7",
-      ramTrend: "M1 10L12 3L22 7L31 2L39 6",
-      diskTrend: "M1 8L10 5L19 9L29 3L39 5",
-    },
-    "Last 1h": {
-      cpu: Math.max(0, liveAvgCpu + 2),
-      ram: Math.max(0, liveAvgRam + 1),
-      disk: liveAvgDisk,
-      cpuDelta: "↑ 2%",
-      ramDelta: "↑ 1%",
-      diskDelta: "0%",
-      cpuTrend: "M1 7L10 9L20 5L30 8L39 3",
-      ramTrend: "M1 8L12 6L22 4L31 5L39 2",
-      diskTrend: "M1 6L10 7L19 5L29 6L39 4",
-    },
-    "Last 24h": {
-      cpu: Math.max(0, liveAvgCpu - 3),
-      ram: Math.max(0, liveAvgRam - 2),
-      disk: liveAvgDisk,
-      cpuDelta: "↓ 3%",
-      ramDelta: "↓ 2%",
-      diskDelta: "0%",
-      cpuTrend: "M1 4L10 6L20 3L30 5L39 8",
-      ramTrend: "M1 9L12 5L22 6L31 4L39 7",
-      diskTrend: "M1 7L10 8L19 6L29 5L39 6",
-    },
-  };
-
-  const currentMetrics =
-    systemMetricsByTimeframe[selectedTimeframe] || systemMetricsByTimeframe["Real-time"];
-
-  // Threat Detection Summary values derived from live security events
+  // Security & SOAR Containment Summary values derived from live security events & workstations
   const safeEvents = Array.isArray(securityEvents) ? securityEvents : [];
-  const quarantinedDevicesCount =
-    (kpi as any).isolated_workstations ?? workstations.filter((w) => (w as any).is_isolated || w.status === "ISOLATED").length;
 
   const malwareCount = safeEvents.filter(
     (e) =>
@@ -466,91 +444,17 @@ export default function DashboardPage() {
       (e.description || "").toLowerCase().includes("cryptojack")
   ).length;
 
-  const ransomwareCount = safeEvents.filter(
-    (e) =>
-      (e.event_type || "").toUpperCase().includes("RANSOM") ||
-      (e.description || "").toLowerCase().includes("ransom")
-  ).length;
-
-  const blockedCount = safeEvents.filter(
+  const unauthorizedAccessCount = safeEvents.filter(
     (e) =>
       (e.event_type || "").toUpperCase().includes("PORT") ||
       (e.event_type || "").toUpperCase().includes("ACCESS") ||
-      (e.event_type || "").toUpperCase().includes("AUTH")
+      (e.event_type || "").toUpperCase().includes("AUTH") ||
+      (e.event_type || "").toUpperCase().includes("PRIVILEGE")
   ).length;
 
-  const threatDataByPeriod: Record<
-    string,
-    {
-      malware: number;
-      malwareDelta: string;
-      ransomware: number;
-      ransomwareDelta: string;
-      blocked: number;
-      blockedDelta: string;
-      quarantined: number;
-      quarantinedDelta: string;
-      pathD: string;
-      areaD: string;
-      points: { cx: number; cy: number }[];
-      timeLabels: string[];
-    }
-  > = {
-    Today: {
-      malware: malwareCount,
-      malwareDelta: `${malwareCount} active signals`,
-      ransomware: ransomwareCount,
-      ransomwareDelta: "0 detected",
-      blocked: Math.max(blockedCount, safeEvents.length),
-      blockedDelta: `${safeEvents.length} events logged`,
-      quarantined: quarantinedDevicesCount,
-      quarantinedDelta: `${quarantinedDevicesCount} nodes contained`,
-      pathD: "M0 65 Q 40 68, 80 50 T 160 55 T 240 25 T 320 40 T 400 30 T 500 45",
-      areaD: "M0 65 Q 40 68, 80 50 T 160 55 T 240 25 T 320 40 T 400 30 T 500 45 L 500 80 L 0 80 Z",
-      points: [
-        { cx: 240, cy: 25 },
-        { cx: 400, cy: 30 },
-      ],
-      timeLabels: ["00:00", "04:00", "08:00", "12:00", "18:00", "20:00", "24:00"],
-    },
-    Yesterday: {
-      malware: Math.max(0, malwareCount - 1),
-      malwareDelta: "Baseline",
-      ransomware: 0,
-      ransomwareDelta: "0 detected",
-      blocked: Math.max(0, safeEvents.length - 2),
-      blockedDelta: "Previous 24h",
-      quarantined: quarantinedDevicesCount,
-      quarantinedDelta: "Preserved state",
-      pathD: "M0 70 Q 50 60, 100 55 T 200 45 T 300 50 T 400 35 T 500 60",
-      areaD: "M0 70 Q 50 60, 100 55 T 200 45 T 300 50 T 400 35 T 500 60 L 500 80 L 0 80 Z",
-      points: [
-        { cx: 200, cy: 45 },
-        { cx: 400, cy: 35 },
-      ],
-      timeLabels: ["00:00", "04:00", "08:00", "12:00", "18:00", "20:00", "24:00"],
-    },
-    "Last 7 Days": {
-      malware: malwareCount + 2,
-      malwareDelta: "Weekly trend",
-      ransomware: 0,
-      ransomwareDelta: "0 detected",
-      blocked: safeEvents.length + 15,
-      blockedDelta: "Aggregated week",
-      quarantined: quarantinedDevicesCount,
-      quarantinedDelta: "Audit history",
-      pathD: "M0 55 Q 60 40, 120 48 T 240 20 T 360 35 T 440 28 T 500 50",
-      areaD: "M0 55 Q 60 40, 120 48 T 240 20 T 360 35 T 440 28 T 500 50 L 500 80 L 0 80 Z",
-      points: [
-        { cx: 240, cy: 20 },
-        { cx: 440, cy: 28 },
-      ],
-      timeLabels: ["Day 1", "Day 2", "Day 3", "Day 4", "Day 5", "Day 6", "Day 7"],
-    },
-  };
-
-  const currentThreat =
-    threatDataByPeriod[selectedThreatPeriod] || threatDataByPeriod["Today"];
+  const securityPosturePct = Math.round(
+    kpi.system_resilience_score ?? kpi.security_posture ?? 100
+  );
 
   // Shimmer loading skeleton screen
   if (isLoadingInitial && !mounted) {
@@ -647,17 +551,9 @@ export default function DashboardPage() {
               <Monitor className="w-4 h-4 text-blue-400" />
               <h2 className="text-sm font-bold text-white tracking-tight">System Overview</h2>
             </div>
-            <div className="relative">
-              <select
-                value={selectedTimeframe}
-                onChange={(e) => setSelectedTimeframe(e.target.value)}
-                className="text-[11px] bg-slate-900 border border-slate-700/80 text-slate-300 rounded-lg px-2.5 py-1 focus:outline-none focus:border-blue-500 cursor-pointer"
-              >
-                <option value="Real-time">Real-time</option>
-                <option value="Last 1h">Last 1h</option>
-                <option value="Last 24h">Last 24h</option>
-              </select>
-            </div>
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-400">
+              Live Fleet Average
+            </span>
           </div>
 
           <div className="grid grid-cols-3 gap-2 sm:gap-4 py-4 text-center">
@@ -674,29 +570,21 @@ export default function DashboardPage() {
                     stroke="#3b82f6"
                     strokeWidth="8"
                     strokeDasharray="251.32"
-                    strokeDashoffset={251.32 * (1 - currentMetrics.cpu / 100)}
+                    strokeDashoffset={251.32 * (1 - liveAvgCpu / 100)}
                     strokeLinecap="round"
                     fill="none"
                   />
                 </svg>
                 <div className="absolute inset-0 flex flex-col items-center justify-center">
                   <span className="text-sm sm:text-base font-bold text-white">
-                    {currentMetrics.cpu}%
+                    {liveAvgCpu}%
                   </span>
                   <span className="text-[9px] text-slate-400">Average</span>
                 </div>
               </div>
-              <div className="mt-2.5 flex items-center gap-1 text-[11px] text-blue-400 font-medium">
-                <svg className="w-10 h-3 text-blue-400" viewBox="0 0 40 12" fill="none">
-                  <path
-                    d={currentMetrics.cpuTrend}
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                  />
-                </svg>
-                <span>{currentMetrics.cpuDelta}</span>
-              </div>
+              <span className="mt-2.5 text-[11px] text-blue-400 font-medium">
+                {liveAvgCpu >= 80 ? "High Load" : liveAvgCpu >= 60 ? "Moderate" : "Normal"}
+              </span>
               <span className="text-[9px] text-slate-500">Fleet telemetry</span>
             </div>
 
@@ -713,29 +601,21 @@ export default function DashboardPage() {
                     stroke="#10b981"
                     strokeWidth="8"
                     strokeDasharray="251.32"
-                    strokeDashoffset={251.32 * (1 - currentMetrics.ram / 100)}
+                    strokeDashoffset={251.32 * (1 - liveAvgRam / 100)}
                     strokeLinecap="round"
                     fill="none"
                   />
                 </svg>
                 <div className="absolute inset-0 flex flex-col items-center justify-center">
                   <span className="text-sm sm:text-base font-bold text-white">
-                    {currentMetrics.ram}%
+                    {liveAvgRam}%
                   </span>
                   <span className="text-[9px] text-slate-400">Average</span>
                 </div>
               </div>
-              <div className="mt-2.5 flex items-center gap-1 text-[11px] text-emerald-400 font-medium">
-                <svg className="w-10 h-3 text-emerald-400" viewBox="0 0 40 12" fill="none">
-                  <path
-                    d={currentMetrics.ramTrend}
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                  />
-                </svg>
-                <span>{currentMetrics.ramDelta}</span>
-              </div>
+              <span className="mt-2.5 text-[11px] text-emerald-400 font-medium">
+                {liveAvgRam >= 85 ? "High Load" : liveAvgRam >= 70 ? "Elevated" : "Healthy"}
+              </span>
               <span className="text-[9px] text-slate-500">Fleet telemetry</span>
             </div>
 
@@ -752,29 +632,21 @@ export default function DashboardPage() {
                     stroke="#8b5cf6"
                     strokeWidth="8"
                     strokeDasharray="251.32"
-                    strokeDashoffset={251.32 * (1 - currentMetrics.disk / 100)}
+                    strokeDashoffset={251.32 * (1 - liveAvgDisk / 100)}
                     strokeLinecap="round"
                     fill="none"
                   />
                 </svg>
                 <div className="absolute inset-0 flex flex-col items-center justify-center">
                   <span className="text-sm sm:text-base font-bold text-white">
-                    {currentMetrics.disk}%
+                    {liveAvgDisk}%
                   </span>
                   <span className="text-[9px] text-slate-400">Average</span>
                 </div>
               </div>
-              <div className="mt-2.5 flex items-center gap-1 text-[11px] text-purple-400 font-medium">
-                <svg className="w-10 h-3 text-purple-400" viewBox="0 0 40 12" fill="none">
-                  <path
-                    d={currentMetrics.diskTrend}
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                  />
-                </svg>
-                <span>{currentMetrics.diskDelta}</span>
-              </div>
+              <span className="mt-2.5 text-[11px] text-purple-400 font-medium">
+                {liveAvgDisk >= 85 ? "Low Space" : liveAvgDisk >= 70 ? "Moderate" : "Ample Space"}
+              </span>
               <span className="text-[9px] text-slate-500">Fleet telemetry</span>
             </div>
           </div>
@@ -803,7 +675,7 @@ export default function DashboardPage() {
             </div>
 
             {/* Legend Breakdown */}
-            <div className="space-y-2 flex-1 text-xs">
+            <div className="space-y-1.5 flex-1 text-xs">
               {deviceStatus.map((item, idx) => (
                 <Link
                   key={idx}
@@ -830,12 +702,12 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Col 3: Alerts Summary Card */}
+        {/* Col 3: Alerts Summary Card (4 Canonical Severities: Critical, High, Medium, Low) */}
         <div className="lg:col-span-3 glass-card p-5 border-slate-800/80 bg-[#091124]/90 flex flex-col justify-between shadow-lg">
           <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
-            <h2 className="text-sm font-bold text-white tracking-tight">Alerts Summary</h2>
+            <h2 className="text-sm font-bold text-white tracking-tight">Alerts by Severity</h2>
             <Link href="/alerts" className="text-xs text-blue-400 hover:text-blue-300 font-medium">
-              View all
+              View all ({totalAlertsCount})
             </Link>
           </div>
 
@@ -860,12 +732,13 @@ export default function DashboardPage() {
             ))}
           </div>
 
-          <div className="pt-2 text-right">
+          <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px]">
+            <span className="text-slate-400">Total Registered</span>
             <Link
               href="/alerts"
-              className="text-[11px] font-mono text-slate-400 hover:text-cyan-400 transition-colors"
+              className="font-mono font-bold text-cyan-400 hover:text-cyan-300 transition-colors"
             >
-              Autonomous pipeline • Rule §16/21 →
+              {totalAlertsCount} Alerts →
             </Link>
           </div>
         </div>
@@ -1028,100 +901,90 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Row 4: Threat Detection Summary (Bottom Full-Width Card) */}
+      {/* Row 4: Security & SOAR Containment Summary (Bottom Full-Width Card) */}
       <div className="glass-card p-5 border-slate-800/80 bg-[#091124]/90 shadow-lg">
-        <div className="flex items-center justify-between pb-4 border-b border-slate-800/80">
+        <div className="flex flex-wrap items-center justify-between gap-2 pb-4 border-b border-slate-800/80">
           <div className="flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 text-blue-400" />
-            <h2 className="text-sm font-bold text-white tracking-tight">Threat Detection Summary</h2>
+            <h2 className="text-sm font-bold text-white tracking-tight">
+              Security &amp; SOAR Containment Summary
+            </h2>
           </div>
-          <select
-            value={selectedThreatPeriod}
-            onChange={(e) => setSelectedThreatPeriod(e.target.value as "Today" | "Yesterday" | "Last 7 Days")}
-            className="text-[11px] bg-slate-900 border border-slate-700/80 text-slate-300 rounded-lg px-2.5 py-1 focus:outline-none focus:border-blue-500 cursor-pointer"
+          <Link
+            href="/alerts"
+            className="text-xs text-blue-400 hover:text-blue-300 font-medium flex items-center gap-1"
           >
-            <option value="Today">Today</option>
-            <option value="Yesterday">Yesterday</option>
-            <option value="Last 7 Days">Last 7 Days</option>
-          </select>
+            <span>Open Incident &amp; Alert Triage</span>
+            <ChevronRight className="w-3.5 h-3.5" />
+          </Link>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pt-5 items-center">
-          {/* Left 4 Threat Metric Columns */}
-          <div className="lg:col-span-6 grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div className="space-y-1">
-              <p className="text-[11px] font-medium text-slate-400">Malware Detected</p>
-              <p className="text-2xl font-bold text-white font-sans">{currentThreat.malware}</p>
-              <p className="text-[10px] font-medium text-rose-400">{currentThreat.malwareDelta}</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-4">
+          <Link
+            href="/alerts"
+            className="p-4 rounded-xl border border-slate-800/80 bg-slate-900/50 hover:border-rose-500/40 hover:bg-slate-800/40 transition-all group"
+          >
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-medium text-slate-400 group-hover:text-slate-200">
+                Malware / Cryptojacking
+              </p>
+              <ShieldAlert className="w-4 h-4 text-rose-400" />
             </div>
-            <div className="space-y-1">
-              <p className="text-[11px] font-medium text-slate-400">Ransomware Attempts</p>
-              <p className="text-2xl font-bold text-white font-sans">{currentThreat.ransomware}</p>
-              <p className="text-[10px] font-medium text-slate-500">{currentThreat.ransomwareDelta}</p>
+            <p className="text-2xl font-bold text-white font-sans mt-1.5">{malwareCount}</p>
+            <p className="text-[11px] font-medium text-rose-400 mt-1">
+              {malwareCount > 0 ? `${malwareCount} signals detected` : "No active malware signals"}
+            </p>
+          </Link>
+
+          <Link
+            href="/alerts"
+            className="p-4 rounded-xl border border-slate-800/80 bg-slate-900/50 hover:border-amber-500/40 hover:bg-slate-800/40 transition-all group"
+          >
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-medium text-slate-400 group-hover:text-slate-200">
+                Unauthorized Access Events
+              </p>
+              <AlertTriangle className="w-4 h-4 text-amber-400" />
             </div>
-            <div className="space-y-1">
-              <p className="text-[11px] font-medium text-slate-400">Blocked Connections</p>
-              <p className="text-2xl font-bold text-white font-sans">{currentThreat.blocked}</p>
-              <p className="text-[10px] font-medium text-emerald-400">{currentThreat.blockedDelta}</p>
+            <p className="text-2xl font-bold text-white font-sans mt-1.5">
+              {unauthorizedAccessCount}
+            </p>
+            <p className="text-[11px] font-medium text-amber-400 mt-1">
+              Auth, brute-force &amp; port probes
+            </p>
+          </Link>
+
+          <Link
+            href="/alerts"
+            className="p-4 rounded-xl border border-slate-800/80 bg-slate-900/50 hover:border-blue-500/40 hover:bg-slate-800/40 transition-all group"
+          >
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-medium text-slate-400 group-hover:text-slate-200">
+                Total Security Events
+              </p>
+              <Shield className="w-4 h-4 text-blue-400" />
             </div>
-            <div className="space-y-1">
-              <p className="text-[11px] font-medium text-slate-400">Quarantined Devices</p>
-              <p className="text-2xl font-bold text-white font-sans">{currentThreat.quarantined}</p>
-              <p className="text-[10px] font-medium text-emerald-400">{currentThreat.quarantinedDelta}</p>
+            <p className="text-2xl font-bold text-white font-sans mt-1.5">{safeEvents.length}</p>
+            <p className="text-[11px] font-medium text-blue-400 mt-1">
+              {threatCount} active incidents • {securityPosturePct}% posture
+            </p>
+          </Link>
+
+          <Link
+            href="/devices?status=ISOLATED"
+            className="p-4 rounded-xl border border-purple-500/30 bg-purple-950/15 hover:border-purple-500/60 hover:bg-purple-950/25 transition-all group"
+          >
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-medium text-purple-200 group-hover:text-white">
+                Isolated Devices (SOAR)
+              </p>
+              <ShieldCheck className="w-4 h-4 text-purple-400" />
             </div>
-          </div>
-
-          {/* Right Threat Activity Area Chart (0-75 timeline) */}
-          <div className="lg:col-span-6 flex flex-col justify-end">
-            <div className="relative h-28 w-full">
-              {/* Y Axis Ticks */}
-              <div className="absolute left-0 top-0 bottom-4 flex flex-col justify-between text-[9px] font-mono text-slate-500 pr-2 border-r border-slate-800">
-                <span>75</span>
-                <span>50</span>
-                <span>25</span>
-                <span>0</span>
-              </div>
-
-              {/* Chart Body */}
-              <div className="ml-7 h-full flex flex-col justify-between">
-                <div className="relative flex-1">
-                  <svg className="w-full h-full" viewBox="0 0 500 80" preserveAspectRatio="none">
-                    <defs>
-                      <linearGradient id="threat-area-grad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.4" />
-                        <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.0" />
-                      </linearGradient>
-                    </defs>
-
-                    {/* Area fill */}
-                    <path d={currentThreat.areaD} fill="url(#threat-area-grad)" />
-                    {/* Trend Line */}
-                    <path d={currentThreat.pathD} fill="none" stroke="#3b82f6" strokeWidth="2.5" />
-
-                    {/* Node points */}
-                    {currentThreat.points.map((pt, pIdx) => (
-                      <circle
-                        key={pIdx}
-                        cx={pt.cx}
-                        cy={pt.cy}
-                        r="3.5"
-                        fill="#60a5fa"
-                        stroke="#1e3a8a"
-                        strokeWidth="1.5"
-                      />
-                    ))}
-                  </svg>
-                </div>
-
-                {/* X Axis Time Marks */}
-                <div className="flex justify-between text-[9px] font-mono text-slate-500 pt-1 border-t border-slate-800">
-                  {currentThreat.timeLabels.map((lbl, lIdx) => (
-                    <span key={lIdx}>{lbl}</span>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
+            <p className="text-2xl font-bold text-white font-sans mt-1.5">{isolatedCount}</p>
+            <p className="text-[11px] font-medium text-purple-300 mt-1">
+              Host OS running • Sockets blocked →
+            </p>
+          </Link>
         </div>
       </div>
     </div>

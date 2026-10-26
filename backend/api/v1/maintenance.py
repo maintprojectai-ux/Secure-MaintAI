@@ -185,10 +185,10 @@ async def create_maintenance_task(
     session: Annotated[AsyncSession, Depends(get_async_session)],
     current_user: Annotated[
         UserAccount,
-        Depends(require_roles([RoleEnum.ADMIN, RoleEnum.IT_OPERATOR])),
+        Depends(require_roles([RoleEnum.ADMIN])),
     ],
 ) -> MaintenanceTaskResponse:
-    """Create a new maintenance task. Requires ADMIN or IT_OPERATOR role."""
+    """Create a new maintenance task. Requires ADMIN role."""
     now = datetime.now(timezone.utc)
     inc_num = f"MNT-{now.strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
 
@@ -240,7 +240,7 @@ async def update_maintenance_task_status(
     session: Annotated[AsyncSession, Depends(get_async_session)],
     current_user: Annotated[
         UserAccount,
-        Depends(require_roles([RoleEnum.ADMIN, RoleEnum.IT_OPERATOR])),
+        Depends(require_roles([RoleEnum.ADMIN])),
     ],
 ) -> MaintenanceTaskResponse:
     """Update execution status of a maintenance task."""

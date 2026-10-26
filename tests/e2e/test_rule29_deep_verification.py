@@ -117,7 +117,6 @@ async def test_scenario_1_deep_technical_fault_maintenance(
 async def test_scenario_2_deep_cryptojacking_student_containment_and_rollback(
     async_client: AsyncClient,
     admin_headers: dict[str, str],
-    operator_headers: dict[str, str],
 ) -> None:
     """
     Scenario 2 (Deep): Cryptojacking Attack -> Security Anomaly + SIEM -> Role Lookup -> Surgical Isolation & Rollback.
@@ -202,10 +201,10 @@ async def test_scenario_2_deep_cryptojacking_student_containment_and_rollback(
         assert inc is not None
         assert inc.status == "CONTAINED"
 
-    # Step 2: SOC Operator rolls back isolation
+    # Step 2: SOC Admin rolls back isolation
     rollback_resp = await async_client.post(
         f"/api/v1/policy/rollback-isolation/{ws_id}",
-        headers=operator_headers,
+        headers=admin_headers,
     )
     assert rollback_resp.status_code == 200
     assert rollback_resp.json()["status"] == "success"
@@ -308,7 +307,6 @@ async def test_scenario_3_deep_researcher_workload_preservation(
 async def test_scenario_4_deep_unauthorized_activity_soc_lifecycle(
     async_client: AsyncClient,
     admin_headers: dict[str, str],
-    operator_headers: dict[str, str],
 ) -> None:
     """
     Scenario 4 (Deep): Unauthorized Activity -> Threat Event -> Alert Creation -> Acknowledge -> Resolve.
@@ -352,26 +350,26 @@ async def test_scenario_4_deep_unauthorized_activity_soc_lifecycle(
     assert eval_resp.status_code == 200
 
     # Step 2: Fetch created alert
-    alerts_resp = await async_client.get("/api/v1/alerts", headers=operator_headers)
+    alerts_resp = await async_client.get("/api/v1/alerts", headers=admin_headers)
     assert alerts_resp.status_code == 200
     alerts = alerts_resp.json()
     assert len(alerts) > 0
     target_alert = alerts[0]
     alert_id = target_alert["id"]
 
-    # Step 3: SOC Operator acknowledges the alert
+    # Step 3: SOC Admin acknowledges the alert
     ack_resp = await async_client.patch(
         f"/api/v1/alerts/{alert_id}/acknowledge",
-        headers=operator_headers,
+        headers=admin_headers,
     )
     assert ack_resp.status_code == 200
     assert ack_resp.json()["status"] == "ACKNOWLEDGED"
     assert ack_resp.json()["acknowledged_at"] is not None
 
-    # Step 4: SOC Operator resolves the alert
+    # Step 4: SOC Admin resolves the alert
     res_resp = await async_client.patch(
         f"/api/v1/alerts/{alert_id}/resolve",
-        headers=operator_headers,
+        headers=admin_headers,
     )
     assert res_resp.status_code == 200
     assert res_resp.json()["status"] == "RESOLVED"

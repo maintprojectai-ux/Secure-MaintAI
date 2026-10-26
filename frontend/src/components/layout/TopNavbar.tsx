@@ -10,8 +10,6 @@ import {
   AlertTriangle,
   Flame,
   Calendar,
-  ChevronDown,
-  Moon,
   Ticket,
 } from "lucide-react";
 import { useAlerts } from "@/context/AlertContext";
@@ -20,13 +18,11 @@ const ROUTE_TITLES: Record<string, { title: string; subtitle: string }> = {
   "/": { title: "Dashboard", subtitle: "Overview of your infrastructure and security status" },
   "/devices": { title: "Devices Monitoring", subtitle: "Monitor and manage all university infrastructure devices in real-time" },
   "/alerts": { title: "Incident & Alert Management", subtitle: "Anomaly screening triage, evidence inspection, and SOAR response" },
-  "/cybersecurity": { title: "Cybersecurity & Threat Intelligence", subtitle: "SIEM correlation, attack matrix, and geographic intrusion origins" },
   "/predictions": { title: "AI Predictive", subtitle: "Model 01 screening, Model 02 diagnostics, and empirical validation" },
   "/maintenance": { title: "Predictive Maintenance Schedule", subtitle: "Autonomous task orchestration, calendar dispatch, and hardware health" },
   "/reports": { title: "Reports", subtitle: "Comprehensive overview of your infrastructure performance and security posture" },
   "/users": { title: "Users Management", subtitle: "Manage system users, roles, permissions, and access control." },
   "/activity-logs": { title: "Activity Logs", subtitle: "Monitor and review all system activities and user actions" },
-  "/settings": { title: "Settings", subtitle: "Configure system preferences, security, and integrations" },
   "/help": { title: "Help / Support", subtitle: "We're here to help you. Find answers, guides, and get support." },
 };
 
@@ -34,6 +30,7 @@ export const TopNavbar: React.FC = () => {
   const pathname = usePathname();
   const { openAlertsCount, recentAlerts } = useAlerts();
   const [currentTime, setCurrentTime] = useState<string>("");
+  const [currentDate, setCurrentDate] = useState<string>("");
   const [showNotifications, setShowNotifications] = useState(false);
 
   // Client-only clock to prevent SSR hydration mismatch
@@ -46,6 +43,13 @@ export const TopNavbar: React.FC = () => {
           minute: "2-digit",
           second: "2-digit",
           hour12: false,
+        })
+      );
+      setCurrentDate(
+        now.toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
         })
       );
     };
@@ -102,26 +106,19 @@ export const TopNavbar: React.FC = () => {
           </a>
         )}
 
-        {/* Date Selector Pill */}
-        <div className="hidden xl:flex items-center gap-2 px-3 py-1.5 rounded-xl border border-slate-800 bg-[#091124] text-slate-300 text-xs font-sans select-none">
-          <Calendar className="w-3.5 h-3.5 text-slate-400" />
-          <span>Sep 16, 2026</span>
-          <ChevronDown className="w-3 h-3 text-slate-400" />
-        </div>
+        {/* Current Date Pill */}
+        {currentDate && (
+          <div className="hidden xl:flex items-center gap-2 px-3 py-1.5 rounded-xl border border-slate-800 bg-[#091124] text-slate-300 text-xs font-sans select-none">
+            <Calendar className="w-3.5 h-3.5 text-slate-400" />
+            <span>{currentDate}</span>
+          </div>
+        )}
 
         {/* Live Clock */}
         <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-slate-800 bg-[#091124] text-slate-300 text-xs font-mono">
           <Clock className="w-3.5 h-3.5 text-blue-400" />
           <span>{currentTime || "12:00:00"}</span>
         </div>
-
-        {/* Dark/Light Theme Toggle Icon */}
-        <button
-          className="p-2 rounded-xl border border-slate-700/80 bg-[#091124] text-slate-400 hover:text-white transition-colors"
-          title="Toggle Theme"
-        >
-          <Moon className="w-4 h-4" />
-        </button>
 
         {/* Notification Bell Dropdown */}
         <div className="relative">

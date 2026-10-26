@@ -3,7 +3,7 @@ Secure-MaintAI — University Identity Provider (IdP) Context Resolver Service.
 
 Per engineering rules Section 18:
 - Resolves contextual identity information: user_id, role, department, lab, status.
-- Differentiates STUDENT vs RESEARCHER vs IT_OPERATOR vs ADMIN context.
+- Differentiates STUDENT vs RESEARCHER vs ADMIN context.
 - Maintains TTL-bounded cache. Never treats cached identity context as permanently valid.
 - Gracefully handles IdP outages with a safe fallback context (Rule 18, 25, 29 Scenario 5).
 """

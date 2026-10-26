@@ -445,7 +445,7 @@ export function DemoProgress({ receipt, activeStep, onStepSelect, onReset }: Dem
                   <div className="my-2 p-2 rounded bg-amber-500/10 border border-amber-500/30 flex items-center gap-2 text-amber-300 text-[11px]">
                     <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
                     <span>
-                      <strong>IdP Outage Fallback Active:</strong> University IdP directory was unreachable. Safe local policy cache engaged without service interruption (Rule 18 / Scenario 5).
+                      <strong>IdP Outage Fallback Active:</strong> University IdP directory was unreachable. Safe local policy cache engaged without service interruption.
                     </span>
                   </div>
                 )}

@@ -1,4 +1,4 @@
-export type UserRole = "ADMIN" | "IT_OPERATOR" | "RESEARCHER" | "STUDENT";
+export type UserRole = "ADMIN" | "RESEARCHER" | "STUDENT";
 
 export interface User {
   id: string;
@@ -152,21 +152,6 @@ export interface SecurityEvent {
   evidence: Record<string, unknown>;
 }
 
-export interface ThreatOrigin {
-  country: string;
-  code: string;
-  count: number;
-  percentage: number;
-  color: string;
-}
-
-export interface AttackMatrixCell {
-  hour: number;
-  day: string;
-  attacks: number;
-  severity: "none" | "low" | "medium" | "high" | "critical";
-}
-
 export interface ModelMetrics {
   name: string;
   version: string;
@@ -244,73 +229,6 @@ export interface UserManagementItem {
   last_login: string;
   two_factor_enabled: boolean;
   avatar?: string;
-}
-
-export interface CyberKPIs {
-  threats_detected: number;
-  threats_detected_change: string;
-  high_risk_events: number;
-  high_risk_change: string;
-  blocked_attacks: string;
-  blocked_attacks_change: string;
-  affected_devices: number;
-  affected_devices_change: string;
-  security_score: number;
-  security_score_change: string;
-}
-
-export interface ActiveThreatItem {
-  id: string;
-  title: string;
-  category: "MALWARE" | "DDOS" | "BRUTE_FORCE" | "SQLI" | "SUSPICIOUS";
-  risk: "Critical" | "High Risk" | "Medium" | "Low";
-  target_description: string;
-  target_ip: string;
-  time_ago: string;
-  status: "Investigating" | "Active" | "Blocked" | "Monitoring";
-  statusColor: "amber" | "rose" | "emerald" | "blue";
-  workstation_id?: string;
-  workstation_hostname?: string;
-  incident_number?: string;
-  raw_status?: string;
-}
-
-export interface VulnerabilityItem {
-  cve: string;
-  severity: "Critical" | "High" | "Medium" | "Low";
-  affected_assets: number;
-  cvss_score: number;
-}
-
-export interface SecurityEventItem {
-  id: string;
-  time: string;
-  event: string;
-  source: string;
-  destination: string;
-  severity: "Critical" | "High" | "Medium" | "Low";
-  status: "Investigating" | "Blocked" | "Active" | "Monitoring";
-  statusColor: "amber" | "emerald" | "rose" | "blue";
-  workstation_id?: string;
-  workstation_hostname?: string;
-  event_type?: string;
-  raw_status?: string;
-  description?: string;
-}
-
-export interface SecurityPostureDimension {
-  name: string;
-  score: number;
-  max: number;
-  colorHex: string;
-}
-
-export interface ThreatIntelItem {
-  id: string;
-  title: string;
-  description: string;
-  time_ago: string;
-  type: "malware" | "phishing" | "cve";
 }
 
 export interface PredictionOverviewKPIs {

@@ -2,7 +2,7 @@
 Secure-MaintAI — Unit Tests for Audit Log Query API.
 
 Verifies:
-- Rule 8: Server-authoritative RBAC (only ADMIN and IT_OPERATOR can query audit logs).
+- Rule 8: Server-authoritative RBAC (only ADMIN can query audit logs).
 - Rule 24: Audit logs are queryable with pagination and filter criteria.
 """
 

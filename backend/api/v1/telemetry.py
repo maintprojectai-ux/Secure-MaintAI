@@ -42,6 +42,11 @@ _telemetry_cache: dict[str, tuple[float, list[TelemetryResponse]]] = {}
 _TELEMETRY_CACHE_TTL = 3.0
 
 
+def invalidate_telemetry_cache() -> None:
+    """Clear the telemetry query cache when new telemetry snapshots are ingested."""
+    _telemetry_cache.clear()
+
+
 @router.get(
     "/anomalies",
     response_model=list[AnomalyResponse],
@@ -50,13 +55,17 @@ _TELEMETRY_CACHE_TTL = 3.0
 async def list_recent_anomalies(
     session: Annotated[AsyncSession, Depends(get_async_session)],
     _: Annotated[UserAccount, Depends(get_current_active_user)],
+    workstation_id: Annotated[UUID | None, Query(description="Filter by workstation UUID")] = None,
     limit: Annotated[int, Query(ge=1, le=200, description="Max anomalies to return")] = 50,
 ) -> list[AnomalyResponse]:
     """
-    Retrieve recently detected anomalies across all monitored workstations.
+    Retrieve recently detected anomalies across monitored workstations.
     Ordered newest-first. Requires authenticated user.
     """
-    query = select(AnomalyDetection).order_by(desc(AnomalyDetection.created_at)).limit(limit)
+    query = select(AnomalyDetection)
+    if workstation_id is not None:
+        query = query.where(AnomalyDetection.workstation_id == workstation_id)
+    query = query.order_by(desc(AnomalyDetection.created_at)).limit(limit)
     result = await session.execute(query)
     anomalies = result.scalars().all()
     return [AnomalyResponse.model_validate(a) for a in anomalies]
@@ -157,6 +166,10 @@ async def ingest_single_telemetry(
             session.add(alert)
 
     await session.commit()
+    invalidate_telemetry_cache()
+    from backend.api.v1.dashboard import invalidate_dashboard_kpi_cache
+
+    invalidate_dashboard_kpi_cache()
 
     return TelemetryIngestResponse(
         status="success",
@@ -262,6 +275,10 @@ async def ingest_telemetry_batch(
         session.add_all(alerts)
 
     await session.commit()
+    invalidate_telemetry_cache()
+    from backend.api.v1.dashboard import invalidate_dashboard_kpi_cache
+
+    invalidate_dashboard_kpi_cache()
 
     return TelemetryIngestResponse(
         status="success",

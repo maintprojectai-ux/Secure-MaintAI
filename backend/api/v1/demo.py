@@ -53,7 +53,7 @@ class DemoScenarioRequest(BaseModel):
     workstation_id: UUID | str | None = Field(default=None, description="Optional target workstation ID or hostname")
     user_role: str | None = Field(
         default=None,
-        description="Optional University IdP role context (e.g., STUDENT, RESEARCHER, IT_OPERATOR, ADMIN)",
+        description="Optional University IdP role context (e.g., STUDENT, RESEARCHER, ADMIN)",
     )
 
 
@@ -175,7 +175,7 @@ async def trigger_demo_scenario(
             effective_profile_key = DemoScenarioType.STUDENT_CYBER_THREAT.value
 
     profile = get_scenario_profile(effective_profile_key, now=now)
-    if requested_role and requested_role in {"STUDENT", "RESEARCHER", "IT_OPERATOR", "ADMIN"}:
+    if requested_role and requested_role in {"STUDENT", "RESEARCHER", "ADMIN"}:
         profile.user_context.role = requested_role
         if requested_role != "RESEARCHER" and effective_profile_key != DemoScenarioType.RESEARCHER_HPC_WORKLOAD.value:
             profile.user_context.active_workloads = []
@@ -329,6 +329,11 @@ async def trigger_demo_scenario(
 
     await session.commit()
     await session.refresh(ws)
+    from backend.api.v1.dashboard import invalidate_dashboard_kpi_cache
+    from backend.api.v1.telemetry import invalidate_telemetry_cache
+
+    invalidate_dashboard_kpi_cache()
+    invalidate_telemetry_cache()
     total_pipeline_ms = round((time.perf_counter() - pipeline_t0) * 1000.0, 2)
 
     # -------------------------------------------------------------

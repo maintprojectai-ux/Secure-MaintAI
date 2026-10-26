@@ -8,7 +8,6 @@ import {
   clearToken,
   getStoredUser,
   setStoredUser,
-  MOCK_CURRENT_USER,
 } from "@/lib/api";
 
 interface AuthContextType {
@@ -72,11 +71,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (res.ok) {
           const data = await res.json();
           if (data.access_token && isMounted) {
-            const apiUser: User = {
-              ...MOCK_CURRENT_USER,
+            let apiUser: User = {
+              id: data.user_id || "admin",
               email: "admin@kku.edu.sa",
+              full_name: "System Administrator",
               role: (data.role as any) || "ADMIN",
+              department: "Cybersecurity & IT Infrastructure",
+              is_active: true,
+              created_at: new Date().toISOString(),
+              last_login: new Date().toISOString(),
             };
+            try {
+              const meRes = await fetch("/api/v1/users/me", {
+                headers: { Authorization: `Bearer ${data.access_token}` },
+              });
+              if (meRes.ok) {
+                const meData = await meRes.json();
+                apiUser = {
+                  id: String(meData.id),
+                  email: meData.email || "admin@kku.edu.sa",
+                  full_name: meData.username || meData.email || "System Administrator",
+                  role: (meData.role as any) || "ADMIN",
+                  department: "Cybersecurity & IT Infrastructure",
+                  is_active: meData.status === "active",
+                  created_at: meData.created_at || new Date().toISOString(),
+                  last_login: meData.last_login_at || new Date().toISOString(),
+                };
+              }
+            } catch {
+              // Keep token-derived user
+            }
             setUser(apiUser);
             setTokenState(data.access_token);
             setToken(data.access_token);
@@ -86,12 +110,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         }
       } catch {
-        // Backend not reachable, fall back to mock session
+        // Backend not reachable
       }
 
       if (isMounted) {
-        setUser(MOCK_CURRENT_USER);
-        setStoredUser(MOCK_CURRENT_USER);
         setIsLoading(false);
       }
     };
@@ -122,8 +144,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       const data = await res.json();
       if (data.access_token) {
-        const apiUser: User = {
-          id: "usr-admin-001",
+        let apiUser: User = {
+          id: data.user_id || email,
           email: email,
           full_name: email.split("@")[0].replace(".", " ").toUpperCase(),
           role: (data.role as any) || "ADMIN",
@@ -132,6 +154,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           created_at: new Date().toISOString(),
           last_login: new Date().toISOString(),
         };
+        try {
+          const meRes = await fetch("/api/v1/users/me", {
+            headers: { Authorization: `Bearer ${data.access_token}` },
+          });
+          if (meRes.ok) {
+            const meData = await meRes.json();
+            apiUser = {
+              id: String(meData.id),
+              email: meData.email || email,
+              full_name: meData.username || email.split("@")[0].replace(".", " ").toUpperCase(),
+              role: (meData.role as any) || "ADMIN",
+              department: "Cybersecurity & IT Infrastructure",
+              is_active: meData.status === "active",
+              created_at: meData.created_at || new Date().toISOString(),
+              last_login: meData.last_login_at || new Date().toISOString(),
+            };
+          }
+        } catch {
+          // Keep token-derived user
+        }
         setUser(apiUser);
         setTokenState(data.access_token);
         setToken(data.access_token);
@@ -140,22 +182,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       throw new Error("No access token returned from authentication server.");
-    } catch (err: unknown) {
-      // If network failure connecting to backend, allow offline fallback
-      if (err instanceof TypeError && err.message.includes("fetch")) {
-        const fallbackToken = "demo-offline-session";
-        const newUser: User = {
-          ...MOCK_CURRENT_USER,
-          email,
-          full_name: email.split("@")[0].replace(".", " ").toUpperCase(),
-        };
-        setUser(newUser);
-        setTokenState(fallbackToken);
-        setToken(fallbackToken);
-        setStoredUser(newUser);
-        return true;
-      }
-      throw err;
     } finally {
       setIsLoading(false);
     }

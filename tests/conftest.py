@@ -69,7 +69,6 @@ async def setup_test_database() -> AsyncGenerator[None, None]:
         RoleEnum.ADMIN: ("00000000-0000-0000-0000-000000000001", "admin", "admin@kku.edu.sa"),
         RoleEnum.STUDENT: ("00000000-0000-0000-0000-000000000002", "student", "student@kku.edu.sa"),
         RoleEnum.RESEARCHER: ("00000000-0000-0000-0000-000000000003", "researcher", "researcher@kku.edu.sa"),
-        RoleEnum.IT_OPERATOR: ("00000000-0000-0000-0000-000000000004", "operator", "operator@kku.edu.sa"),
     }
 
     async with TestAsyncSession() as session:
@@ -170,18 +169,3 @@ def researcher_token() -> str:
 def researcher_headers(researcher_token: str) -> dict[str, str]:
     """Provide HTTP Authorization headers for RESEARCHER."""
     return {"Authorization": f"Bearer {researcher_token}"}
-
-
-@pytest.fixture
-def operator_token() -> str:
-    """Generate a valid JWT token for an IT_OPERATOR user."""
-    return create_access_token(
-        subject="00000000-0000-0000-0000-000000000004",
-        role="IT_OPERATOR",
-    )
-
-
-@pytest.fixture
-def operator_headers(operator_token: str) -> dict[str, str]:
-    """Provide HTTP Authorization headers for IT_OPERATOR."""
-    return {"Authorization": f"Bearer {operator_token}"}

@@ -16,12 +16,6 @@ import {
   Calendar,
 } from "lucide-react";
 import {
-  MOCK_PREDICTION_KPIS,
-  MOCK_PREDICTION_TRENDS,
-  MOCK_CONFIDENCE_DISTRIBUTION,
-  MOCK_TOP_PREDICTIONS,
-  MOCK_AI_INSIGHTS,
-  MOCK_RECENT_PREDICTIONS,
   getValidationMetrics,
   getRecentAnomalies,
   getWorkstations,
@@ -96,10 +90,10 @@ export default function PredictionsPage() {
     return map;
   }, [workstations]);
 
-  // Dynamic Top Predictions derived from live anomalies
+  // Dynamic Top Predictions derived strictly from live anomalies (no mock fallback on empty DB)
   const dynamicPredictions = useMemo<TopPredictionItem[]>(() => {
     if (!liveAnomalies || liveAnomalies.length === 0) {
-      return MOCK_TOP_PREDICTIONS;
+      return [];
     }
     return liveAnomalies.slice(0, 10).map((anom, idx) => {
       const ws = anom.workstation_id ? wsMap.get(String(anom.workstation_id)) : null;
@@ -257,21 +251,19 @@ export default function PredictionsPage() {
         : "96.8";
 
     return {
-      predicted_issues: totalAnomalies > 0 ? totalAnomalies : MOCK_PREDICTION_KPIS.predicted_issues,
+      predicted_issues: totalAnomalies,
       predicted_issues_change:
         totalAnomalies > 0
           ? `+${totalAnomalies} detected (${systemScope === "All Systems" ? "fleet-wide" : systemScope.split(" ")[0]})`
-          : MOCK_PREDICTION_KPIS.predicted_issues_change,
-      high_risk_predictions:
-        totalAnomalies > 0 ? highRiskCount : MOCK_PREDICTION_KPIS.high_risk_predictions,
+          : "0 active anomalies",
+      high_risk_predictions: highRiskCount,
       high_risk_change:
-        totalAnomalies > 0 ? `${highRiskCount} critical urgency` : MOCK_PREDICTION_KPIS.high_risk_change,
-      prevented_issues:
-        livePreventedCount > 0 ? livePreventedCount : MOCK_PREDICTION_KPIS.prevented_issues,
+        highRiskCount > 0 ? `${highRiskCount} critical urgency` : "0 critical urgency",
+      prevented_issues: livePreventedCount,
       prevented_issues_change:
         livePreventedCount > 0
           ? `${isolatedHostCount} isolated • ${mitigatedIncidentCount} playbooks`
-          : MOCK_PREDICTION_KPIS.prevented_issues_change,
+          : "0 isolated • 0 playbooks",
       prediction_accuracy: parseFloat(calculatedAccuracy),
       accuracy_change: "94.8% M02-A • 96.8% M02-B",
     };
@@ -308,27 +300,20 @@ export default function PredictionsPage() {
       year: "numeric",
     });
 
-    const liveBonus = Math.min(12, scopedAnomalies.length * 2);
-    const highBonus = Math.min(
-      10,
-      scopedAnomalies.filter(
-        (a) => a.anomaly_type === "SECURITY_ANOMALY" || Number(a.confidence || a.score) >= 0.85
-      ).length * 2
-    );
-    const prevBonus = Math.min(10, liveIncidents.length * 2);
+    const totalPred = scopedAnomalies.length;
+    const highRiskPred = scopedAnomalies.filter(
+      (a) => a.anomaly_type === "SECURITY_ANOMALY" || Number(a.confidence || a.score) >= 0.85
+    ).length;
+    const totalPrev = liveIncidents.length;
+    const totalRes = liveIncidents.filter((inc) => {
+      const st = String(inc.status || "").toUpperCase();
+      return st === "RESOLVED" || st === "CONTAINED";
+    }).length;
 
-    const predictedSeries = MOCK_PREDICTION_TRENDS.predicted_issues.map((v, idx) =>
-      Math.min(98, Math.round(v * scaleFactor + (idx === 6 ? liveBonus : Math.floor(liveBonus * (idx / 6)))))
-    );
-    const highRiskSeries = MOCK_PREDICTION_TRENDS.high_risk.map((v, idx) =>
-      Math.min(92, Math.round(v * scaleFactor + (idx === 6 ? highBonus : Math.floor(highBonus * (idx / 6)))))
-    );
-    const preventedSeries = MOCK_PREDICTION_TRENDS.prevented.map((v, idx) =>
-      Math.min(88, Math.round(v * scaleFactor + (idx === 6 ? prevBonus : Math.floor(prevBonus * (idx / 6)))))
-    );
-    const resolvedSeries = MOCK_PREDICTION_TRENDS.resolved.map((v, idx) =>
-      Math.min(80, Math.round(v * scaleFactor + (idx === 6 ? Math.ceil(prevBonus * 0.7) : 0)))
-    );
+    const predictedSeries = [0, 0, 0, 0, 0, 0, Math.min(100, Math.round(totalPred * scaleFactor))];
+    const highRiskSeries = [0, 0, 0, 0, 0, 0, Math.min(100, Math.round(highRiskPred * scaleFactor))];
+    const preventedSeries = [0, 0, 0, 0, 0, 0, Math.min(100, Math.round(totalPrev * scaleFactor))];
+    const resolvedSeries = [0, 0, 0, 0, 0, 0, Math.min(100, Math.round(totalRes * scaleFactor))];
 
     const toPoints = (series: number[]) =>
       series.map((val, i) => ({
@@ -386,11 +371,15 @@ export default function PredictionsPage() {
   const dynamicConfidence = useMemo(() => {
     if (!scopedAnomalies || scopedAnomalies.length === 0) {
       return {
-        overall: "93.6%",
-        highPct: 93.6,
-        medPct: 5.2,
-        lowPct: 1.2,
-        distribution: MOCK_CONFIDENCE_DISTRIBUTION,
+        overall: "0.0%",
+        highPct: 0,
+        medPct: 0,
+        lowPct: 0,
+        distribution: [
+          { label: "High Confidence (≥85%)", percentage: 0, color: "#3b82f6" },
+          { label: "Moderate Confidence (65–84%)", percentage: 0, color: "#f59e0b" },
+          { label: "Low Confidence (<65%)", percentage: 0, color: "#64748b" },
+        ],
       };
     }
     let high = 0;
@@ -446,7 +435,7 @@ export default function PredictionsPage() {
   // Dynamic AI Insights derived from live anomalies
   const dynamicInsights = useMemo<AIInsightItem[]>(() => {
     if (!liveAnomalies || liveAnomalies.length === 0) {
-      return MOCK_AI_INSIGHTS;
+      return [];
     }
     return dynamicPredictions.slice(0, 4).map((pred, idx) => {
       const severity: AIInsightItem["severity"] =
@@ -464,7 +453,7 @@ export default function PredictionsPage() {
   // Dynamic Recent Predictions stream derived from live anomalies
   const dynamicRecentPredictions = useMemo(() => {
     if (!liveAnomalies || liveAnomalies.length === 0) {
-      return MOCK_RECENT_PREDICTIONS;
+      return [];
     }
     return dynamicPredictions.slice(0, 4).map((pred, idx) => ({
       id: `live-rec-${pred.id}-${idx}`,
@@ -963,6 +952,11 @@ export default function PredictionsPage() {
           </div>
         </div>
 
+        {filteredPredictions.length === 0 ? (
+          <div className="glass-card p-6 text-center text-xs text-slate-400">
+            No anomaly predictions recorded yet. Trigger a scenario or stream live agent telemetry to run ML inference.
+          </div>
+        ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
           {filteredPredictions.slice(0, 5).map((pred) => (
             <div
@@ -1031,6 +1025,7 @@ export default function PredictionsPage() {
             </div>
           ))}
         </div>
+        )}
       </div>
 
       {/* Row 4: Operational Intelligence & Model Specifications (Balanced 3-Column Grid) */}

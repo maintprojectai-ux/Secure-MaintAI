@@ -689,10 +689,10 @@ export default function ReportsPage() {
                 3. Security Posture
               </h3>
               <Link
-                href="/cybersecurity"
+                href="/alerts"
                 className="text-xs font-semibold text-blue-400 hover:text-blue-300 transition-colors inline-flex items-center gap-1"
               >
-                <span>View all security events</span>
+                <span>View all security alerts</span>
                 <span>→</span>
               </Link>
             </div>

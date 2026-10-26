@@ -17,11 +17,9 @@ from sqlalchemy.orm import selectinload
 
 from backend.core.database import get_async_session
 from backend.core.dependencies import get_current_active_user, require_permission
-from backend.core.security import hash_password
 from backend.models.user import UserAccount, UserRole
 from backend.schemas.user import (
     RoleEnum,
-    UserAdminCreate,
     UserPaginatedResponse,
     UserProfileResponse,
     UserResponse,
@@ -123,83 +121,6 @@ async def list_users(
         page=page,
         page_size=page_size,
         total_pages=total_pages,
-    )
-
-
-@router.post(
-    "",
-    response_model=UserResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create a new user with specific role (admin)",
-    dependencies=[Depends(require_permission("users.manage"))],
-)
-async def create_user_admin(
-    user_data: UserAdminCreate,
-    request: Request,
-    current_user: Annotated[UserAccount, Depends(get_current_active_user)],
-    session: Annotated[AsyncSession, Depends(get_async_session)],
-) -> UserResponse:
-    """
-    Administrative creation of user accounts.
-    Allows assigning any role and initial status.
-    Requires 'users.manage' permission.
-    """
-    audit = AuditService(session)
-
-    # Check username uniqueness
-    existing_username = await session.execute(select(UserAccount).where(UserAccount.username == user_data.username))
-    if existing_username.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Username '{user_data.username}' is already in use.",
-        )
-
-    # Check email uniqueness
-    existing_email = await session.execute(select(UserAccount).where(UserAccount.email == user_data.email))
-    if existing_email.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Email '{user_data.email}' is already in use.",
-        )
-
-    # Resolve specified role
-    role_result = await session.execute(select(UserRole).where(UserRole.name == user_data.role.value))
-    role = role_result.scalar_one_or_none()
-    if role is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Role '{user_data.role.value}' does not exist.",
-        )
-
-    # Create account
-    new_user = UserAccount(
-        username=user_data.username,
-        email=user_data.email,
-        password_hash=hash_password(user_data.password),
-        role_id=role.id,
-        status=user_data.status.value,
-    )
-    session.add(new_user)
-    await session.flush()
-
-    await audit.log(
-        actor=str(current_user.id),
-        action="user.admin_create",
-        resource=f"user:{new_user.id}",
-        source_ip=request.client.host if request.client else None,
-        result="success",
-        metadata_={"role": user_data.role.value, "status": user_data.status.value},
-    )
-    await session.commit()
-
-    return UserResponse(
-        id=new_user.id,
-        username=new_user.username,
-        email=new_user.email,
-        role=RoleEnum(role.name),
-        status=new_user.status,
-        last_login_at=new_user.last_login_at,
-        created_at=new_user.created_at,
     )
 
 

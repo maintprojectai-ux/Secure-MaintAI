@@ -166,10 +166,10 @@ async def test_point_3_predictive_maintenance_alert_and_recommendation(
     eval_res = PolicyEvaluationResult(
         workstation_id=ws_id,
         user_context=IdPIdentityContext(
-            user_id="u-operator",
-            username="it_operator",
-            email="operator@kku.edu.sa",
-            role="IT_OPERATOR",
+            user_id="u-admin",
+            username="admin",
+            email="admin@kku.edu.sa",
+            role="ADMIN",
             department="Infrastructure",
         ),
         workstation_context=IdPWorkstationContext(

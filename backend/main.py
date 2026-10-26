@@ -46,6 +46,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as exc:
         logger.warning("ml_initialization_failed", error=str(exc))
     yield
+    from backend.services.alert_broadcaster import alert_broadcaster
+
+    alert_broadcaster.trigger_shutdown()
     logger.info("application_shutting_down")
 
 

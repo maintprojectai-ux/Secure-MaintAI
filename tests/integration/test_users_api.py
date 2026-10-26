@@ -31,23 +31,6 @@ async def test_list_users_requires_authentication(
 
 
 @pytest.mark.asyncio
-async def test_create_user_requires_authentication(
-    async_client: AsyncClient,
-) -> None:
-    """POST /api/v1/users should return 401 Unauthorized when no token provided."""
-    response = await async_client.post(
-        "/api/v1/users",
-        json={
-            "username": "new_admin_user",
-            "email": "new_admin@example.com",
-            "password": "SecurePassword123!",
-            "role": "ADMIN",
-        },
-    )
-    assert response.status_code == 401
-
-
-@pytest.mark.asyncio
 async def test_update_user_requires_authentication(
     async_client: AsyncClient,
 ) -> None:

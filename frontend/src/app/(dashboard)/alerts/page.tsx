@@ -41,8 +41,8 @@ import {
 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 
-// Severity and Status types
-type SeverityType = "Critical" | "High" | "Medium" | "Low" | "Info";
+// Severity and Status types (strictly matching backend AlertSeverity: CRITICAL, HIGH, MEDIUM, LOW)
+type SeverityType = "Critical" | "High" | "Medium" | "Low";
 type StatusType = "Active" | "Resolved" | "Monitored";
 
 interface ProcessItemDetail {
@@ -103,7 +103,6 @@ function mapBackendAlertToItem(raw: any, workstationMap?: Map<string, any>): Ale
     HIGH: "High",
     MEDIUM: "Medium",
     LOW: "Low",
-    INFO: "Info",
   };
   const severity: SeverityType = severityMap[sev] || "Medium";
 
@@ -279,6 +278,15 @@ export default function AlertsPage() {
   };
 
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const sevParam = (params.get("severity") || "").toUpperCase();
+      if (sevParam === "CRITICAL") setActiveSeverityTab("Critical");
+      else if (sevParam === "HIGH") setActiveSeverityTab("High");
+      else if (sevParam === "MEDIUM") setActiveSeverityTab("Medium");
+      else if (sevParam === "LOW") setActiveSeverityTab("Low");
+    }
+
     loadAlerts(true);
 
     const handleUpdate = () => {
@@ -293,16 +301,24 @@ export default function AlertsPage() {
   // Selected Alert
   const selectedAlert = alerts.find((a) => a.id === selectedAlertId) || (alerts.length > 0 ? alerts[0] : null);
 
-  // Severity counts computed directly from real live alerts
+  // Severity counts computed directly from real live alerts (4 canonical severities)
   const severityCounts = {
     Critical: alerts.filter((a) => a.severity === "Critical").length,
     High: alerts.filter((a) => a.severity === "High").length,
     Medium: alerts.filter((a) => a.severity === "Medium").length,
     Low: alerts.filter((a) => a.severity === "Low").length,
-    Info: alerts.filter((a) => a.severity === "Info").length,
   };
 
   const topSeverityCards = [
+    {
+      title: "All Alerts",
+      value: alerts.length,
+      delta: "Total registered",
+      deltaColor: "text-blue-400",
+      border: "border-blue-500/40 bg-blue-950/20",
+      icon: <Shield className="w-5 h-5 text-blue-400" />,
+      severityKey: "All Alerts",
+    },
     {
       title: "Critical",
       value: severityCounts.Critical,
@@ -338,15 +354,6 @@ export default function AlertsPage() {
       border: "border-cyan-500/40 bg-cyan-950/20",
       icon: <Info className="w-5 h-5 text-cyan-400" />,
       severityKey: "Low",
-    },
-    {
-      title: "Info",
-      value: severityCounts.Info,
-      delta: `${severityCounts.Info} active`,
-      deltaColor: "text-purple-400",
-      border: "border-purple-500/40 bg-purple-950/20",
-      icon: <Info className="w-5 h-5 text-purple-400" />,
-      severityKey: "Info",
     },
   ];
 
@@ -562,13 +569,6 @@ export default function AlertsPage() {
             Low
           </span>
         );
-      case "Info":
-        return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-purple-500/15 text-purple-400 border border-purple-500/30">
-            <Info className="w-3 h-3" />
-            Info
-          </span>
-        );
     }
   };
 
@@ -767,7 +767,7 @@ export default function AlertsPage() {
         <div className="lg:col-span-7 glass-card p-4 rounded-2xl border-slate-800/80 bg-[#091124]/95 shadow-xl flex flex-col space-y-3.5">
           {/* Severity Tabs */}
           <div className="flex items-center gap-1 overflow-x-auto pb-1 border-b border-slate-800/80 scrollbar-none text-xs">
-            {(["All Alerts", "Critical", "High", "Medium", "Low", "Info"] as const).map(
+            {(["All Alerts", "Critical", "High", "Medium", "Low"] as const).map(
               (tab) => {
                 const isActive = activeSeverityTab === tab;
                 return (
@@ -1479,7 +1479,7 @@ export default function AlertsPage() {
                 <span>Playbook 3: Surgical Network Isolation (Ingress/Egress Filtering)</span>
               </div>
               <p className="text-slate-400 text-[10px] pl-6">
-                Drops unauthorized C2 beaconing connections; preserves legitimate researcher compute state per Rule 19 &amp; 20.
+                Drops unauthorized C2 beaconing connections; preserves legitimate researcher compute state.
               </p>
 
               <div className="flex items-center gap-2 text-cyan-400 font-bold pt-1 border-t border-slate-800/80">

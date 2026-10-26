@@ -2,21 +2,21 @@
 Secure-MaintAI — User and Authentication Schemas.
 
 Defines the canonical user, role, and authentication contracts.
-Per engineering rules Section 8: RBAC with ADMIN, IT_OPERATOR, RESEARCHER, STUDENT.
+Per engineering rules Section 8: RBAC with ADMIN, RESEARCHER, STUDENT.
 """
 
 from datetime import datetime
 from enum import Enum
+from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 class RoleEnum(str, Enum):
     """Canonical user roles per the project report."""
 
     ADMIN = "ADMIN"
-    IT_OPERATOR = "IT_OPERATOR"
     RESEARCHER = "RESEARCHER"
     STUDENT = "STUDENT"
 
@@ -37,16 +37,6 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=12, max_length=128)
     role: RoleEnum = RoleEnum.STUDENT
-
-
-class UserAdminCreate(BaseModel):
-    """Schema for administrative user creation with custom role and status."""
-
-    username: str = Field(..., min_length=3, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
-    email: EmailStr
-    password: str = Field(..., min_length=12, max_length=128)
-    role: RoleEnum = RoleEnum.STUDENT
-    status: UserStatusEnum = UserStatusEnum.ACTIVE
 
 
 class UserUpdate(BaseModel):
@@ -89,6 +79,13 @@ class UserResponse(BaseModel):
     last_login_at: datetime | None = None
     created_at: datetime
 
+    @field_validator("role", mode="before")
+    @classmethod
+    def _extract_role_name(cls, v: Any) -> Any:
+        if hasattr(v, "name") and not isinstance(v, (str, Enum)):
+            return v.name
+        return v
+
     model_config = {"from_attributes": True}
 
 
@@ -103,6 +100,13 @@ class UserProfileResponse(BaseModel):
     permissions: dict[str, bool] = Field(default_factory=dict)
     last_login_at: datetime | None = None
     created_at: datetime
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def _extract_role_name(cls, v: Any) -> Any:
+        if hasattr(v, "name") and not isinstance(v, (str, Enum)):
+            return v.name
+        return v
 
     model_config = {"from_attributes": True}
 

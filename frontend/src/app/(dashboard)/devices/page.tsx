@@ -40,7 +40,7 @@ interface DeviceItem {
   lab: string;
   location: string;
   rack: string;
-  status: "Online" | "Warning" | "Critical" | "Offline" | "Maintenance" | "Decommissioned";
+  status: "Online" | "Warning" | "Critical" | "Isolated" | "Offline" | "Maintenance" | "Decommissioned";
   rawStatus: string;
   cpu: number | null;
   memory: number | null;
@@ -73,12 +73,37 @@ export default function DevicesPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
-  // Search & Filter State
+  // Search & Filter State (initialized from ?status= URL query parameter when navigated from Dashboard)
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedStatus, setSelectedStatus] = useState("ALL");
+  const [selectedStatus, setSelectedStatus] = useState(() => {
+    if (typeof window !== "undefined") {
+      const statusParam = (new URLSearchParams(window.location.search).get("status") || "").toUpperCase();
+      if (
+        ["ONLINE", "WARNING", "CRITICAL", "ISOLATED", "OFFLINE", "MAINTENANCE", "DECOMMISSIONED"].includes(
+          statusParam
+        )
+      ) {
+        return statusParam;
+      }
+    }
+    return "ALL";
+  });
   const [selectedType, setSelectedType] = useState("ALL");
   const [selectedLocation, setSelectedLocation] = useState("ALL");
   const [selectedDevices, setSelectedDevices] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const statusParam = (new URLSearchParams(window.location.search).get("status") || "").toUpperCase();
+      if (
+        ["ONLINE", "WARNING", "CRITICAL", "ISOLATED", "OFFLINE", "MAINTENANCE", "DECOMMISSIONED"].includes(
+          statusParam
+        )
+      ) {
+        setSelectedStatus(statusParam);
+      }
+    }
+  }, []);
 
   // Action & Modal States
   const [isolationTarget, setIsolationTarget] = useState<DeviceItem | null>(null);
@@ -117,13 +142,13 @@ export default function DevicesPage() {
 
             const statusMap: Record<
               string,
-              "Online" | "Warning" | "Critical" | "Offline" | "Maintenance" | "Decommissioned"
+              "Online" | "Warning" | "Critical" | "Isolated" | "Offline" | "Maintenance" | "Decommissioned"
             > = {
               ONLINE: "Online",
               OFFLINE: "Offline",
               WARNING: "Warning",
               CRITICAL: "Critical",
-              ISOLATED: "Critical",
+              ISOLATED: "Isolated",
               MAINTENANCE: "Maintenance",
               DECOMMISSIONED: "Decommissioned",
             };
@@ -158,9 +183,9 @@ export default function DevicesPage() {
               rack: w.asset_tag || "Fleet Asset",
               status: mappedStatus,
               rawStatus: w.status,
-              cpu: w.cpu_usage ?? (w.status === "ONLINE" ? 34 : null),
-              memory: w.memory_usage ?? (w.status === "ONLINE" ? 48 : null),
-              disk: w.disk_usage ?? (w.status === "ONLINE" ? 52 : null),
+              cpu: w.cpu_usage ?? 0,
+              memory: w.memory_usage ?? 0,
+              disk: w.disk_usage ?? 0,
               lastSeen: lastSeenStr,
               is_isolated: w.status === "ISOLATED",
               mac_address: w.mac_address,
@@ -367,7 +392,7 @@ export default function DevicesPage() {
             ? {
                 ...d,
                 is_isolated: !d.is_isolated,
-                status: !d.is_isolated ? "Critical" : "Online",
+                status: !d.is_isolated ? "Isolated" : "Online",
                 rawStatus: !d.is_isolated ? "ISOLATED" : "ONLINE",
               }
             : d
@@ -769,7 +794,7 @@ export default function DevicesPage() {
                                 ? "bg-amber-400 shadow-[0_0_8px_rgba(245,158,11,0.5)]"
                                 : device.status === "Critical"
                                   ? "bg-rose-400 shadow-[0_0_8px_rgba(239,68,68,0.5)]"
-                                  : device.status === "Maintenance"
+                                  : device.status === "Isolated" || device.status === "Maintenance"
                                     ? "bg-purple-400 shadow-[0_0_8px_rgba(168,85,247,0.5)]"
                                     : "bg-slate-500"
                           }`}
@@ -782,7 +807,7 @@ export default function DevicesPage() {
                                 ? "text-amber-400"
                                 : device.status === "Critical"
                                   ? "text-rose-400"
-                                  : device.status === "Maintenance"
+                                  : device.status === "Isolated" || device.status === "Maintenance"
                                     ? "text-purple-400"
                                     : "text-slate-400"
                           }
@@ -1153,7 +1178,7 @@ export default function DevicesPage() {
             <p className="text-xs text-slate-300">
               {isolationTarget.is_isolated
                 ? "Rolling back surgical isolation will restore normal inbound and outbound network connectivity to this workstation. The telemetry monitoring agent will remain active."
-                : "Enforcing surgical network isolation severs all unauthorized socket connections and drops inbound/outbound packets to prevent lateral movement and C2 beaconing. The host operating system will NOT reboot, and active legitimate researcher state is preserved per Rule 19 & 20."}
+                : "Enforcing surgical network isolation severs all unauthorized socket connections and drops inbound/outbound packets to prevent lateral movement and C2 beaconing. The host operating system will NOT reboot, and active legitimate researcher state."}
             </p>
 
             <div className="p-3 rounded-xl border border-slate-800 bg-slate-900/80 text-xs font-mono space-y-1">

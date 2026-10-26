@@ -3,32 +3,24 @@
 import React, { useState, useMemo, useEffect, useCallback } from "react";
 import {
   Users,
-  UserPlus,
   Search,
-  Shield,
   ShieldCheck,
   CheckCircle,
   XCircle,
   Clock,
-  Download,
-  RefreshCw,
-  ChevronRight,
   Lock,
   Unlock,
 } from "lucide-react";
 import {
   getUsers,
-  createUser,
   updateUser,
   getAuditLogs,
 } from "@/lib/api";
 import { UserRole, UserManagementItem } from "@/types";
 import { DonutChart } from "@/components/charts/DonutChart";
-import { Modal } from "@/components/ui/Modal";
 
 const ROLE_DEPT_MAP: Record<UserRole, string> = {
   ADMIN: "Administration & SOC",
-  IT_OPERATOR: "IT Operations",
   RESEARCHER: "AI & Scientific Computing Lab",
   STUDENT: "Academic Computing",
 };
@@ -36,7 +28,6 @@ const ROLE_DEPT_MAP: Record<UserRole, string> = {
 function mapBackendUserToItem(u: any): UserManagementItem {
   const roleMap: Record<string, UserRole> = {
     ADMIN: "ADMIN",
-    IT_OPERATOR: "IT_OPERATOR",
     RESEARCHER: "RESEARCHER",
     STUDENT: "STUDENT",
   };
@@ -83,7 +74,6 @@ export default function UsersManagementPage() {
   const [selectedRole, setSelectedRole] = useState<string>("ALL");
   const [currentPage, setCurrentPage] = useState<number>(1);
   const pageSize = 10;
-  const [isAddUserOpen, setIsAddUserOpen] = useState(false);
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
   const [recentUserActivity, setRecentUserActivity] = useState<UserActivityItem[]>([]);
 
@@ -136,25 +126,14 @@ export default function UsersManagementPage() {
     loadLiveUsers();
   }, [loadLiveUsers]);
 
-  // New user form state
-  const [newUser, setNewUser] = useState({
-    full_name: "",
-    email: "",
-    password: "TempPassword123!",
-    role: "STUDENT" as UserRole,
-    department: "Computer Science",
-    two_factor_enabled: true,
-  });
-
   // Dynamic KPIs computed strictly from database users
   const kpiStats = useMemo(() => {
     const total = users.length;
     const active = users.filter((u) => u.status === "ACTIVE").length;
-    const itOperators = users.filter((u) => u.role === "IT_OPERATOR").length;
     const pendingOrInactive = users.filter((u) => u.status === "PENDING").length;
     const suspended = users.filter((u) => u.status === "SUSPENDED").length;
     const activeRate = total > 0 ? ((active / total) * 100).toFixed(1) : "0.0";
-    return { total, active, itOperators, pendingOrInactive, suspended, activeRate };
+    return { total, active, pendingOrInactive, suspended, activeRate };
   }, [users]);
 
   // Dynamic Role Breakdown computed strictly from database users
@@ -162,7 +141,6 @@ export default function UsersManagementPage() {
     const total = users.length;
     const counts = {
       STUDENT: users.filter((u) => u.role === "STUDENT").length,
-      IT_OPERATOR: users.filter((u) => u.role === "IT_OPERATOR").length,
       RESEARCHER: users.filter((u) => u.role === "RESEARCHER").length,
       ADMIN: users.filter((u) => u.role === "ADMIN").length,
     };
@@ -172,13 +150,11 @@ export default function UsersManagementPage() {
       counts,
       percentages: {
         STUDENT: pct(counts.STUDENT),
-        IT_OPERATOR: pct(counts.IT_OPERATOR),
         RESEARCHER: pct(counts.RESEARCHER),
         ADMIN: pct(counts.ADMIN),
       },
       donutData: [
         { label: "Students", value: counts.STUDENT, color: "#10b981" },
-        { label: "IT Operators", value: counts.IT_OPERATOR, color: "#3b82f6" },
         { label: "Researchers", value: counts.RESEARCHER, color: "#f59e0b" },
         { label: "Administrators", value: counts.ADMIN, color: "#8b5cf6" },
       ],
@@ -237,82 +213,10 @@ export default function UsersManagementPage() {
     setTimeout(() => setFeedbackMsg(null), 3000);
   };
 
-  const handleAddUser = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newUser.full_name || !newUser.email) return;
-
-    const sanitizedUsername =
-      newUser.full_name
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9_-]/g, "_")
-        .replace(/_+/g, "_")
-        .replace(/^_|_$/g, "")
-        .slice(0, 64) ||
-      newUser.email
-        .split("@")[0]
-        .replace(/[^a-zA-Z0-9_-]/g, "_")
-        .slice(0, 64);
-
-    const finalUsername =
-      sanitizedUsername.length >= 3 ? sanitizedUsername : `${sanitizedUsername}_usr`;
-
-    try {
-      await createUser({
-        username: finalUsername,
-        email: newUser.email.trim(),
-        password: newUser.password.length >= 12 ? newUser.password : "TempPassword123!",
-        role: newUser.role,
-        status: "active",
-      });
-      await loadLiveUsers();
-      setIsAddUserOpen(false);
-      setNewUser({
-        full_name: "",
-        email: "",
-        password: "TempPassword123!",
-        role: "STUDENT",
-        department: "Computer Science",
-        two_factor_enabled: true,
-      });
-      setFeedbackMsg(`User ${finalUsername} created in database.`);
-    } catch (err: any) {
-      setFeedbackMsg(err?.message || "Failed to create user account in database.");
-    }
-    setTimeout(() => setFeedbackMsg(null), 3500);
-  };
-
-  const handleExportCsv = () => {
-    const headers = ["ID", "Username", "Email", "Role", "Department", "Status", "Last Login"];
-    const rows = filteredUsers.map((u) => [
-      u.id,
-      `"${u.full_name.replace(/"/g, '""')}"`,
-      u.email,
-      u.role,
-      `"${u.department.replace(/"/g, '""')}"`,
-      u.status,
-      `"${u.last_login}"`,
-    ]);
-    const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.setAttribute("download", `user_directory_${new Date().toISOString().slice(0, 10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-    setFeedbackMsg(`Exported ${filteredUsers.length} user record(s) to CSV.`);
-    setTimeout(() => setFeedbackMsg(null), 3000);
-  };
-
   const getRoleBadge = (role: UserRole) => {
     switch (role) {
       case "ADMIN":
         return <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-500/15 text-purple-300 border border-purple-500/30">ADMIN</span>;
-      case "IT_OPERATOR":
-        return <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-500/15 text-blue-300 border border-blue-500/30">IT_OPERATOR</span>;
       case "RESEARCHER":
         return <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30">RESEARCHER</span>;
       case "STUDENT":
@@ -347,8 +251,8 @@ export default function UsersManagementPage() {
         </div>
       )}
 
-      {/* 5 Top KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
+      {/* 4 Top KPI Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
         <div className="glass-card p-4">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-slate-400">Total Users</span>
@@ -369,17 +273,6 @@ export default function UsersManagementPage() {
           </div>
           <p className="text-2xl font-bold text-emerald-400 mt-1">{kpiStats.active}</p>
           <p className="text-[11px] text-emerald-400 mt-1 font-mono">{kpiStats.activeRate}% active rate</p>
-        </div>
-
-        <div className="glass-card p-4">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-400">IT Operators</span>
-            <div className="w-7 h-7 rounded-lg bg-purple-500/15 flex items-center justify-center text-purple-400">
-              <Shield className="w-3.5 h-3.5" />
-            </div>
-          </div>
-          <p className="text-2xl font-bold text-purple-400 mt-1">{kpiStats.itOperators}</p>
-          <p className="text-[11px] text-slate-400 mt-1 font-mono">24/7 coverage</p>
         </div>
 
         <div className="glass-card p-4">
@@ -457,7 +350,6 @@ export default function UsersManagementPage() {
                 >
                   <option value="ALL">All Roles</option>
                   <option value="ADMIN">ADMIN</option>
-                  <option value="IT_OPERATOR">IT_OPERATOR</option>
                   <option value="RESEARCHER">RESEARCHER</option>
                   <option value="STUDENT">STUDENT</option>
                 </select>
@@ -598,7 +490,7 @@ export default function UsersManagementPage() {
           </div>
         </div>
 
-        {/* Right Column: Analytics, Feed, Quick Actions */}
+        {/* Right Column: Analytics & Activity Feed */}
         <div className="lg:col-span-4 space-y-6">
           {/* Users by Role Donut */}
           <div className="glass-card p-5">
@@ -622,14 +514,6 @@ export default function UsersManagementPage() {
                 </span>
                 <span className="font-mono text-slate-400">
                   {roleStats.percentages.STUDENT}% ({roleStats.counts.STUDENT})
-                </span>
-              </div>
-              <div className="flex justify-between text-slate-300">
-                <span className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-blue-400" /> IT Operators
-                </span>
-                <span className="font-mono text-slate-400">
-                  {roleStats.percentages.IT_OPERATOR}% ({roleStats.counts.IT_OPERATOR})
                 </span>
               </div>
               <div className="flex justify-between text-slate-300">
@@ -675,157 +559,8 @@ export default function UsersManagementPage() {
               )}
             </div>
           </div>
-
-          {/* Quick Actions Card */}
-          <div className="glass-card p-5">
-            <h3 className="text-base font-semibold text-white mb-3">Directory Quick Actions</h3>
-
-            <div className="space-y-2 text-xs">
-              <button
-                onClick={() => setIsAddUserOpen(true)}
-                className="w-full flex items-center justify-between p-2.5 rounded-lg bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-slate-200 transition-colors"
-              >
-                <div className="flex items-center gap-2.5">
-                  <UserPlus className="w-4 h-4 text-brand-blue" />
-                  <span>Add Single User</span>
-                </div>
-                <ChevronRight className="w-3.5 h-3.5 text-slate-500" />
-              </button>
-
-              <button
-                onClick={async () => {
-                  await loadLiveUsers();
-                  setFeedbackMsg(`Database user directory refreshed (${users.length} records).`);
-                  setTimeout(() => setFeedbackMsg(null), 3000);
-                }}
-                className="w-full flex items-center justify-between p-2.5 rounded-lg bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-slate-200 transition-colors"
-              >
-                <div className="flex items-center gap-2.5">
-                  <RefreshCw className="w-4 h-4 text-brand-cyan" />
-                  <span>Trigger LDAP / IdP Sync</span>
-                </div>
-                <ChevronRight className="w-3.5 h-3.5 text-slate-500" />
-              </button>
-
-              <button
-                onClick={handleExportCsv}
-                className="w-full flex items-center justify-between p-2.5 rounded-lg bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-slate-200 transition-colors"
-              >
-                <div className="flex items-center gap-2.5">
-                  <Download className="w-4 h-4 text-brand-purple" />
-                  <span>Export User Directory CSV</span>
-                </div>
-                <ChevronRight className="w-3.5 h-3.5 text-slate-500" />
-              </button>
-            </div>
-          </div>
         </div>
       </div>
-
-      {/* Add User Modal */}
-      <Modal
-        isOpen={isAddUserOpen}
-        onClose={() => setIsAddUserOpen(false)}
-        title="Add New User Account"
-      >
-        <form onSubmit={handleAddUser} className="space-y-4 text-xs">
-          <div>
-            <label className="block text-slate-300 font-medium mb-1">Username / Full Name</label>
-            <input
-              type="text"
-              required
-              placeholder="e.g. m_qahtani"
-              value={newUser.full_name}
-              onChange={(e) => setNewUser({ ...newUser, full_name: e.target.value })}
-              className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-200 focus:outline-none focus:border-brand-blue"
-            />
-          </div>
-
-          <div>
-            <label className="block text-slate-300 font-medium mb-1">University Email</label>
-            <input
-              type="email"
-              required
-              placeholder="e.g. m.qahtani@university.edu"
-              value={newUser.email}
-              onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
-              className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-200 focus:outline-none focus:border-brand-blue"
-            />
-          </div>
-
-          <div>
-            <label className="block text-slate-300 font-medium mb-1">Initial Password (min 12 chars)</label>
-            <input
-              type="password"
-              required
-              minLength={12}
-              value={newUser.password}
-              onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
-              className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-200 focus:outline-none focus:border-brand-blue"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-slate-300 font-medium mb-1">Role</label>
-              <select
-                value={newUser.role}
-                onChange={(e) => setNewUser({ ...newUser, role: e.target.value as UserRole })}
-                className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-200 focus:outline-none focus:border-brand-blue"
-              >
-                <option value="STUDENT">STUDENT</option>
-                <option value="RESEARCHER">RESEARCHER</option>
-                <option value="IT_OPERATOR">IT_OPERATOR</option>
-                <option value="ADMIN">ADMIN</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-slate-300 font-medium mb-1">Department</label>
-              <select
-                value={newUser.department}
-                onChange={(e) => setNewUser({ ...newUser, department: e.target.value })}
-                className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-200 focus:outline-none focus:border-brand-blue"
-              >
-                <option value="Computer Science">Computer Science</option>
-                <option value="Artificial Intelligence Lab">AI Lab</option>
-                <option value="Administration">Administration</option>
-                <option value="Medical Sciences">Medical Sciences</option>
-                <option value="Mechanical Engineering">Mechanical Engineering</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 pt-2">
-            <input
-              type="checkbox"
-              id="two_factor_check"
-              checked={newUser.two_factor_enabled}
-              onChange={(e) => setNewUser({ ...newUser, two_factor_enabled: e.target.checked })}
-              className="rounded bg-slate-950 border-slate-800 text-brand-blue focus:ring-0"
-            />
-            <label htmlFor="two_factor_check" className="text-slate-300 select-none">
-              Enforce Multi-Factor Authentication (MFA) on first login
-            </label>
-          </div>
-
-          <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
-            <button
-              type="button"
-              onClick={() => setIsAddUserOpen(false)}
-              className="px-4 py-2 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-4 py-2 rounded-lg bg-brand-blue text-white font-semibold hover:bg-blue-600 transition-colors"
-            >
-              Create Account
-            </button>
-          </div>
-        </form>
-      </Modal>
     </div>
   );
 }

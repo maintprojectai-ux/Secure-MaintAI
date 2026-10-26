@@ -181,7 +181,7 @@ export function DemoController({
             )}
             {isIsolated && (
               <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40 flex items-center gap-1">
-                <ShieldAlert className="w-3 h-3" /> Security Quarantine Active
+                <ShieldAlert className="w-3 h-3" /> Surgical Isolation Active
               </span>
             )}
           </div>

@@ -4,7 +4,7 @@ Secure-MaintAI — Role-Sensitive Security Policy Engine.
 Per engineering rules:
 - Rule 16: Required flow is ML Prediction -> Security Correlation -> Identity Context -> Policy Engine -> Authorized Action.
 - Rule 19: Surgical isolation with protected processes, protected workloads, emergency kill switch, and rollback.
-- Rule 20: Differentiates STUDENT, RESEARCHER, IT_OPERATOR, ADMIN contexts.
+- Rule 20: Differentiates STUDENT, RESEARCHER contexts.
 - Rule 29: Satisfies scenarios for Benign Compute vs Cryptojacking vs Hardware Failure vs IdP Outage.
 """
 

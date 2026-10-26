@@ -2,7 +2,7 @@
 Secure-MaintAI — Audit Log API Endpoints.
 
 Per engineering rules:
-- Rule 8: Centralized RBAC; only ADMIN and IT_OPERATOR can query audit logs.
+- Rule 8: Centralized RBAC; only ADMIN can query audit logs.
 - Rule 24: Logging rules; immutable audit trails.
 """
 
@@ -27,7 +27,7 @@ router = APIRouter()
     "/logs",
     response_model=AuditLogPaginatedResponse,
     summary="List paginated audit log entries",
-    dependencies=[Depends(require_roles([RoleEnum.ADMIN, RoleEnum.IT_OPERATOR]))],
+    dependencies=[Depends(require_roles([RoleEnum.ADMIN]))],
 )
 async def list_audit_logs(
     session: Annotated[AsyncSession, Depends(get_async_session)],
@@ -42,7 +42,7 @@ async def list_audit_logs(
 ) -> AuditLogPaginatedResponse:
     """
     Retrieve immutable audit log records with pagination and filtering.
-    Requires ADMIN or IT_OPERATOR privileges.
+    Requires ADMIN privileges.
     """
     query = select(AuditLog)
     count_query = select(func.count(AuditLog.id))
@@ -110,7 +110,7 @@ async def list_audit_logs(
     "/logs/{log_id}",
     response_model=AuditLogResponse,
     summary="Get single audit log entry by ID",
-    dependencies=[Depends(require_roles([RoleEnum.ADMIN, RoleEnum.IT_OPERATOR]))],
+    dependencies=[Depends(require_roles([RoleEnum.ADMIN]))],
 )
 async def get_audit_log(
     log_id: UUID,

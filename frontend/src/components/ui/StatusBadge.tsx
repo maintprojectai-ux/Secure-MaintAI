@@ -31,7 +31,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
   } else if (["OFFLINE", "CLOSED", "SUSPENDED"].includes(norm)) {
     colorClasses = "bg-slate-900/70 text-slate-400 border-slate-700/40";
     dotColor = "bg-slate-500";
-  } else if (["ADMIN", "IT_OPERATOR", "API"].includes(norm)) {
+  } else if (["ADMIN", "API"].includes(norm)) {
     colorClasses = "bg-blue-950/60 text-blue-400 border-blue-500/30";
     dotColor = "bg-blue-400";
   } else if (["RESEARCHER", "SYSTEM"].includes(norm)) {

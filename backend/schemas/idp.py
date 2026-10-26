@@ -53,7 +53,7 @@ class IdPIdentityContext(BaseModel):
     email: str = Field(..., max_length=256)
     role: str = Field(
         ...,
-        description="University role: 'STUDENT', 'RESEARCHER', 'IT_OPERATOR', 'ADMIN'",
+        description="University role: 'STUDENT', 'RESEARCHER', 'ADMIN'",
     )
     department: str = Field(..., max_length=128)
     lab: str | None = Field(default=None, max_length=128)

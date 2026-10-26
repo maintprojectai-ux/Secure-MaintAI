@@ -7,7 +7,6 @@ import {
   Monitor,
   Cpu,
   Activity,
-  Shield,
   RotateCcw,
   AlertTriangle,
   AlertCircle,
@@ -15,13 +14,10 @@ import {
   Edit,
   RotateCw,
   Slash,
-  Thermometer,
-  Fan,
   Network,
   ChevronDown,
   ChevronRight,
   ShieldCheck,
-  Power,
   KeyRound,
   ShieldAlert as ShieldAlertIcon,
   HardDrive,
@@ -47,6 +43,9 @@ import {
   updateWorkstation,
   isolateWorkstation,
   rollbackWorkstationIsolation,
+  getRecentAnomalies,
+  getIncidents,
+  getAlerts,
 } from "@/lib/api";
 
 interface DeviceDetailClientProps {
@@ -96,7 +95,6 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
   const [isSubmittingEdit, setIsSubmittingEdit] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [showRestartModal, setShowRestartModal] = useState(false);
-  const [isScanning, setIsScanning] = useState(false);
 
   // Edit form state
   const [editForm, setEditForm] = useState<{
@@ -115,16 +113,25 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
   const [demoReceipt, setDemoReceipt] = useState<DemoExecutionReceipt | null>(null);
   const [demoActiveStep, setDemoActiveStep] = useState<number>(1);
 
-  // Dynamic live telemetry metrics
-  const [liveCpu, setLiveCpu] = useState<number>(initialWorkstation?.cpu_usage ?? 42);
-  const [liveMemory, setLiveMemory] = useState<number>(initialWorkstation?.memory_usage ?? 68);
+  // Dynamic live telemetry metrics (default 0 until database telemetry arrives)
+  const [liveCpu, setLiveCpu] = useState<number>(initialWorkstation?.cpu_usage ?? 0);
+  const [liveMemory, setLiveMemory] = useState<number>(initialWorkstation?.memory_usage ?? 0);
   const [liveDisk, setLiveDisk] = useState<number>(initialWorkstation?.disk_usage ?? 0);
   const [liveDiskIO, setLiveDiskIO] = useState<number>(0);
-  const [sparkCpu, setSparkCpu] = useState<number[]>([35, 42, 38, 45, 52, 48, 44, 42]);
-  const [sparkMemory, setSparkMemory] = useState<number[]>([62, 64, 65, 66, 68, 67, 68, 68]);
+  const [liveNetworkInMb, setLiveNetworkInMb] = useState<number>(0);
+  const [liveNetworkOutMb, setLiveNetworkOutMb] = useState<number>(0);
+  const [liveProcessCount, setLiveProcessCount] = useState<number>(
+    initialWorkstation?.process_count ?? 0
+  );
+  const [latestTelemetryTime, setLatestTelemetryTime] = useState<string | null>(null);
+  const [deviceAnomalies, setDeviceAnomalies] = useState<any[]>([]);
+  const [deviceIncidents, setDeviceIncidents] = useState<any[]>([]);
+  const [deviceAlerts, setDeviceAlerts] = useState<any[]>([]);
+  const [sparkCpu, setSparkCpu] = useState<number[]>([0, 0, 0, 0, 0, 0, 0, 0]);
+  const [sparkMemory, setSparkMemory] = useState<number[]>([0, 0, 0, 0, 0, 0, 0, 0]);
   const [sparkDiskIO, setSparkDiskIO] = useState<number[]>([0, 0, 0, 0, 0, 0, 0, 0]);
   const [sparkLabels, setSparkLabels] = useState<string[]>([
-    "15:25", "15:30", "15:35", "15:40", "15:45", "15:50", "15:55", "16:00",
+    "--:--", "--:--", "--:--", "--:--", "--:--", "--:--", "--:--", "--:--",
   ]);
 
   // Polling control refs to prevent duplicate/overlapping requests
@@ -185,8 +192,31 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
 
       isFetchingRef.current = true;
       try {
-        const metrics = await getWorkstationTelemetry(workstation.id, 8);
-        if (active && metrics && metrics.length > 0) {
+        const [metricsRes, anomaliesRes, incidentsRes, alertsRes] = await Promise.allSettled([
+          getWorkstationTelemetry(workstation.id, 8),
+          getRecentAnomalies(5, workstation.id),
+          getIncidents({ workstationId: workstation.id, limit: 5 }),
+          getAlerts({ workstationId: workstation.id, limit: 5 }),
+        ]);
+
+        if (!active) return;
+
+        if (anomaliesRes.status === "fulfilled" && Array.isArray(anomaliesRes.value)) {
+          setDeviceAnomalies(
+            anomaliesRes.value.filter(
+              (a) => !a.workstation_id || String(a.workstation_id) === String(workstation.id)
+            )
+          );
+        }
+        if (incidentsRes.status === "fulfilled" && Array.isArray(incidentsRes.value)) {
+          setDeviceIncidents(incidentsRes.value);
+        }
+        if (alertsRes.status === "fulfilled" && Array.isArray(alertsRes.value)) {
+          setDeviceAlerts(alertsRes.value);
+        }
+
+        const metrics = metricsRes.status === "fulfilled" ? metricsRes.value : [];
+        if (metrics && metrics.length > 0) {
           const sorted = [...metrics].sort(
             (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
           );
@@ -194,19 +224,44 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
           setLiveCpu(Math.round(latest.cpu_usage));
           setLiveMemory(Math.round(latest.memory_usage));
 
-          // Real disk I/O throughput in MB/s (read + write), no fabricated percentages
-          const ioRate = Math.round((latest.disk_read + latest.disk_write) * 10) / 10;
-          setLiveDiskIO(ioRate);
+          // Real disk I/O and network throughput in MB/s (converting bytes/sec -> MB/s)
+          const ioRateMb =
+            Math.round(((latest.disk_read + latest.disk_write) / (1024 * 1024)) * 100) / 100;
+          const netInMb = Math.round((latest.network_in / (1024 * 1024)) * 100) / 100;
+          const netOutMb = Math.round((latest.network_out / (1024 * 1024)) * 100) / 100;
+
+          setLiveDiskIO(ioRateMb);
+          setLiveDisk(Math.min(Math.round(ioRateMb), 100));
+          setLiveNetworkInMb(netInMb);
+          setLiveNetworkOutMb(netOutMb);
+          setLiveProcessCount(latest.process_count ?? 0);
+          setLatestTelemetryTime(latest.timestamp);
 
           setSparkCpu(sorted.map((m) => Math.round(m.cpu_usage)));
           setSparkMemory(sorted.map((m) => Math.round(m.memory_usage)));
-          setSparkDiskIO(sorted.map((m) => Math.round((m.disk_read + m.disk_write) * 10) / 10));
+          setSparkDiskIO(
+            sorted.map(
+              (m) => Math.round(((m.disk_read + m.disk_write) / (1024 * 1024)) * 100) / 100
+            )
+          );
           setSparkLabels(
             sorted.map((m) => {
               const d = new Date(m.timestamp);
               return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
             })
           );
+        } else {
+          setLiveCpu(0);
+          setLiveMemory(0);
+          setLiveDisk(0);
+          setLiveDiskIO(0);
+          setLiveNetworkInMb(0);
+          setLiveNetworkOutMb(0);
+          setLiveProcessCount(0);
+          setLatestTelemetryTime(null);
+          setSparkCpu([0, 0, 0, 0, 0, 0, 0, 0]);
+          setSparkMemory([0, 0, 0, 0, 0, 0, 0, 0]);
+          setSparkDiskIO([0, 0, 0, 0, 0, 0, 0, 0]);
         }
       } catch {
         // Retain current metrics if endpoint offline
@@ -264,10 +319,16 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
     setDemoActiveStep(4);
     setLiveCpu(Math.round(receipt.step_3_telemetry.cpu_percent));
     setLiveMemory(Math.round(receipt.step_3_telemetry.memory_percent));
+    setLiveDiskIO(receipt.step_3_telemetry.disk_read_mb_s);
+    setLiveDisk(Math.min(Math.round(receipt.step_3_telemetry.disk_read_mb_s), 100));
+    setLiveNetworkOutMb(receipt.step_3_telemetry.network_out_mb_s);
+    setLiveProcessCount(receipt.step_3_telemetry.process_count);
+    setLatestTelemetryTime(receipt.step_4_scenario.triggered_at);
     setWorkstation((prev) =>
       prev
         ? {
           ...prev,
+          last_seen_at: receipt.step_4_scenario.triggered_at,
           is_isolated: receipt.step_8_soar_execution.workstation_final_status === "ISOLATED",
           status:
             receipt.step_8_soar_execution.workstation_final_status === "ISOLATED"
@@ -276,6 +337,46 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
         }
         : null
     );
+    if (workstation?.id) {
+      Promise.allSettled([
+        getWorkstationTelemetry(workstation.id, 8),
+        getRecentAnomalies(5, workstation.id),
+        getIncidents({ workstationId: workstation.id, limit: 5 }),
+        getAlerts({ workstationId: workstation.id, limit: 5 }),
+      ]).then(([metricsRes, anomaliesRes, incidentsRes, alertsRes]) => {
+        if (metricsRes.status === "fulfilled" && metricsRes.value?.length > 0) {
+          const sorted = [...metricsRes.value].sort(
+            (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+          );
+          const latest = sorted[sorted.length - 1];
+          const ioRateMb =
+            Math.round(((latest.disk_read + latest.disk_write) / (1024 * 1024)) * 100) / 100;
+          setLiveDiskIO(ioRateMb);
+          setLiveNetworkInMb(Math.round((latest.network_in / (1024 * 1024)) * 100) / 100);
+          setLiveNetworkOutMb(Math.round((latest.network_out / (1024 * 1024)) * 100) / 100);
+          setSparkCpu(sorted.map((m) => Math.round(m.cpu_usage)));
+          setSparkMemory(sorted.map((m) => Math.round(m.memory_usage)));
+          setSparkDiskIO(
+            sorted.map(
+              (m) => Math.round(((m.disk_read + m.disk_write) / (1024 * 1024)) * 100) / 100
+            )
+          );
+        }
+        if (anomaliesRes.status === "fulfilled" && Array.isArray(anomaliesRes.value)) {
+          setDeviceAnomalies(
+            anomaliesRes.value.filter(
+              (a) => !a.workstation_id || String(a.workstation_id) === String(workstation.id)
+            )
+          );
+        }
+        if (incidentsRes.status === "fulfilled" && Array.isArray(incidentsRes.value)) {
+          setDeviceIncidents(incidentsRes.value);
+        }
+        if (alertsRes.status === "fulfilled" && Array.isArray(alertsRes.value)) {
+          setDeviceAlerts(alertsRes.value);
+        }
+      });
+    }
   };
 
   // Actions
@@ -314,23 +415,11 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
     setShowIsolationModal(false);
 
     const message = nextState
-      ? `Network quarantine enforced on ${workstation.hostname}. Unauthorized traffic blocked; host OS and research work stay running.`
-      : `Network quarantine lifted for ${workstation.hostname}. Full connectivity and data streams restored.`;
+      ? `Surgical network isolation enforced on ${workstation.hostname}. Unauthorized traffic blocked; host OS and research work stay running.`
+      : `Surgical network isolation lifted for ${workstation.hostname}. Full connectivity and data streams restored.`;
 
     setFeedbackMessage(message);
     setTimeout(() => setFeedbackMessage(null), 6000);
-  };
-
-  const handleRunScan = () => {
-    setIsScanning(true);
-    setFeedbackMessage("Running health & integrity scan on this device...");
-    setTimeout(() => {
-      setIsScanning(false);
-      setFeedbackMessage(
-        "Health check complete: All system services, OS modules, and network interfaces are optimal."
-      );
-      setTimeout(() => setFeedbackMessage(null), 5000);
-    }, 2000);
   };
 
   const handleRestartService = () => {
@@ -544,39 +633,41 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
           .toUpperCase()
       : "KKU";
 
-  // Dynamic Environmental & Hardware Vitals
+  // Real Database-Backed Telemetry & Hardware Vitals
   const isQuarantined = Boolean(workstation.is_isolated);
   const isOffline = workstation.status === "OFFLINE";
   const isDegraded =
     workstation.status === "CRITICAL" ||
     demoReceipt?.scenario_type === "TECHNICAL_DEGRADATION";
 
-  // Temperature (°C): base 36°C idle, scales with liveCpu up to 72°C (or 81°C if degraded)
-  const dynamicTemp = isDegraded ? 81 : Math.round(36 + (liveCpu / 100) * 36);
-  const tempStatus =
-    dynamicTemp >= 78
-      ? { label: "High Thermal Load", color: "text-rose-400", sub: "Throttling Risk" }
-      : dynamicTemp >= 58
-      ? { label: "Warm (Under Load)", color: "text-amber-400", sub: "Active Dissipation" }
-      : { label: "Cool & Optimal", color: "text-emerald-400", sub: "Nominal Range" };
+  const hasLiveTelemetry = Boolean(latestTelemetryTime);
 
-  // Fan Speed (RPM): base 1,200 idle, scales with temperature & CPU
-  const dynamicRpm = isDegraded ? 3850 : Math.round(1200 + (liveCpu / 100) * 2200);
-  const fanStatus =
-    dynamicRpm >= 3200
-      ? { label: "Max Turbo Cooling", color: "text-amber-400" }
-      : dynamicRpm >= 2000
-      ? { label: "Dynamic Adaptive", color: "text-blue-300" }
-      : { label: "Quiet & Steady", color: "text-slate-300" };
+  const netEgressStatus = isQuarantined
+    ? { label: "Quarantined (Blocked)", color: "text-rose-400" }
+    : liveNetworkOutMb >= 5.0
+    ? { label: "High Outbound Stream", color: "text-amber-400" }
+    : hasLiveTelemetry
+    ? { label: "Active Egress Stream", color: "text-emerald-400" }
+    : { label: "No Telemetry Yet", color: "text-slate-400" };
 
-  // Power state
-  const powerStatus = isOffline
-    ? { draw: "0 W", sub: "Suspended / Off", color: "text-slate-400" }
-    : isDegraded || liveCpu > 80
-    ? { draw: isServer ? "~420 W" : "~240 W", sub: "High Compute Draw", color: "text-amber-400" }
-    : { draw: isServer ? "~180 W" : "~85 W", sub: "Stable AC (KKU Grid)", color: "text-emerald-400" };
+  const netIngressStatus = isQuarantined
+    ? { label: "Inbound Restricted", color: "text-rose-400" }
+    : liveNetworkInMb >= 10.0
+    ? { label: "Heavy Inbound Transfer", color: "text-cyan-400" }
+    : hasLiveTelemetry
+    ? { label: "Active Ingress Stream", color: "text-emerald-400" }
+    : { label: "No Telemetry Yet", color: "text-slate-400" };
 
-  // Network Link state
+  const diskThroughputStatus =
+    liveDiskIO >= 50.0
+      ? { label: "High I/O Saturation", color: "text-rose-400" }
+      : liveDiskIO >= 10.0
+      ? { label: "Active R/W Throughput", color: "text-amber-400" }
+      : hasLiveTelemetry
+      ? { label: "Nominal Disk I/O", color: "text-emerald-400" }
+      : { label: "No Telemetry Yet", color: "text-slate-400" };
+
+  // Network Link & Process state
   const networkLinkStatus = isQuarantined
     ? {
         speed: "0 Mbps",
@@ -595,22 +686,89 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
       }
     : {
         speed: isServer ? "10 Gbps" : "1 Gbps",
-        sub: "Full Duplex Connected",
+        sub: hasLiveTelemetry
+          ? `${liveProcessCount} Active Processes`
+          : "Full Duplex Connected",
         color: "text-emerald-400",
         border: "border-slate-800/80 bg-[#060b18]",
         badge: "Connected",
       };
 
-  // Overall environmental status badge
+  // Overall telemetry & hardware status badge
   const overallEnvBadge = isQuarantined
     ? { text: "Network Quarantined", color: "text-rose-400", icon: Slash }
-    : isDegraded || dynamicTemp >= 78
-    ? { text: "Thermal Warning", color: "text-rose-400", icon: AlertTriangle }
+    : isDegraded || liveDiskIO >= 50.0
+    ? { text: "Hardware Saturation", color: "text-rose-400", icon: AlertTriangle }
     : liveCpu > 80
     ? { text: "High Load", color: "text-amber-400", icon: Activity }
     : isOffline
     ? { text: "Offline", color: "text-slate-400", icon: AlertCircle }
-    : { text: "All Normal", color: "text-emerald-400", icon: CheckCircle2 };
+    : hasLiveTelemetry
+    ? { text: "Telemetry Verified", color: "text-emerald-400", icon: CheckCircle2 }
+    : { text: "Awaiting Telemetry", color: "text-slate-400", icon: Clock };
+
+  // Build real chronological protection activity feed from DB records
+  const protectionActivityItems: Array<{
+    id: string;
+    title: string;
+    description: string;
+    time: string;
+    ts: number;
+    type: "telemetry" | "anomaly" | "incident" | "alert";
+  }> = [];
+
+  if (latestTelemetryTime) {
+    protectionActivityItems.push({
+      id: `tel-${latestTelemetryTime}`,
+      title: "Telemetry Heartbeat Ingested",
+      description: `CPU ${liveCpu}%, RAM ${liveMemory}%, Disk I/O ${liveDiskIO.toFixed(2)} MB/s, Net Out ${liveNetworkOutMb.toFixed(2)} MB/s, and ${liveProcessCount} active processes synced to database.`,
+      time: formatLastSeen(latestTelemetryTime),
+      ts: new Date(latestTelemetryTime).getTime(),
+      type: "telemetry",
+    });
+  }
+
+  for (const a of deviceAnomalies) {
+    const tsStr = a.timestamp || a.created_at;
+    const evidenceStr = Array.isArray(a.evidence) && a.evidence.length > 0
+      ? ` — ${a.evidence.join("; ")}`
+      : "";
+    protectionActivityItems.push({
+      id: `anom-${a.id}`,
+      title: `ML Anomaly Detected: ${a.anomaly_type}`,
+      description: `${a.model_name || "ML Engine"} (${a.model_version || "v1"}) scored ${(Number(a.score ?? 0) * 100).toFixed(1)}% (Confidence: ${(Number(a.confidence ?? 0) * 100).toFixed(1)}%)${evidenceStr}`,
+      time: formatLastSeen(tsStr),
+      ts: tsStr ? new Date(tsStr).getTime() : 0,
+      type: "anomaly",
+    });
+  }
+
+  for (const inc of deviceIncidents) {
+    const tsStr = inc.detected_at || inc.created_at;
+    protectionActivityItems.push({
+      id: `inc-${inc.id}`,
+      title: `Security Incident (${inc.incident_number || inc.category || "SIEM"}): ${inc.title}`,
+      description: `Status: ${inc.status} • Severity: ${inc.severity}${inc.response_action ? ` • Action: ${inc.response_action}` : ""}`,
+      time: formatLastSeen(tsStr),
+      ts: tsStr ? new Date(tsStr).getTime() : 0,
+      type: "incident",
+    });
+  }
+
+  for (const al of deviceAlerts) {
+    const tsStr = al.created_at;
+    protectionActivityItems.push({
+      id: `al-${al.id}`,
+      title: `Alert [${al.severity}]: ${al.title}`,
+      description: al.description || al.recommendation || "Active alert recorded for this workstation.",
+      time: formatLastSeen(tsStr),
+      ts: tsStr ? new Date(tsStr).getTime() : 0,
+      type: "alert",
+    });
+  }
+
+  protectionActivityItems.sort((a, b) => b.ts - a.ts);
+  const recentProtectionFeed = protectionActivityItems.slice(0, 5);
 
   // Hardware storage capacity and utilization
   const rawStorageSpec =
@@ -744,18 +902,6 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
 
           {/* Right: Action Buttons with Clear Explanations */}
           <div className="flex flex-wrap items-center gap-2.5">
-            {/* Run Health Check */}
-            <button
-              type="button"
-              onClick={handleRunScan}
-              disabled={isScanning}
-              title="Perform an immediate health and cybersecurity integrity scan"
-              className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center gap-2 transition-all shadow-md shadow-blue-600/20 cursor-pointer disabled:opacity-60"
-            >
-              <Shield className={`w-3.5 h-3.5 ${isScanning ? "animate-spin" : ""}`} />
-              <span>{isScanning ? "Scanning System..." : "Run Health Check"}</span>
-            </button>
-
             {/* Restart Agent */}
             <button
               type="button"
@@ -1204,11 +1350,11 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
             {/* Left: Environmental Health & Physical Conditions (7 cols) */}
             <div className="lg:col-span-7 space-y-5">
-              {/* Environmental Vitals */}
+              {/* Environmental & Hardware Status (Real Telemetry Vitals) */}
               <div className="glass-card p-5 rounded-2xl border-slate-800/80 bg-[#091124]/95 shadow-xl space-y-4">
                 <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
                   <div className="flex items-center gap-2">
-                    <Thermometer className="w-4 h-4 text-emerald-400" />
+                    <Activity className="w-4 h-4 text-emerald-400" />
                     <h3 className="text-sm font-bold text-white tracking-tight">Environmental & Hardware Status</h3>
                   </div>
                   <span className={`text-[11px] ${overallEnvBadge.color} flex items-center gap-1 font-medium`}>
@@ -1220,31 +1366,31 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
                   <div className="p-3 rounded-xl bg-[#060b18] border border-slate-800/80 space-y-1">
                     <span className="text-slate-500 text-[10px] uppercase font-bold flex items-center gap-1">
-                      <Thermometer className={`w-3 h-3 ${tempStatus.color}`} /> Temperature
+                      <Network className={`w-3 h-3 ${netEgressStatus.color}`} /> Net Egress
                     </span>
-                    <span className="text-white font-bold text-base block">{dynamicTemp} °C</span>
-                    <span className={`text-[11px] ${tempStatus.color}`}>{tempStatus.label}</span>
+                    <span className="text-white font-bold text-base block">{liveNetworkOutMb.toFixed(2)} MB/s</span>
+                    <span className={`text-[11px] ${netEgressStatus.color}`}>{netEgressStatus.label}</span>
                   </div>
 
                   <div className="p-3 rounded-xl bg-[#060b18] border border-slate-800/80 space-y-1">
                     <span className="text-slate-500 text-[10px] uppercase font-bold flex items-center gap-1">
-                      <Fan className={`w-3 h-3 ${fanStatus.color}`} /> Fan Speed
+                      <Network className={`w-3 h-3 ${netIngressStatus.color}`} /> Net Ingress
                     </span>
-                    <span className="text-white font-bold text-base block">{dynamicRpm.toLocaleString()} RPM</span>
-                    <span className={`text-[11px] ${fanStatus.color}`}>{fanStatus.label}</span>
+                    <span className="text-white font-bold text-base block">{liveNetworkInMb.toFixed(2)} MB/s</span>
+                    <span className={`text-[11px] ${netIngressStatus.color}`}>{netIngressStatus.label}</span>
                   </div>
 
                   <div className="p-3 rounded-xl bg-[#060b18] border border-slate-800/80 space-y-1">
                     <span className="text-slate-500 text-[10px] uppercase font-bold flex items-center gap-1">
-                      <Power className="w-3 h-3 text-amber-400" /> Power
+                      <HardDrive className={`w-3 h-3 ${diskThroughputStatus.color}`} /> Disk I/O
                     </span>
-                    <span className="text-white font-bold text-base block">{powerStatus.draw}</span>
-                    <span className={`text-[11px] ${powerStatus.color}`}>{powerStatus.sub}</span>
+                    <span className="text-white font-bold text-base block">{liveDiskIO.toFixed(2)} MB/s</span>
+                    <span className={`text-[11px] ${diskThroughputStatus.color}`}>{diskThroughputStatus.label}</span>
                   </div>
 
                   <div className={`p-3 rounded-xl border space-y-1 ${networkLinkStatus.border}`}>
                     <span className="text-slate-500 text-[10px] uppercase font-bold flex items-center gap-1">
-                      <Network className={`w-3 h-3 ${networkLinkStatus.color}`} /> Network Link
+                      <Cpu className={`w-3 h-3 ${networkLinkStatus.color}`} /> Link & Procs
                     </span>
                     <span className="text-white font-bold text-base block">{networkLinkStatus.speed}</span>
                     <span className={`text-[11px] ${networkLinkStatus.color}`}>{networkLinkStatus.sub}</span>
@@ -1255,67 +1401,66 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
                   {isQuarantined
                     ? "SOAR automated response has isolated external network interfaces. Host CPU execution remains stable with zero operating system reboot required."
                     : isDegraded
-                    ? "Thermal dissipation sensors report elevated core temperatures. Predictive maintenance recommends inspecting air intake and thermal paste application."
+                    ? "Elevated disk I/O and CPU saturation detected from agent telemetry. Predictive maintenance recommends inspecting high-load background processes."
                     : isOffline
-                    ? "Agent telemetry heartbeat is currently suspended. Physical sensors will sync automatically once device reconnects."
-                    : "Physical sensors confirm thermal thresholds and fan intake are healthy. There is no risk of thermal throttling or power interruption."}
+                    ? "Agent telemetry heartbeat is currently suspended. Hardware and network throughput metrics will sync once the device reconnects."
+                    : hasLiveTelemetry
+                    ? "Live agent telemetry confirms network ingress/egress, disk I/O throughput, and active process counts are within normal operational bounds."
+                    : "No telemetry snapshots have been ingested for this workstation yet. Start the monitoring agent or run a scenario in the Simulation tab to populate live vitals."}
                 </p>
               </div>
 
-              {/* Recent Health & Monitoring Activity */}
+              {/* Recent Protection Activity (Database-Backed) */}
               <div className="glass-card p-5 rounded-2xl border-slate-800/80 bg-[#091124]/95 shadow-xl space-y-3">
                 <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
                   <div className="flex items-center gap-2">
                     <Activity className="w-4 h-4 text-blue-400" />
                     <h3 className="text-sm font-bold text-white tracking-tight">Recent Protection Activity</h3>
                   </div>
-                  <span className="text-[10px] font-mono text-slate-400">Continuous telemetry feed</span>
+                  <span className="text-[10px] font-mono text-slate-400">
+                    {recentProtectionFeed.length > 0
+                      ? `${recentProtectionFeed.length} recorded event${recentProtectionFeed.length === 1 ? "" : "s"}`
+                      : "No events recorded"}
+                  </span>
                 </div>
 
-                <div className="space-y-2.5 text-xs">
-                  <div className="flex items-start gap-2.5 p-2 rounded-xl bg-[#060b18] border border-slate-800/60">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                    <div className="space-y-0.5">
-                      <p className="text-slate-200 font-medium">Telemetry Heartbeat Ingested</p>
-                      <p className="text-slate-400 text-[11px]">Hardware metrics, load factors, and process count synced to backend.</p>
-                    </div>
-                    <span className="text-[10px] text-slate-500 font-mono shrink-0 ml-auto">
-                      {formatLastSeen(workstation.last_seen_at)}
-                    </span>
+                {recentProtectionFeed.length > 0 ? (
+                  <div className="space-y-2.5 text-xs">
+                    {recentProtectionFeed.map((item) => (
+                      <div
+                        key={item.id}
+                        className="flex items-start gap-2.5 p-2 rounded-xl bg-[#060b18] border border-slate-800/60"
+                      >
+                        {item.type === "telemetry" ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                        ) : item.type === "anomaly" ? (
+                          <ShieldCheck className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
+                        ) : item.type === "incident" ? (
+                          <ShieldAlertIcon className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                        ) : (
+                          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                        )}
+                        <div className="space-y-0.5">
+                          <p className="text-slate-200 font-medium">{item.title}</p>
+                          <p className="text-slate-400 text-[11px]">{item.description}</p>
+                        </div>
+                        <span className="text-[10px] text-slate-500 font-mono shrink-0 ml-auto">
+                          {item.time}
+                        </span>
+                      </div>
+                    ))}
                   </div>
-
-                  <div className="flex items-start gap-2.5 p-2 rounded-xl bg-[#060b18] border border-slate-800/60">
-                    <ShieldCheck className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
-                    <div className="space-y-0.5">
-                      <p className="text-slate-200 font-medium">AI Anomaly Screening</p>
-                      <p className="text-slate-400 text-[11px]">
-                        {demoReceipt?.step_5_ml_result?.is_anomaly
-                          ? `Isolation Forest flagged anomaly (Score: ${(demoReceipt.step_5_ml_result.score * 100).toFixed(1)}%). Classified as ${demoReceipt.step_5_ml_result.anomaly_type || "Incident"}.`
-                          : "Dual-model AI screening active. Hardware consumption is within certified operational baseline."}
-                      </p>
-                    </div>
-                    <span className="text-[10px] text-slate-500 font-mono shrink-0 ml-auto">
-                      {demoReceipt ? "Active Run" : "1m ago"}
-                    </span>
+                ) : (
+                  <div className="p-4 rounded-xl bg-[#060b18] border border-slate-800/60 text-center space-y-1.5">
+                    <p className="text-xs font-medium text-slate-300">
+                      No Protection Activity Recorded Yet
+                    </p>
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      No telemetry heartbeats, ML anomaly detections, security incidents, or alerts exist in the database for{" "}
+                      <span className="font-mono text-slate-300">{workstation.hostname}</span>. Run the endpoint agent or trigger an interactive scenario in the Simulation tab to generate live records.
+                    </p>
                   </div>
-
-                  <div className="flex items-start gap-2.5 p-2 rounded-xl bg-[#060b18] border border-slate-800/60">
-                    <KeyRound className="w-4 h-4 text-purple-400 shrink-0 mt-0.5" />
-                    <div className="space-y-0.5">
-                      <p className="text-slate-200 font-medium">University IdP Validation</p>
-                      <p className="text-slate-400 text-[11px]">
-                        {hasSimulatedSession
-                          ? `IdP verified active user '${simulatedIdp?.username}' with role '${idpRole}'. Policy: ${demoReceipt?.step_8_soar_execution?.action_taken || demoReceipt?.step_7_policy_decision?.decision || "Monitored"}.`
-                          : hasAssignedUser
-                          ? `Institutional IdP synced account for '${assignedUser?.full_name || assignedUser?.username || "Assigned User"}' (${idpRole}).`
-                          : "Campus IdP listener standing by for single sign-on user login."}
-                      </p>
-                    </div>
-                    <span className="text-[10px] text-slate-500 font-mono shrink-0 ml-auto">
-                      {demoReceipt ? "Synced" : "5m ago"}
-                    </span>
-                  </div>
-                </div>
+                )}
               </div>
             </div>
 
@@ -1344,7 +1489,7 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
                     <div className={`w-10 h-10 rounded-full border flex items-center justify-center font-bold text-sm shrink-0 ${
                       idpRole === "RESEARCHER"
                         ? "bg-purple-950/80 border-purple-500/40 text-purple-300"
-                        : idpRole === "ADMIN" || idpRole === "IT_OPERATOR"
+                        : idpRole === "ADMIN"
                         ? "bg-amber-950/80 border-amber-500/40 text-amber-300"
                         : "bg-blue-950/80 border-blue-500/40 text-blue-300"
                     }`}>
@@ -1367,7 +1512,7 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
                         className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
                           idpRole === "RESEARCHER"
                             ? "bg-purple-500/20 text-purple-300 border-purple-500/40"
-                            : idpRole === "ADMIN" || idpRole === "IT_OPERATOR"
+                            : idpRole === "ADMIN"
                             ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
                             : idpRole === "STUDENT"
                             ? "bg-blue-500/20 text-blue-300 border-blue-500/40"
@@ -1405,7 +1550,7 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
                       ? "Researcher Privilege Context: Under King Khalid University policy, AI-detected anomalous spikes trigger surgical network containment rather than destructive kills, ensuring active simulations, deep learning weights, and open sessions are preserved."
                       : idpRole === "STUDENT"
                       ? "Student Lab Policy: High-severity threats (e.g., cryptojacking or rogue processes) trigger surgical process containment and session suspension to safeguard shared campus hardware."
-                      : idpRole === "ADMIN" || idpRole === "IT_OPERATOR"
+                      : idpRole === "ADMIN"
                       ? "Administrative Policy: Privileged maintenance access is audited in high fidelity; unauthorized escalation attempts trigger instant SIEM alerts and operational audit log entries."
                       : "Open SSO Integration: When students or researchers log in with university credentials, Secure-MaintAI queries the IdP to dynamically bind institutional roles and apply appropriate security containment playbooks."}
                   </p>

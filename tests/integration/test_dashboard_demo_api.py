@@ -141,7 +141,7 @@ async def test_trigger_technical_degradation_demo_scenario(
 
     assert receipt["scenario_type"] == "TECHNICAL_DEGRADATION"
     assert receipt["step_2_workstation"]["hostname"] == "lab-server-12"
-    assert receipt["step_6_idp_context"]["role"] == "IT_OPERATOR"
+    assert receipt["step_6_idp_context"]["role"] == "ADMIN"
 
     pol_dec = receipt["step_7_policy_decision"]
     assert pol_dec["decision"] == "SCHEDULE_MAINTENANCE"

@@ -1,27 +1,27 @@
 """
-Secure-MaintAI — Comprehensive Database Demo Data Seeder.
+Secure-MaintAI — Minimal Foundational Database Seeder.
 
-Reseeds the database cleanly and deterministically:
-1. Purges stale operational records (Alerts, Incidents, Anomalies, Security Events, Telemetry, Audit Logs)
-   and removes orphan/untagged workstations from previous test runs.
-2. Seeds the 4 canonical RBAC roles (ADMIN, IT_OPERATOR, RESEARCHER, STUDENT).
-3. Seeds all University Departments and Campus Locations.
-4. Seeds the 4 primary operator login accounts plus the scenario identity accounts.
-5. Seeds the complete 12-workstation campus fleet (including all 6 scenario target hosts with full
-   asset tags and hardware specifications).
-6. Generates authentic baseline telemetry across the fleet and executes initial representative
-   scenarios through the real ML -> IdP -> Correlation -> Policy -> SOAR -> SHA-256 Audit pipeline
-   so all Dashboard, Devices, Alerts, Cybersecurity, AI Predictions, Maintenance, and Activity Logs
-   views are populated with genuine runtime outputs.
+Reseeds the database cleanly and deterministically with only foundational entities:
+1. Purges all system-generated operational records (Alerts, Incidents, Anomalies,
+   Security Events, Telemetry Metrics, and Audit Logs) so the platform starts clean.
+2. Seeds the 3 canonical RBAC roles (ADMIN, RESEARCHER, STUDENT).
+3. Seeds the essential University Departments and Campus Locations.
+4. Seeds the 3 core RBAC login accounts (admin, researcher, student).
+5. Seeds strictly 2 workstations:
+   - 1 Student workstation (undergrad-pc-04, assigned to student)
+   - 1 Researcher workstation (quantum-node-01, assigned to researcher)
+
+No alerts, incidents, anomalies, security events, telemetry, or audit logs are pre-seeded;
+all operational records are generated dynamically by the system at runtime.
 
 Usage:
-    python scripts/seed_demo_data.py
+    python -m scripts.seed_demo_data
 """
 
 import asyncio
 import sys
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Ensure project root is on sys.path
@@ -31,7 +31,6 @@ from sqlalchemy import delete, select
 
 from backend.core.database import async_session_factory
 from backend.core.security import hash_password
-from backend.data.scenario_registry import get_scenario_profile
 from backend.models.alert import Alert
 from backend.models.anomaly import AnomalyDetection
 from backend.models.audit import AuditLog
@@ -41,37 +40,19 @@ from backend.models.security_event import SecurityEvent
 from backend.models.telemetry import TelemetryMetric
 from backend.models.user import UserAccount, UserRole
 from backend.models.workstation import Workstation
-from backend.schemas.telemetry import TelemetryCreate
 from backend.schemas.user import RoleEnum
-from backend.services import ml_pipeline_service
-from backend.services.idp_service import idp_service
-from backend.services.soar_service import SOARService
 from scripts.seed_roles import seed_roles
 
 DEMO_DEPARTMENTS = [
     {"name": "Computer Science", "code": "CS"},
-    {"name": "Artificial Intelligence", "code": "AI"},
-    {"name": "IT Services", "code": "IT"},
-    {"name": "Mechanical Engineering", "code": "ME"},
-    {"name": "Engineering", "code": "ENG"},
     {"name": "Physics & Advanced Computing", "code": "PHYS"},
-    {"name": "Mathematics", "code": "MATH"},
-    {"name": "IT Operations & Security", "code": "SEC"},
-    {"name": "Distance Education", "code": "DE"},
+    {"name": "IT Services", "code": "IT"},
 ]
 
 DEMO_LOCATIONS = [
-    {"building": "Computer Science Building", "floor": 1, "room": "CS Lab 101"},
-    {"building": "Computer Science Building", "floor": 1, "room": "CS Lab 102"},
     {"building": "Computer Science Building", "floor": 3, "room": "Undergraduate Lab 301"},
-    {"building": "Science & AI Research Complex", "floor": 2, "room": "AI Research Lab"},
     {"building": "Science & AI Research Complex", "floor": 3, "room": "Quantum Computing Lab"},
-    {"building": "Administration Building", "floor": 3, "room": "Main Campus Admin"},
     {"building": "Administration Building", "floor": 4, "room": "Security Operations Center"},
-    {"building": "Engineering Hall", "floor": 1, "room": "CAD Simulation Lab"},
-    {"building": "Engineering Hall", "floor": 2, "room": "Fluid Mechanics Lab"},
-    {"building": "Faculty Building", "floor": 2, "room": "Faculty Office"},
-    {"building": "Distance Learning Center", "floor": 1, "room": "Virtual Lab 8"},
 ]
 
 DEMO_USERS = [
@@ -86,24 +67,14 @@ DEMO_USERS = [
         "department_code": "IT",
     },
     {
-        "username": "operator",
-        "email": "operator@kku.edu.sa",
-        "password": "OperatorSecure2026!",
-        "role_name": RoleEnum.IT_OPERATOR.value,
-        "external_id": "idp:kku:op01",
-        "university_id": "KKU-STAFF-1002",
-        "full_name": "Eng. Khalid Al-Ghamdi",
-        "department_code": "IT",
-    },
-    {
         "username": "researcher",
         "email": "researcher@kku.edu.sa",
         "password": "ResearcherSecure2026!",
         "role_name": RoleEnum.RESEARCHER.value,
         "external_id": "idp:kku:res01",
-        "university_id": "KKU-STAFF-2005",
-        "full_name": "Dr. Sarah Al-Shehri",
-        "department_code": "AI",
+        "university_id": "KKU-FAC-2041",
+        "full_name": "Dr. Sara Al-Zahrani",
+        "department_code": "PHYS",
     },
     {
         "username": "student",
@@ -111,320 +82,64 @@ DEMO_USERS = [
         "password": "StudentSecure2026!",
         "role_name": RoleEnum.STUDENT.value,
         "external_id": "idp:kku:stu01",
-        "university_id": "KKU-STU-4410982",
-        "full_name": "Fahad Al-Otaibi",
+        "university_id": "KKU-STU-441092",
+        "full_name": "Tariq Al-Shahrani",
         "department_code": "CS",
-    },
-    # Scenario persona accounts
-    {
-        "username": "student_attacker",
-        "email": "student_attacker@univ.edu",
-        "password": "StudentSecure2026!",
-        "role_name": RoleEnum.STUDENT.value,
-        "external_id": "idp:kku:stu02",
-        "university_id": "KKU-STU-4411024",
-        "full_name": "Tariq Al-Zahrani",
-        "department_code": "CS",
-    },
-    {
-        "username": "sys_operator",
-        "email": "sys_operator@univ.edu",
-        "password": "OperatorSecure2026!",
-        "role_name": RoleEnum.IT_OPERATOR.value,
-        "external_id": "idp:kku:op02",
-        "university_id": "KKU-STAFF-1044",
-        "full_name": "Eng. Nasser Al-Dosari",
-        "department_code": "ENG",
-    },
-    {
-        "username": "prof_researcher",
-        "email": "prof_researcher@univ.edu",
-        "password": "ResearcherSecure2026!",
-        "role_name": RoleEnum.RESEARCHER.value,
-        "external_id": "idp:kku:res02",
-        "university_id": "KKU-STAFF-2019",
-        "full_name": "Prof. Mansour Al-Harbi",
-        "department_code": "PHYS",
-    },
-    {
-        "username": "admin_operator",
-        "email": "admin_operator@univ.edu",
-        "password": "AdminSecure2026!",
-        "role_name": RoleEnum.ADMIN.value,
-        "external_id": "idp:kku:admin02",
-        "university_id": "KKU-STAFF-1009",
-        "full_name": "Eng. Sultan Al-Maliki",
-        "department_code": "SEC",
     },
 ]
 
 DEMO_WORKSTATIONS = [
-    # Standard Campus Workstations
-    {
-        "hostname": "cs-lab-pc-01",
-        "asset_tag": "KKU-CS-001",
-        "ip_address": "10.10.1.11",
-        "operating_system": "Ubuntu 22.04 LTS",
-        "department": "Computer Science",
-        "lab": "CS Lab 101",
-        "status": "ONLINE",
-        "agent_version": "1.0.0",
-        "hardware_specs": {"cpu": "Intel Core i7-12700", "ram_gb": 32, "storage": "512GB NVMe"},
-    },
-    {
-        "hostname": "cs-lab-pc-02",
-        "asset_tag": "KKU-CS-002",
-        "ip_address": "10.10.1.15",
-        "operating_system": "Windows 11 Enterprise",
-        "department": "Computer Science",
-        "lab": "CS Lab 101",
-        "status": "ONLINE",
-        "agent_version": "1.0.0",
-        "hardware_specs": {"cpu": "Intel Core i7-12700", "ram_gb": 32, "storage": "512GB NVMe"},
-    },
-    {
-        "hostname": "cs-lab-pc-03",
-        "asset_tag": "KKU-CS-003",
-        "ip_address": "10.10.1.13",
-        "operating_system": "Ubuntu 22.04 LTS",
-        "department": "Computer Science",
-        "lab": "CS Lab 102",
-        "status": "ONLINE",
-        "agent_version": "1.0.0",
-        "hardware_specs": {"cpu": "Intel Core i5-12400", "ram_gb": 16, "storage": "512GB NVMe"},
-    },
-    {
-        "hostname": "cs-lab-pc-04",
-        "asset_tag": "KKU-CS-004",
-        "ip_address": "10.10.1.14",
-        "operating_system": "Windows 11 Enterprise",
-        "department": "Computer Science",
-        "lab": "CS Lab 102",
-        "status": "ONLINE",
-        "agent_version": "1.0.0",
-        "hardware_specs": {"cpu": "Intel Core i5-12400", "ram_gb": 16, "storage": "512GB NVMe"},
-    },
-    {
-        "hostname": "hpc-node-01",
-        "asset_tag": "KKU-HPC-001",
-        "ip_address": "10.20.1.50",
-        "operating_system": "Ubuntu 22.04 LTS",
-        "department": "Artificial Intelligence",
-        "lab": "AI Research Lab",
-        "status": "ONLINE",
-        "agent_version": "1.0.0",
-        "hardware_specs": {"cpu": "AMD EPYC 7763 64-Core", "ram_gb": 256, "gpu": "4x NVIDIA A100 80GB"},
-    },
-    {
-        "hostname": "hpc-node-02",
-        "asset_tag": "KKU-HPC-002",
-        "ip_address": "10.20.1.51",
-        "operating_system": "Ubuntu 22.04 LTS",
-        "department": "Artificial Intelligence",
-        "lab": "AI Research Lab",
-        "status": "ONLINE",
-        "agent_version": "1.0.0",
-        "hardware_specs": {"cpu": "AMD EPYC 7763 64-Core", "ram_gb": 256, "gpu": "4x NVIDIA A100 80GB"},
-    },
-    {
-        "hostname": "admin-desk-01",
-        "asset_tag": "KKU-ADM-001",
-        "ip_address": "10.30.1.5",
-        "operating_system": "Windows 11 Enterprise",
-        "department": "IT Services",
-        "lab": "Main Campus Admin",
-        "status": "ONLINE",
-        "agent_version": "1.0.0",
-        "hardware_specs": {"cpu": "Intel Core i5-13400", "ram_gb": 16, "storage": "256GB SSD"},
-    },
-    {
-        "hostname": "eng-cad-01",
-        "asset_tag": "KKU-ENG-001",
-        "ip_address": "10.40.1.21",
-        "operating_system": "Windows 11 Enterprise",
-        "department": "Mechanical Engineering",
-        "lab": "CAD Simulation Lab",
-        "status": "ONLINE",
-        "agent_version": "1.0.0",
-        "hardware_specs": {"cpu": "Intel Core i9-13900K", "ram_gb": 64, "gpu": "NVIDIA RTX 4080"},
-    },
-    # Scenario Target Workstations (aligned with backend/data/scenario_registry.py)
+    # 1. Student Workstation
     {
         "hostname": "undergrad-pc-04",
-        "asset_tag": "KKU-CS-304",
+        "asset_tag": "KKU-STD-001",
         "ip_address": "10.20.4.104",
         "operating_system": "Ubuntu 22.04 LTS",
         "department": "Computer Science",
+        "department_code": "CS",
         "lab": "Undergraduate Lab 301",
+        "assigned_username": "student",
         "status": "ONLINE",
         "agent_version": "1.0.0",
-        "hardware_specs": {"cpu": "Intel Core i7-12700", "ram_gb": 16, "storage": "512GB NVMe"},
+        "hardware_specs": {
+            "cpu": "Intel Core i7-12700",
+            "cores": 12,
+            "ram_gb": 16,
+            "storage_gb": 512,
+            "disk_usage_pct": 42.0,
+        },
     },
-    {
-        "hostname": "lab-server-12",
-        "asset_tag": "KKU-ENG-012",
-        "ip_address": "10.10.1.12",
-        "operating_system": "Ubuntu 22.04 LTS",
-        "department": "Engineering",
-        "lab": "Fluid Mechanics Lab",
-        "status": "ONLINE",
-        "agent_version": "1.0.0",
-        "hardware_specs": {"cpu": "Intel Xeon Silver 4314", "ram_gb": 64, "storage": "2TB NVMe RAID"},
-    },
+    # 2. Researcher Workstation
     {
         "hostname": "quantum-node-01",
-        "asset_tag": "KKU-QNT-001",
+        "asset_tag": "KKU-RES-001",
         "ip_address": "10.30.2.1",
         "operating_system": "Red Hat Enterprise Linux 9",
         "department": "Physics & Advanced Computing",
+        "department_code": "PHYS",
         "lab": "Quantum Computing Lab",
+        "assigned_username": "researcher",
         "status": "ONLINE",
         "agent_version": "1.0.0",
-        "hardware_specs": {"cpu": "AMD EPYC 9554 64-Core", "ram_gb": 128, "storage": "4TB NVMe"},
-    },
-    {
-        "hostname": "dept-pc-02",
-        "asset_tag": "KKU-MTH-002",
-        "ip_address": "10.20.1.2",
-        "operating_system": "Ubuntu 22.04 LTS",
-        "department": "Mathematics",
-        "lab": "Faculty Office",
-        "status": "ONLINE",
-        "agent_version": "1.0.0",
-        "hardware_specs": {"cpu": "Intel Core i7-13700", "ram_gb": 32, "storage": "1TB NVMe"},
-    },
-    {
-        "hostname": "admin-jumphost-01",
-        "asset_tag": "KKU-SOC-001",
-        "ip_address": "10.50.1.5",
-        "operating_system": "Windows Server 2022",
-        "department": "IT Operations & Security",
-        "lab": "Security Operations Center",
-        "status": "ONLINE",
-        "agent_version": "1.0.0",
-        "hardware_specs": {"cpu": "Intel Xeon Gold 6330", "ram_gb": 32, "storage": "1TB SSD"},
-    },
-    {
-        "hostname": "remote-lab-08",
-        "asset_tag": "KKU-VDI-008",
-        "ip_address": "10.40.1.8",
-        "operating_system": "Ubuntu 22.04 LTS",
-        "department": "Distance Education",
-        "lab": "Virtual Lab 8",
-        "status": "ONLINE",
-        "agent_version": "1.0.0",
-        "hardware_specs": {"cpu": "AMD EPYC vCPU 8-Core", "ram_gb": 16, "storage": "256GB VirtIO"},
+        "hardware_specs": {
+            "cpu": "Dual AMD EPYC 7763",
+            "cores": 128,
+            "ram_gb": 64,
+            "storage_gb": 2000,
+            "gpu": "4x NVIDIA A100 80GB",
+            "disk_usage_pct": 38.0,
+        },
     },
 ]
 
 
-async def _seed_scenario_through_pipeline(
-    session,
-    scenario_name: str,
-    ws_by_hostname: dict[str, Workstation],
-    offset_minutes: int,
-    preserve_online_status: bool = False,
-) -> None:
-    """Run a canonical scenario through the genuine ML + Policy + SOAR pipeline to populate DB tables."""
-    now = datetime.now(timezone.utc) - timedelta(minutes=offset_minutes)
-    profile = get_scenario_profile(scenario_name, now=now)
-    ws = ws_by_hostname[profile.target_hostname]
-
-    ml_pipeline_service.reset_state(str(ws.id))
-    idp_service.clear_workloads(ws.id)
-    idp_service.register_mock_user(profile.user_context)
-    for wl in profile.workloads:
-        idp_service.register_workload(wl.model_copy(update={"workstation_id": ws.id}))
-
-    raw_telemetry = TelemetryCreate(
-        agent_id=ws.agent_id or uuid.uuid4(),
-        workstation_id=ws.id,
-        timestamp=now,
-        cpu=profile.cpu,
-        memory=profile.memory,
-        disk=profile.disk,
-        network=profile.network,
-        process_count=profile.process_count,
-    )
-    ml_eval = ml_pipeline_service.evaluate_telemetry_snapshot(raw_telemetry, workstation_name=ws.hostname)
-
-    t_rec = TelemetryMetric(
-        workstation_id=ws.id,
-        timestamp=now,
-        schema_version="1.0.0",
-        cpu_usage=profile.cpu.usage_percent,
-        memory_usage=profile.memory.usage_percent,
-        disk_read=profile.disk.read_bytes_per_sec,
-        disk_write=profile.disk.write_bytes_per_sec,
-        network_in=profile.network.bytes_in_per_sec,
-        network_out=profile.network.bytes_out_per_sec,
-        process_count=profile.process_count,
-    )
-    session.add(t_rec)
-
-    anom_rec = None
-    if ml_eval.is_anomaly:
-        anom_rec = AnomalyDetection(
-            workstation_id=ws.id,
-            timestamp=now,
-            anomaly_type=ml_eval.anomaly_type.value,
-            score=ml_eval.score,
-            confidence=ml_eval.confidence,
-            model_name=ml_eval.model_name,
-            model_version=ml_eval.model_version,
-            features_snapshot=ml_eval.features_snapshot,
-            evidence=ml_eval.evidence,
-            status="DETECTED",
-        )
-        session.add(anom_rec)
-
-    sec_rec = None
-    if profile.security_event_spec:
-        sec_rec = SecurityEvent(
-            workstation_id=ws.id,
-            timestamp=now,
-            event_type=profile.security_event_spec["event_type"],
-            severity=profile.security_event_spec["severity"],
-            confidence=profile.security_event_spec["confidence"],
-            source=profile.security_event_spec["source"],
-            description=profile.security_event_spec["description"],
-            evidence=profile.security_event_spec["evidence"],
-        )
-        session.add(sec_rec)
-
-    await session.flush()
-
-    soar = SOARService(session)
-    _, _, _, policy_result, _ = await soar.evaluate_and_execute(
-        workstation_id=ws.id,
-        anomalies=[anom_rec] if anom_rec else [],
-        security_events=[sec_rec] if sec_rec else [],
-        target_user_id=profile.user_context.user_id,
-        workstation_name=ws.hostname,
-        auto_execute=False,
-        operator="system:seed-pipeline",
-    )
-    receipt = await soar.execute_policy_decision(
-        evaluation=policy_result,
-        operator="system:seed-pipeline",
-    )
-    if preserve_online_status:
-        ws.status = "ONLINE"
-    print(
-        f"  [+] Seeded scenario {scenario_name:<25} -> ML={ml_eval.anomaly_type.value} "
-        f"(fault={ml_eval.predicted_fault}, conf={ml_eval.confidence:.2%}) "
-        f"Playbook={receipt.playbook_name}"
-    )
-
-
 async def seed_demo_data() -> None:
-    """Cleanly reseed roles, lookup tables, users, workstations, telemetry, and pipeline records."""
+    """Cleanly reseed roles, lookup tables, 4 core RBAC users, and 2 workstations (Student & Researcher)."""
     await seed_roles()
-    ml_pipeline_service.initialise()
 
     async with async_session_factory() as session:
-        # 0. Clean stale operational records and orphan workstations
-        print("\n--- Purging Stale Operational Records ---")
+        # 0. Clean all system-generated operational records and orphan workstations
+        print("\n--- Purging System-Generated Operational Records ---")
         for model in [Alert, Incident, SecurityEvent, AnomalyDetection, TelemetryMetric, AuditLog]:
             await session.execute(delete(model))
 
@@ -434,6 +149,24 @@ async def seed_demo_data() -> None:
             if ws.hostname not in canonical_hostnames:
                 print(f"  [-] Removing orphan workstation: {ws.hostname} ({ws.ip_address})")
                 await session.delete(ws)
+        await session.flush()
+
+        # Remove extra non-canonical user accounts after workstations are unlinked
+        canonical_usernames = {u["username"] for u in DEMO_USERS}
+        all_users = (await session.execute(select(UserAccount))).scalars().all()
+        for usr in all_users:
+            if usr.username not in canonical_usernames:
+                print(f"  [-] Removing extra user account: {usr.username}")
+                await session.delete(usr)
+        await session.flush()
+
+        # Remove non-canonical roles
+        canonical_role_names = {u["role_name"] for u in DEMO_USERS}
+        all_roles = (await session.execute(select(UserRole))).scalars().all()
+        for r in all_roles:
+            if r.name not in canonical_role_names:
+                print(f"  [-] Removing deprecated role: {r.name}")
+                await session.delete(r)
         await session.flush()
 
         # 1. Fetch available roles
@@ -456,6 +189,7 @@ async def seed_demo_data() -> None:
 
         # 3. Seed Locations
         print("\n--- Seeding Locations ---")
+        locs_by_room: dict[str, Location] = {}
         for ldata in DEMO_LOCATIONS:
             l_res = await session.execute(
                 select(Location).where(
@@ -473,9 +207,13 @@ async def seed_demo_data() -> None:
                     room=ldata["room"],
                 )
                 session.add(loc)
+            locs_by_room[ldata["room"]] = loc
+
+        await session.flush()
 
         # 4. Seed Users
-        print("\n--- Seeding Demo & Scenario Users ---")
+        print("\n--- Seeding Core RBAC Users ---")
+        users_by_username: dict[str, UserAccount] = {}
         for udata in DEMO_USERS:
             role = roles_by_name.get(udata["role_name"])
             if not role:
@@ -494,9 +232,9 @@ async def seed_demo_data() -> None:
                 existing_user.external_id = udata["external_id"]
                 existing_user.university_id = udata.get("university_id")
                 existing_user.full_name = udata.get("full_name")
-                if dept:
-                    existing_user.department_id = dept.id
-                print(f"  [*] Updated user: {udata['username']:<18} [{udata['role_name']}]")
+                existing_user.department_id = dept.id if dept else None
+                users_by_username[udata["username"]] = existing_user
+                print(f"  [*] Updated user: {udata['username']:<14} [{udata['role_name']}]")
             else:
                 new_user = UserAccount(
                     id=uuid.uuid4(),
@@ -511,27 +249,38 @@ async def seed_demo_data() -> None:
                     status="active",
                 )
                 session.add(new_user)
-                print(f"  [+] Created user: {udata['username']:<18} [{udata['role_name']}]")
+                users_by_username[udata["username"]] = new_user
+                print(f"  [+] Created user: {udata['username']:<14} [{udata['role_name']}]")
 
-        # 5. Seed Workstations
-        print("\n--- Seeding Campus & Scenario Workstations ---")
+        await session.flush()
+
+        # 5. Seed the 2 Workstations (1 Student, 1 Researcher)
+        print("\n--- Seeding Student & Researcher Workstations (2 Devices) ---")
         now = datetime.now(timezone.utc)
-        ws_by_hostname: dict[str, Workstation] = {}
         for wdata in DEMO_WORKSTATIONS:
             ws_res = await session.execute(select(Workstation).where(Workstation.hostname == wdata["hostname"]))
             existing_ws = ws_res.scalar_one_or_none()
+            assigned_user = users_by_username.get(wdata["assigned_username"])
+            dept = depts_by_code.get(wdata["department_code"])
+            loc = locs_by_room.get(wdata["lab"])
+
             if existing_ws:
                 existing_ws.asset_tag = wdata["asset_tag"]
                 existing_ws.ip_address = wdata["ip_address"]
                 existing_ws.operating_system = wdata["operating_system"]
                 existing_ws.department = wdata["department"]
+                existing_ws.department_id = dept.id if dept else None
+                existing_ws.location_id = loc.id if loc else None
+                existing_ws.assigned_user_id = assigned_user.id if assigned_user else None
                 existing_ws.lab = wdata["lab"]
                 existing_ws.status = "ONLINE"
                 existing_ws.agent_version = wdata["agent_version"]
                 existing_ws.hardware_specs = wdata["hardware_specs"]
                 existing_ws.last_seen_at = now
-                ws_by_hostname[wdata["hostname"]] = existing_ws
-                print(f"  [*] Reset workstation:   {wdata['hostname']:<20} [{wdata['asset_tag']}] ({wdata['ip_address']})")
+                print(
+                    f"  [*] Reset workstation:   {wdata['hostname']:<18} [{wdata['asset_tag']}] "
+                    f"-> Assigned to: {wdata['assigned_username']}"
+                )
             else:
                 new_ws = Workstation(
                     id=uuid.uuid4(),
@@ -541,6 +290,9 @@ async def seed_demo_data() -> None:
                     ip_address=wdata["ip_address"],
                     operating_system=wdata["operating_system"],
                     department=wdata["department"],
+                    department_id=dept.id if dept else None,
+                    location_id=loc.id if loc else None,
+                    assigned_user_id=assigned_user.id if assigned_user else None,
                     lab=wdata["lab"],
                     status="ONLINE",
                     agent_version=wdata["agent_version"],
@@ -548,50 +300,22 @@ async def seed_demo_data() -> None:
                     last_seen_at=now,
                 )
                 session.add(new_ws)
-                ws_by_hostname[wdata["hostname"]] = new_ws
-                print(f"  [+] Created workstation: {wdata['hostname']:<20} [{wdata['asset_tag']}] ({wdata['ip_address']})")
-
-        await session.flush()
-
-        # 6. Seed Baseline Telemetry Stream Across All Workstations
-        print("\n--- Seeding Baseline Telemetry Metrics ---")
-        for idx, (_hostname, ws) in enumerate(ws_by_hostname.items()):
-            for step in range(3):
-                ts = now - timedelta(minutes=(15 - step * 4))
-                cpu_u = round(14.0 + (idx * 2.3) % 18.0 + step * 1.1, 1)
-                mem_u = round(36.0 + (idx * 3.1) % 24.0 + step * 0.8, 1)
-                session.add(
-                    TelemetryMetric(
-                        workstation_id=ws.id,
-                        timestamp=ts,
-                        schema_version="1.0.0",
-                        cpu_usage=cpu_u,
-                        memory_usage=mem_u,
-                        disk_read=float((1.2 + step * 0.3) * 1024**2),
-                        disk_write=float((1.8 + step * 0.4) * 1024**2),
-                        network_in=float(450 * 1024),
-                        network_out=float(320 * 1024),
-                        process_count=135 + idx * 3 + step,
-                    )
+                print(
+                    f"  [+] Created workstation: {wdata['hostname']:<18} [{wdata['asset_tag']}] "
+                    f"-> Assigned to: {wdata['assigned_username']}"
                 )
-
-        # 7. Seed Authentic Scenarios Through ML -> Policy -> SOAR Pipeline
-        print("\n--- Seeding Authentic Pipeline Events (ML + Policy + SOAR + Audit) ---")
-        await _seed_scenario_through_pipeline(session, "TECHNICAL_DEGRADATION", ws_by_hostname, offset_minutes=12)
-        await _seed_scenario_through_pipeline(session, "RESEARCHER_HPC_WORKLOAD", ws_by_hostname, offset_minutes=8)
-        await _seed_scenario_through_pipeline(session, "STUDENT_CYBER_THREAT", ws_by_hostname, offset_minutes=4)
 
         await session.commit()
 
-    print("\nDatabase Reseeding Complete!\n")
+    print("\nDatabase Reseeding Complete (2 Workstations • 0 Pre-Seeded Alerts/Incidents/Telemetry)!\n")
     print("=" * 65)
-    print("DEMO CREDENTIALS REFERENCE (Password: <Username>Secure2026!):")
+    print("CORE RBAC CREDENTIALS (Password: <Username>Secure2026!):")
     print("=" * 65)
-    for u in DEMO_USERS[:4]:
+    for u in DEMO_USERS:
         print(f"Role: {u['role_name']:<12} | Username: {u['username']:<11} | Password: {u['password']}")
     print("=" * 65)
 
 
 if __name__ == "__main__":
-    print("Secure-MaintAI — Reseeding Roles, Campus Fleet, Telemetry & Authentic Pipeline Records...")
+    print("Secure-MaintAI — Seeding Roles, Core Users & 2 Workstations (Student + Researcher)...")
     asyncio.run(seed_demo_data())

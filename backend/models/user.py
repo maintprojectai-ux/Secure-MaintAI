@@ -2,7 +2,7 @@
 Secure-MaintAI — User and Role Models.
 
 Per implementation plan Section 5: user_role and user_account tables.
-Per engineering rules Section 8: RBAC with ADMIN, IT_OPERATOR, RESEARCHER, STUDENT.
+Per engineering rules Section 8: RBAC with ADMIN, RESEARCHER, STUDENT.
 """
 
 import uuid

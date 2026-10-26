@@ -4,7 +4,7 @@ Secure-MaintAI — Policy Evaluation & SOAR Response API Endpoints.
 Per engineering rules:
 - Rule 16: ML Prediction -> Security Correlation -> Identity Context -> Policy Engine -> Authorized Action.
 - Rule 19: Surgical isolation with rollback and emergency kill switch.
-- Rule 20: Role-sensitive enforcement across Student, Researcher, and IT Operator profiles.
+- Rule 20: Role-sensitive enforcement across Student, Researcher, and Administrator profiles.
 """
 
 from typing import Annotated, Any
@@ -150,12 +150,12 @@ async def rollback_isolation(
     session: Annotated[AsyncSession, Depends(get_async_session)],
     operator: Annotated[
         UserAccount,
-        Depends(require_roles([RoleEnum.ADMIN, RoleEnum.IT_OPERATOR])),
+        Depends(require_roles([RoleEnum.ADMIN])),
     ],
 ) -> dict[str, Any]:
     """
     Rolls back surgical network isolation and restores workstation status to ONLINE.
-    Requires ADMIN or IT_OPERATOR role.
+    Requires ADMIN role.
     """
     soar = SOARService(session)
     restored = await soar.rollback_isolation(

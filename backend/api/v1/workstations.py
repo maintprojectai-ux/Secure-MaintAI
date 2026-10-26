@@ -64,21 +64,11 @@ def _attach_telemetry_metrics(
             m = metrics_map[w.id]
             item.cpu_usage = round(float(m.cpu_usage), 1)
             item.memory_usage = round(float(m.memory_usage), 1)
-            # Disk utilization percentage must not be confused with disk I/O throughput
-            item.disk_usage = round(float(hw_disk), 1) if hw_disk is not None else 38.0
-        elif w.status in (WorkstationStatus.CRITICAL, WorkstationStatus.ISOLATED):
-            item.cpu_usage = 94.0
-            item.memory_usage = 89.0
-            item.disk_usage = round(float(hw_disk), 1) if hw_disk is not None else 76.0
-        elif w.status == WorkstationStatus.WARNING:
-            item.cpu_usage = 78.0
-            item.memory_usage = 72.0
-            item.disk_usage = round(float(hw_disk), 1) if hw_disk is not None else 65.0
-        elif w.status == WorkstationStatus.ONLINE:
-            seed_val = abs(hash(str(w.id))) % 30
-            item.cpu_usage = round(20.0 + seed_val, 1)
-            item.memory_usage = round(45.0 + (seed_val * 1.2), 1)
-            item.disk_usage = round(float(hw_disk), 1) if hw_disk is not None else round(35.0 + (seed_val * 0.4), 1)
+            if hw_disk is not None:
+                item.disk_usage = round(float(hw_disk), 1)
+            else:
+                io_mb_s = (float(m.disk_read) + float(m.disk_write)) / (1024**2)
+                item.disk_usage = round(min(100.0, io_mb_s), 1)
         else:
             item.cpu_usage = 0.0
             item.memory_usage = 0.0
@@ -200,7 +190,7 @@ async def get_workstation_by_id(
     "/{workstation_id}",
     response_model=WorkstationResponse,
     summary="Update workstation metadata or status",
-    dependencies=[Depends(require_role(RoleEnum.ADMIN, RoleEnum.IT_OPERATOR))],
+    dependencies=[Depends(require_role(RoleEnum.ADMIN))],
 )
 async def update_workstation(
     workstation_id: UUID,
@@ -211,7 +201,7 @@ async def update_workstation(
 ) -> WorkstationResponse:
     """
     Update workstation metadata (department, lab) or operational status.
-    Requires ADMIN or IT_OPERATOR role.
+    Requires ADMIN role.
     """
     audit = AuditService(session)
 
