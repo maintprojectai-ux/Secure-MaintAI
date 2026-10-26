@@ -17,6 +17,7 @@ import {
   Shield,
   Info,
   RotateCw,
+  Zap,
 } from "lucide-react";
 import { DonutChart, DonutSegment } from "@/components/charts/DonutChart";
 import {
@@ -38,6 +39,72 @@ function formatRelativeTime(date?: string | Date): string {
   const diffHours = Math.floor(diffMin / 60);
   if (diffHours < 24) return `${diffHours}h ago`;
   return `${Math.floor(diffHours / 24)}d ago`;
+}
+
+function formatAlertSourceType(rawType?: string): { label: string; color: string } {
+  const norm = (rawType || "TECHNICAL_ANOMALY").toUpperCase();
+  if (norm.includes("CYBER") || norm.includes("MALWARE") || norm.includes("ATTACK")) {
+    return {
+      label: "Cyber Threat",
+      color: "bg-purple-500/15 text-purple-300 border-purple-500/30",
+    };
+  }
+  if (norm.includes("MAINT") || norm.includes("PREDICTIVE")) {
+    return {
+      label: "Predictive Maint",
+      color: "bg-indigo-500/15 text-indigo-300 border-indigo-500/30",
+    };
+  }
+  if (norm.includes("HUMAN") || norm.includes("APPROVAL")) {
+    return {
+      label: "Human Review",
+      color: "bg-orange-500/15 text-orange-300 border-orange-500/30",
+    };
+  }
+  return {
+    label: "Technical",
+    color: "bg-blue-500/15 text-blue-300 border-blue-500/30",
+  };
+}
+
+function formatPlaybook(rawPlaybook?: string): { label: string; color: string } {
+  const pb = (rawPlaybook || "").toUpperCase();
+  if (pb.includes("03") || pb.includes("SURGICAL") || pb.includes("ISOLATION")) {
+    return {
+      label: "Surgical Isolation (PB-03)",
+      color: "bg-purple-950/40 text-purple-300 border-purple-500/40",
+    };
+  }
+  if (pb.includes("02") || pb.includes("CONTAINMENT") || pb.includes("PROCESS")) {
+    return {
+      label: "Process Containment (PB-02)",
+      color: "bg-rose-950/40 text-rose-300 border-rose-500/40",
+    };
+  }
+  if (pb.includes("04") || pb.includes("MAINTENANCE")) {
+    return {
+      label: "Maintenance Advisory (PB-04)",
+      color: "bg-blue-950/40 text-blue-300 border-blue-500/40",
+    };
+  }
+  if (pb.includes("01") || pb.includes("ALERT_ONLY")) {
+    return {
+      label: "Alert Notification (PB-01)",
+      color: "bg-slate-900/60 text-slate-300 border-slate-700/50",
+    };
+  }
+  if (pb) {
+    const clean = pb.replace(/^PLAYBOOK_\d+_?/, "").replace(/_/g, " ").toLowerCase();
+    const formatted = clean.charAt(0).toUpperCase() + clean.slice(1);
+    return {
+      label: formatted,
+      color: "bg-cyan-950/40 text-cyan-300 border-cyan-500/40",
+    };
+  }
+  return {
+    label: "Autonomous Triage",
+    color: "bg-emerald-950/40 text-emerald-300 border-emerald-500/40",
+  };
 }
 
 export default function DashboardPage() {
@@ -180,51 +247,71 @@ export default function DashboardPage() {
   const isolatedPct = total > 0 ? ((isolatedCount / total) * 100).toFixed(1) : "0.0";
   const offlinePct = total > 0 ? ((offlineCount / total) * 100).toFixed(1) : "0.0";
 
-  // Top KPI metrics
+  // Alerts Summary strictly matching canonical AlertSeverity values (CRITICAL, HIGH, MEDIUM, LOW)
+  const safeAlerts = Array.isArray(alerts) ? alerts : [];
+  const criticalAlertsCount = safeAlerts.filter(
+    (a) => (a.severity || "").toUpperCase() === "CRITICAL"
+  ).length;
+  const highAlertsCount = safeAlerts.filter(
+    (a) => (a.severity || "").toUpperCase() === "HIGH"
+  ).length;
+  const mediumAlertsCount = safeAlerts.filter(
+    (a) => (a.severity || "").toUpperCase() === "MEDIUM"
+  ).length;
+  const lowAlertsCount = safeAlerts.filter(
+    (a) => (a.severity || "").toUpperCase() === "LOW"
+  ).length;
+  const totalAlertsCount = safeAlerts.length;
+
+  const securityPosturePct = Math.round(
+    kpi.system_resilience_score ?? kpi.security_posture ?? 100
+  );
+
+  // Top KPI metrics - Designed so counts add up logically and match actual incident/isolation state
   const kpiCards = [
     {
-      title: "Total Devices",
+      title: "Total Fleet",
       value: String(total),
-      delta: `${workstations.length} visible in fleet`,
+      delta: `${total} enrolled workstations`,
       deltaColor: "text-blue-400",
       icon: <Monitor className="w-5 h-5 text-blue-400" />,
       iconBg: "bg-blue-600/20 border-blue-500/30",
       href: "/devices",
     },
     {
-      title: "Online Devices",
+      title: "Online & Healthy",
       value: String(healthyCount),
-      delta: `${healthyPct}% of fleet`,
+      delta: `${healthyPct}% normal operations`,
       deltaColor: "text-emerald-400",
       icon: <Activity className="w-5 h-5 text-emerald-400" />,
       iconBg: "bg-emerald-600/20 border-emerald-500/30",
       href: "/devices?status=ONLINE",
     },
     {
-      title: "Warning Devices",
-      value: String(warningCount),
-      delta: `${warningPct}% of fleet`,
-      deltaColor: "text-amber-400",
-      icon: <AlertTriangle className="w-5 h-5 text-amber-400" />,
-      iconBg: "bg-amber-600/20 border-amber-500/30",
-      href: "/devices?status=WARNING",
+      title: "Surgically Isolated",
+      value: String(isolatedCount),
+      delta: isolatedCount > 0 ? "Contained by automated SOAR" : "0 contained endpoints",
+      deltaColor: isolatedCount > 0 ? "text-purple-400" : "text-slate-400",
+      icon: <ShieldCheck className="w-5 h-5 text-purple-400" />,
+      iconBg: "bg-purple-600/20 border-purple-500/30",
+      href: "/devices?status=ISOLATED",
     },
     {
-      title: "Critical Devices",
-      value: String(criticalCount),
-      delta: `${criticalPct}% of fleet`,
-      deltaColor: "text-rose-400",
+      title: "Critical Alerts",
+      value: String(criticalAlertsCount > 0 ? criticalAlertsCount : (kpi.active_alerts ?? 0)),
+      delta: criticalAlertsCount > 0 ? `${criticalAlertsCount} critical signals active` : "0 critical alerts",
+      deltaColor: criticalAlertsCount > 0 ? "text-rose-400" : "text-emerald-400",
       icon: <AlertCircle className="w-5 h-5 text-rose-400" />,
       iconBg: "bg-rose-600/20 border-rose-500/30",
-      href: "/devices?status=CRITICAL",
+      href: "/alerts?severity=CRITICAL",
     },
     {
-      title: "Active Threats",
-      value: String(threatCount),
-      delta: `${isolatedCount} isolated • ${Math.round(kpi.system_resilience_score ?? kpi.security_posture ?? 100)}% posture`,
-      deltaColor: "text-purple-400",
-      icon: <ShieldAlert className="w-5 h-5 text-purple-400" />,
-      iconBg: "bg-purple-600/20 border-purple-500/30",
+      title: "Resilience Posture",
+      value: `${securityPosturePct}%`,
+      delta: securityPosturePct >= 90 ? "Optimal fleet posture" : "Impacted by active threats",
+      deltaColor: securityPosturePct >= 90 ? "text-emerald-400" : "text-amber-400",
+      icon: <Shield className="w-5 h-5 text-cyan-400" />,
+      iconBg: "bg-cyan-600/20 border-cyan-500/30",
       href: "/alerts",
     },
   ];
@@ -281,22 +368,7 @@ export default function DashboardPage() {
     { label: "Offline", value: offlineCount, color: "#64748b" },
   ];
 
-  // Alerts Summary rows strictly matching the 4 canonical AlertSeverity values (CRITICAL, HIGH, MEDIUM, LOW)
-  const safeAlerts = Array.isArray(alerts) ? alerts : [];
-  const criticalAlertsCount = safeAlerts.filter(
-    (a) => (a.severity || "").toUpperCase() === "CRITICAL"
-  ).length;
-  const highAlertsCount = safeAlerts.filter(
-    (a) => (a.severity || "").toUpperCase() === "HIGH"
-  ).length;
-  const mediumAlertsCount = safeAlerts.filter(
-    (a) => (a.severity || "").toUpperCase() === "MEDIUM"
-  ).length;
-  const lowAlertsCount = safeAlerts.filter(
-    (a) => (a.severity || "").toUpperCase() === "LOW"
-  ).length;
-  const totalAlertsCount = safeAlerts.length;
-
+  // Alerts Summary rows for the Severity Widget
   const alertsSummary = [
     {
       title: "Critical",
@@ -328,12 +400,12 @@ export default function DashboardPage() {
     },
   ];
 
-  // Recent Alerts list derived from live alerts (preserving canonical severities)
+  // Recent Alerts list derived from live alerts (preserving canonical severities, source type, and SOAR playbook)
   const recentAlerts = useMemo(() => {
     if (!safeAlerts || safeAlerts.length === 0) {
       return [];
     }
-    return safeAlerts.slice(0, 5).map((a: any) => {
+    return safeAlerts.slice(0, 6).map((a: any) => {
       const sev = (a.severity || "MEDIUM").toUpperCase();
       const severity =
         sev === "CRITICAL"
@@ -352,6 +424,11 @@ export default function DashboardPage() {
               ? "bg-amber-500/15 text-amber-300 border-amber-500/30"
               : "bg-cyan-500/15 text-cyan-400 border-cyan-500/30";
 
+      const sourceInfo = formatAlertSourceType(a.source_type || a.source);
+      const playbookInfo = formatPlaybook(
+        a.playbook_initiated || a.playbook_executed || a.playbook
+      );
+
       const matchedWs = workstations.find(
         (w) => w.id === a.workstation_id || w.hostname === a.workstation_id
       );
@@ -362,6 +439,10 @@ export default function DashboardPage() {
         id: String(a.id),
         severity,
         severityColor,
+        sourceLabel: sourceInfo.label,
+        sourceColor: sourceInfo.color,
+        playbookLabel: playbookInfo.label,
+        playbookColor: playbookInfo.color,
         title: a.title || "System Alert",
         description: a.description || "Alert registered in monitoring stream",
         deviceName,
@@ -433,28 +514,8 @@ export default function DashboardPage() {
   const liveAvgCpu = Math.round(kpi.average_cpu || 0);
   const liveAvgRam = Math.round(kpi.average_ram || 0);
   const liveAvgDisk = Math.round(kpi.average_disk || 0);
-
-  // Security & SOAR Containment Summary values derived from live security events & workstations
-  const safeEvents = Array.isArray(securityEvents) ? securityEvents : [];
-
-  const malwareCount = safeEvents.filter(
-    (e) =>
-      (e.event_type || "").toUpperCase().includes("MALWARE") ||
-      (e.event_type || "").toUpperCase().includes("CRYPTO") ||
-      (e.description || "").toLowerCase().includes("cryptojack")
-  ).length;
-
-  const unauthorizedAccessCount = safeEvents.filter(
-    (e) =>
-      (e.event_type || "").toUpperCase().includes("PORT") ||
-      (e.event_type || "").toUpperCase().includes("ACCESS") ||
-      (e.event_type || "").toUpperCase().includes("AUTH") ||
-      (e.event_type || "").toUpperCase().includes("PRIVILEGE")
-  ).length;
-
-  const securityPosturePct = Math.round(
-    kpi.system_resilience_score ?? kpi.security_posture ?? 100
-  );
+  const cpuGaugeStroke = liveAvgCpu >= 80 ? "#ef4444" : liveAvgCpu >= 60 ? "#f59e0b" : "#3b82f6";
+  const cpuGaugeTextClass = liveAvgCpu >= 80 ? "text-rose-400" : liveAvgCpu >= 60 ? "text-amber-400" : "text-blue-400";
 
   // Shimmer loading skeleton screen
   if (isLoadingInitial && !mounted) {
@@ -467,21 +528,18 @@ export default function DashboardPage() {
           ))}
         </div>
 
-        {/* Row 2: Middle Section Skeleton */}
+        {/* Section 1: Device Infrastructure Skeleton */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          <div className="lg:col-span-5 glass-card p-5 h-64 border-slate-800 bg-[#091124]/90 rounded-2xl" />
           <div className="lg:col-span-4 glass-card p-5 h-64 border-slate-800 bg-[#091124]/90 rounded-2xl" />
-          <div className="lg:col-span-3 glass-card p-5 h-64 border-slate-800 bg-[#091124]/90 rounded-2xl" />
+          <div className="lg:col-span-4 glass-card p-5 h-64 border-slate-800 bg-[#091124]/90 rounded-2xl" />
+          <div className="lg:col-span-4 glass-card p-5 h-64 border-slate-800 bg-[#091124]/90 rounded-2xl" />
         </div>
 
-        {/* Row 3: Recent Alerts Skeleton */}
+        {/* Section 2: Security & SOAR Alerts Skeleton */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          <div className="lg:col-span-7 glass-card p-5 h-72 border-slate-800 bg-[#091124]/90 rounded-2xl" />
-          <div className="lg:col-span-5 glass-card p-5 h-72 border-slate-800 bg-[#091124]/90 rounded-2xl" />
+          <div className="lg:col-span-4 glass-card p-5 h-72 border-slate-800 bg-[#091124]/90 rounded-2xl" />
+          <div className="lg:col-span-8 glass-card p-5 h-72 border-slate-800 bg-[#091124]/90 rounded-2xl" />
         </div>
-
-        {/* Row 4: Threat Summary Skeleton */}
-        <div className="glass-card p-5 h-48 border-slate-800 bg-[#091124]/90 rounded-2xl" />
       </div>
     );
   }
@@ -542,449 +600,432 @@ export default function DashboardPage() {
         ))}
       </div>
 
-      {/* Row 2: 3-Column Middle Section (System Overview, Devices Status Overview, Alerts Summary) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Col 1: System Overview (Radial Progress Gauges) */}
-        <div className="lg:col-span-5 glass-card p-5 border-slate-800/80 bg-[#091124]/90 flex flex-col justify-between shadow-lg">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
-            <div className="flex items-center gap-2">
-              <Monitor className="w-4 h-4 text-blue-400" />
-              <h2 className="text-sm font-bold text-white tracking-tight">System Overview</h2>
-            </div>
-            <span className="text-[10px] font-mono px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-400">
-              Live Fleet Average
-            </span>
-          </div>
-
-          <div className="grid grid-cols-3 gap-2 sm:gap-4 py-4 text-center">
-            {/* CPU Gauge */}
-            <div className="flex flex-col items-center">
-              <span className="text-xs font-medium text-slate-400 mb-2">CPU Usage</span>
-              <div className="relative w-20 h-20 sm:w-24 sm:h-24 flex items-center justify-center">
-                <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
-                  <circle cx="50" cy="50" r="40" stroke="#1e293b" strokeWidth="8" fill="none" />
-                  <circle
-                    cx="50"
-                    cy="50"
-                    r="40"
-                    stroke="#3b82f6"
-                    strokeWidth="8"
-                    strokeDasharray="251.32"
-                    strokeDashoffset={251.32 * (1 - liveAvgCpu / 100)}
-                    strokeLinecap="round"
-                    fill="none"
-                  />
-                </svg>
-                <div className="absolute inset-0 flex flex-col items-center justify-center">
-                  <span className="text-sm sm:text-base font-bold text-white">
-                    {liveAvgCpu}%
-                  </span>
-                  <span className="text-[9px] text-slate-400">Average</span>
-                </div>
-              </div>
-              <span className="mt-2.5 text-[11px] text-blue-400 font-medium">
-                {liveAvgCpu >= 80 ? "High Load" : liveAvgCpu >= 60 ? "Moderate" : "Normal"}
-              </span>
-              <span className="text-[9px] text-slate-500">Fleet telemetry</span>
-            </div>
-
-            {/* Memory Gauge */}
-            <div className="flex flex-col items-center">
-              <span className="text-xs font-medium text-slate-400 mb-2">Memory Usage</span>
-              <div className="relative w-20 h-20 sm:w-24 sm:h-24 flex items-center justify-center">
-                <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
-                  <circle cx="50" cy="50" r="40" stroke="#1e293b" strokeWidth="8" fill="none" />
-                  <circle
-                    cx="50"
-                    cy="50"
-                    r="40"
-                    stroke="#10b981"
-                    strokeWidth="8"
-                    strokeDasharray="251.32"
-                    strokeDashoffset={251.32 * (1 - liveAvgRam / 100)}
-                    strokeLinecap="round"
-                    fill="none"
-                  />
-                </svg>
-                <div className="absolute inset-0 flex flex-col items-center justify-center">
-                  <span className="text-sm sm:text-base font-bold text-white">
-                    {liveAvgRam}%
-                  </span>
-                  <span className="text-[9px] text-slate-400">Average</span>
-                </div>
-              </div>
-              <span className="mt-2.5 text-[11px] text-emerald-400 font-medium">
-                {liveAvgRam >= 85 ? "High Load" : liveAvgRam >= 70 ? "Elevated" : "Healthy"}
-              </span>
-              <span className="text-[9px] text-slate-500">Fleet telemetry</span>
-            </div>
-
-            {/* Disk Gauge */}
-            <div className="flex flex-col items-center">
-              <span className="text-xs font-medium text-slate-400 mb-2">Disk Usage</span>
-              <div className="relative w-20 h-20 sm:w-24 sm:h-24 flex items-center justify-center">
-                <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
-                  <circle cx="50" cy="50" r="40" stroke="#1e293b" strokeWidth="8" fill="none" />
-                  <circle
-                    cx="50"
-                    cy="50"
-                    r="40"
-                    stroke="#8b5cf6"
-                    strokeWidth="8"
-                    strokeDasharray="251.32"
-                    strokeDashoffset={251.32 * (1 - liveAvgDisk / 100)}
-                    strokeLinecap="round"
-                    fill="none"
-                  />
-                </svg>
-                <div className="absolute inset-0 flex flex-col items-center justify-center">
-                  <span className="text-sm sm:text-base font-bold text-white">
-                    {liveAvgDisk}%
-                  </span>
-                  <span className="text-[9px] text-slate-400">Average</span>
-                </div>
-              </div>
-              <span className="mt-2.5 text-[11px] text-purple-400 font-medium">
-                {liveAvgDisk >= 85 ? "Low Space" : liveAvgDisk >= 70 ? "Moderate" : "Ample Space"}
-              </span>
-              <span className="text-[9px] text-slate-500">Fleet telemetry</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Col 2: Devices Status Overview (Donut Chart & Legend) */}
-        <div className="lg:col-span-4 glass-card p-5 border-slate-800/80 bg-[#091124]/90 flex flex-col justify-between shadow-lg">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
-            <div className="flex items-center gap-2">
-              <PieChart className="w-4 h-4 text-emerald-400" />
-              <h2 className="text-sm font-bold text-white tracking-tight">Devices Status Overview</h2>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between gap-4 py-3">
-            {/* Donut graphic using reusable DonutChart */}
-            <div className="flex items-center justify-center flex-shrink-0">
-              <DonutChart
-                data={deviceStatusDonutData}
-                size={135}
-                strokeWidth={14}
-                centerLabel={String(total)}
-                centerSub="Total"
-                showLegend={false}
-              />
-            </div>
-
-            {/* Legend Breakdown */}
-            <div className="space-y-1.5 flex-1 text-xs">
-              {deviceStatus.map((item, idx) => (
-                <Link
-                  key={idx}
-                  href={item.href}
-                  className="flex items-center justify-between hover:bg-slate-800/40 p-1 rounded transition-colors group cursor-pointer"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className={`w-2.5 h-2.5 rounded-sm ${item.bg}`} />
-                    <span className="text-slate-300 font-medium group-hover:text-white">
-                      {item.label}
-                    </span>
-                  </div>
-                  <span className="text-slate-400 font-mono text-[11px] group-hover:text-slate-200">
-                    {item.count} ({item.percent})
-                  </span>
-                </Link>
-              ))}
-            </div>
-          </div>
-
-          <div className="pt-2.5 border-t border-slate-800/80 flex items-center gap-1.5 text-[10px] text-slate-400">
-            <Clock className="w-3 h-3 text-slate-500" />
-            <span>Updated {formatRelativeTime(lastUpdatedTime)}</span>
-          </div>
-        </div>
-
-        {/* Col 3: Alerts Summary Card (4 Canonical Severities: Critical, High, Medium, Low) */}
-        <div className="lg:col-span-3 glass-card p-5 border-slate-800/80 bg-[#091124]/90 flex flex-col justify-between shadow-lg">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
-            <h2 className="text-sm font-bold text-white tracking-tight">Alerts by Severity</h2>
-            <Link href="/alerts" className="text-xs text-blue-400 hover:text-blue-300 font-medium">
-              View all ({totalAlertsCount})
-            </Link>
-          </div>
-
-          <div className="divide-y divide-slate-800/60 my-1">
-            {alertsSummary.map((alert, idx) => (
-              <Link
-                key={idx}
-                href={alert.href}
-                className="py-2.5 flex items-center justify-between hover:bg-slate-800/30 px-1 rounded-lg transition-colors group"
-              >
-                <div className="flex items-center gap-2.5">
-                  <span className="flex-shrink-0">{alert.icon}</span>
-                  <span className="text-xs font-medium text-slate-200 group-hover:text-white transition-colors">
-                    {alert.title}
-                  </span>
-                </div>
-                <div className="flex items-center gap-1 text-xs font-bold text-white font-mono">
-                  <span>{alert.count}</span>
-                  <ChevronRight className="w-3.5 h-3.5 text-slate-500 group-hover:text-slate-300 transition-colors" />
-                </div>
-              </Link>
-            ))}
-          </div>
-
-          <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px]">
-            <span className="text-slate-400">Total Registered</span>
-            <Link
-              href="/alerts"
-              className="font-mono font-bold text-cyan-400 hover:text-cyan-300 transition-colors"
-            >
-              {totalAlertsCount} Alerts →
-            </Link>
-          </div>
-        </div>
-      </div>
-
-      {/* Row 3: Recent Alerts Table & Top Devices by Resource Usage */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left: Recent Alerts Table */}
-        <div className="lg:col-span-7 glass-card p-5 border-slate-800/80 bg-[#091124]/90 shadow-lg flex flex-col justify-between">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center">
-                <AlertCircle className="w-3.5 h-3.5" />
-              </div>
-              <h2 className="text-sm font-bold text-white tracking-tight">Recent Alerts</h2>
-            </div>
-            <Link href="/alerts" className="text-xs text-blue-400 hover:text-blue-300 font-medium">
-              View all ({alerts.length})
-            </Link>
-          </div>
-
-          <div className="overflow-x-auto my-2">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="text-[11px] text-slate-400 border-b border-slate-800/80 font-medium">
-                  <th className="py-2.5 px-2 font-normal">Severity</th>
-                  <th className="py-2.5 px-2 font-normal">Alert</th>
-                  <th className="py-2.5 px-2 font-normal">Device</th>
-                  <th className="py-2.5 px-2 font-normal">Time</th>
-                  <th className="py-2.5 px-1 font-normal text-right"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/60 text-xs">
-                {recentAlerts.length > 0 ? (
-                  recentAlerts.map((alert) => (
-                    <tr key={alert.id} className="hover:bg-slate-800/30 transition-colors">
-                      <td className="py-3 px-2 whitespace-nowrap">
-                        <span
-                          className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${alert.severityColor}`}
-                        >
-                          {alert.severity}
-                        </span>
-                      </td>
-                      <td className="py-3 px-2">
-                        <Link
-                          href="/alerts"
-                          className="font-semibold text-white tracking-tight hover:text-blue-400 transition-colors"
-                        >
-                          {alert.title}
-                        </Link>
-                        <div className="text-[11px] text-slate-400 line-clamp-1">
-                          {alert.description}
-                        </div>
-                      </td>
-                      <td className="py-3 px-2 font-mono text-[11px] text-slate-300 whitespace-nowrap">
-                        <Link
-                          href={`/devices/${alert.deviceId}`}
-                          className="hover:text-blue-400 hover:underline transition-colors"
-                        >
-                          {alert.deviceName}
-                        </Link>
-                      </td>
-                      <td className="py-3 px-2 text-[11px] text-slate-400 whitespace-nowrap">
-                        {alert.time}
-                      </td>
-                      <td className="py-3 px-1 text-right">
-                        <Link
-                          href="/alerts"
-                          className="p-1 rounded text-slate-500 hover:text-slate-300 transition-colors inline-block"
-                          title="View alert"
-                        >
-                          <MoreVertical className="w-3.5 h-3.5" />
-                        </Link>
-                      </td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={5} className="py-8 text-center text-xs text-slate-400">
-                      No active alerts registered in database. All monitored endpoints operating normally.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Right: Top Devices by Resource Usage */}
-        <div className="lg:col-span-5 glass-card p-5 border-slate-800/80 bg-[#091124]/90 shadow-lg flex flex-col justify-between">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
-            <div className="flex items-center gap-2">
-              <BarChart2 className="w-4 h-4 text-emerald-400" />
-              <h2 className="text-sm font-bold text-white tracking-tight">Top Devices by Resource Usage</h2>
-            </div>
-            <select
-              value={selectedResource}
-              onChange={(e) => setSelectedResource(e.target.value as "CPU" | "Memory" | "Disk")}
-              className="text-[11px] bg-slate-900 border border-slate-700/80 text-slate-300 rounded-lg px-2.5 py-1 focus:outline-none focus:border-blue-500 cursor-pointer"
-            >
-              <option value="CPU">CPU</option>
-              <option value="Memory">Memory</option>
-              <option value="Disk">Disk</option>
-            </select>
-          </div>
-
-          <div className="overflow-x-auto my-2">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="text-[11px] text-slate-400 border-b border-slate-800/80 font-medium">
-                  <th className="py-2.5 px-2 font-normal">Device</th>
-                  <th className="py-2.5 px-2 font-normal">{selectedResource} Usage</th>
-                  <th className="py-2.5 px-2 font-normal">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/60">
-                {currentTopDevices.length > 0 ? (
-                  currentTopDevices.map((device) => (
-                    <tr key={device.id} className="hover:bg-slate-800/30 transition-colors">
-                      <td className="py-3 px-2 font-mono text-[11px] text-white whitespace-nowrap">
-                        <Link
-                          href={`/devices/${device.id}`}
-                          className="flex items-center gap-2 hover:text-blue-400 hover:underline transition-colors"
-                        >
-                          <Monitor className="w-3.5 h-3.5 text-slate-400" />
-                          <span>{device.name}</span>
-                        </Link>
-                      </td>
-                      <td className="py-3 px-2">
-                        <div className="flex items-center gap-3">
-                          <div className="w-24 sm:w-32 h-2 bg-slate-800 rounded-full overflow-hidden">
-                            <div
-                              className={`h-full rounded-full ${device.barColor}`}
-                              style={{ width: `${Math.min(100, Math.max(5, device.usage))}%` }}
-                            />
-                          </div>
-                          <span className="text-[11px] font-mono text-slate-300 w-8">
-                            {device.usage}%
-                          </span>
-                        </div>
-                      </td>
-                      <td className="py-3 px-2 whitespace-nowrap">
-                        <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-300">
-                          <span className={`w-1.5 h-1.5 rounded-full ${device.statusDot}`} />
-                          {device.status}
-                        </span>
-                      </td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={3} className="py-8 text-center text-xs text-slate-400">
-                      No enrolled workstations reporting telemetry.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      {/* Row 4: Security & SOAR Containment Summary (Bottom Full-Width Card) */}
-      <div className="glass-card p-5 border-slate-800/80 bg-[#091124]/90 shadow-lg">
-        <div className="flex flex-wrap items-center justify-between gap-2 pb-4 border-b border-slate-800/80">
+      {/* ========================================================================= */}
+      {/* SECTION 1: Device Infrastructure & Fleet Telemetry */}
+      {/* ========================================================================= */}
+      <div className="space-y-3 pt-1">
+        <div className="flex items-center justify-between pb-2 border-b border-slate-800/60">
           <div className="flex items-center gap-2">
-            <ShieldCheck className="w-4 h-4 text-blue-400" />
+            <Monitor className="w-4 h-4 text-blue-400" />
             <h2 className="text-sm font-bold text-white tracking-tight">
-              Security &amp; SOAR Containment Summary
+              Device Infrastructure &amp; Fleet Telemetry
+            </h2>
+          </div>
+          <Link
+            href="/devices"
+            className="text-xs text-blue-400 hover:text-blue-300 font-medium flex items-center gap-1 group"
+          >
+            <span>Fleet Inventory ({total})</span>
+            <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+          </Link>
+        </div>
+
+        {/* 3-Column Dedicated Device Grid: Telemetry Gauges | Status Distribution | Top Usage */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* Col 1: System Telemetry Gauges */}
+          <div className="lg:col-span-4 glass-card p-5 border-slate-800/80 bg-[#091124]/90 flex flex-col justify-between shadow-lg">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
+              <div className="flex items-center gap-2">
+                <Activity className="w-4 h-4 text-blue-400" />
+                <h3 className="text-xs font-bold text-white tracking-tight">Fleet Telemetry Gauges</h3>
+              </div>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-400">
+                Live Average
+              </span>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 py-4 text-center">
+              {/* CPU Gauge */}
+              <div className="flex flex-col items-center">
+                <span className="text-[11px] font-medium text-slate-400 mb-2">CPU</span>
+                <div className="relative w-16 h-16 sm:w-20 sm:h-20 flex items-center justify-center">
+                  <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
+                    <circle cx="50" cy="50" r="40" stroke="#1e293b" strokeWidth="8" fill="none" />
+                    <circle
+                      cx="50"
+                      cy="50"
+                      r="40"
+                      stroke={cpuGaugeStroke}
+                      strokeWidth="8"
+                      strokeDasharray="251.32"
+                      strokeDashoffset={251.32 * (1 - liveAvgCpu / 100)}
+                      strokeLinecap="round"
+                      fill="none"
+                    />
+                  </svg>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    <span className="text-xs sm:text-sm font-bold text-white">{liveAvgCpu}%</span>
+                  </div>
+                </div>
+                <span className={`mt-2 text-[10px] font-medium ${cpuGaugeTextClass}`}>
+                  {liveAvgCpu >= 80 ? "High Load" : liveAvgCpu >= 60 ? "Moderate" : "Normal"}
+                </span>
+              </div>
+
+              {/* Memory Gauge */}
+              <div className="flex flex-col items-center">
+                <span className="text-[11px] font-medium text-slate-400 mb-2">Memory</span>
+                <div className="relative w-16 h-16 sm:w-20 sm:h-20 flex items-center justify-center">
+                  <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
+                    <circle cx="50" cy="50" r="40" stroke="#1e293b" strokeWidth="8" fill="none" />
+                    <circle
+                      cx="50"
+                      cy="50"
+                      r="40"
+                      stroke="#10b981"
+                      strokeWidth="8"
+                      strokeDasharray="251.32"
+                      strokeDashoffset={251.32 * (1 - liveAvgRam / 100)}
+                      strokeLinecap="round"
+                      fill="none"
+                    />
+                  </svg>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    <span className="text-xs sm:text-sm font-bold text-white">{liveAvgRam}%</span>
+                  </div>
+                </div>
+                <span className="mt-2 text-[10px] font-medium text-emerald-400">
+                  {liveAvgRam >= 85 ? "High Load" : liveAvgRam >= 70 ? "Elevated" : "Healthy"}
+                </span>
+              </div>
+
+              {/* Disk Gauge */}
+              <div className="flex flex-col items-center">
+                <span className="text-[11px] font-medium text-slate-400 mb-2">Disk</span>
+                <div className="relative w-16 h-16 sm:w-20 sm:h-20 flex items-center justify-center">
+                  <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
+                    <circle cx="50" cy="50" r="40" stroke="#1e293b" strokeWidth="8" fill="none" />
+                    <circle
+                      cx="50"
+                      cy="50"
+                      r="40"
+                      stroke="#8b5cf6"
+                      strokeWidth="8"
+                      strokeDasharray="251.32"
+                      strokeDashoffset={251.32 * (1 - liveAvgDisk / 100)}
+                      strokeLinecap="round"
+                      fill="none"
+                    />
+                  </svg>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    <span className="text-xs sm:text-sm font-bold text-white">{liveAvgDisk}%</span>
+                  </div>
+                </div>
+                <span className="mt-2 text-[10px] font-medium text-purple-400">
+                  {liveAvgDisk >= 85 ? "Low Space" : liveAvgDisk >= 70 ? "Moderate" : "Healthy Space"}
+                </span>
+              </div>
+            </div>
+
+            <div className="pt-2.5 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
+              <span>Telemetry Snapshot</span>
+              <span className="font-mono text-slate-300">{workstations.length} Active Nodes</span>
+            </div>
+          </div>
+
+          {/* Col 2: Devices Status Overview (Donut Chart & Active Legend) */}
+          <div className="lg:col-span-4 glass-card p-5 border-slate-800/80 bg-[#091124]/90 flex flex-col justify-between shadow-lg">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
+              <div className="flex items-center gap-2">
+                <PieChart className="w-4 h-4 text-emerald-400" />
+                <h3 className="text-xs font-bold text-white tracking-tight">Devices Status Distribution</h3>
+              </div>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-400">
+                {total} Total
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between gap-4 py-3">
+              <div className="flex items-center justify-center flex-shrink-0">
+                <DonutChart
+                  data={deviceStatusDonutData}
+                  size={120}
+                  strokeWidth={12}
+                  centerLabel={String(total)}
+                  centerSub="Total"
+                  showLegend={false}
+                />
+              </div>
+
+              {/* Legend Breakdown: Only display active states to prevent visual clutter */}
+              <div className="space-y-1.5 flex-1 text-xs">
+                {deviceStatus.filter((item) => item.count > 0).map((item, idx) => (
+                  <Link
+                    key={idx}
+                    href={item.href}
+                    className="flex items-center justify-between hover:bg-slate-800/40 p-1.5 rounded-lg transition-colors group cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className={`w-2 h-2 rounded-full ${item.bg}`} />
+                      <span className="text-slate-300 font-medium group-hover:text-white">
+                        {item.label}
+                      </span>
+                    </div>
+                    <span className="text-slate-300 font-mono text-[11px] group-hover:text-white font-semibold">
+                      {item.count} ({item.percent})
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+
+            <div className="pt-2.5 border-t border-slate-800/80 flex items-center justify-between text-[10px] text-slate-400">
+              <div className="flex items-center gap-1">
+                <Clock className="w-3 h-3 text-slate-500" />
+                <span>Updated {formatRelativeTime(lastUpdatedTime)}</span>
+              </div>
+              <Link href="/devices" className="text-blue-400 hover:text-blue-300 font-medium">
+                Manage Devices →
+              </Link>
+            </div>
+          </div>
+
+          {/* Col 3: Top Devices by Resource Usage */}
+          <div className="lg:col-span-4 glass-card p-5 border-slate-800/80 bg-[#091124]/90 shadow-lg flex flex-col justify-between">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
+              <div className="flex items-center gap-2">
+                <BarChart2 className="w-4 h-4 text-emerald-400" />
+                <h3 className="text-xs font-bold text-white tracking-tight">Top Workstations by Resource</h3>
+              </div>
+              <select
+                value={selectedResource}
+                onChange={(e) => setSelectedResource(e.target.value as "CPU" | "Memory" | "Disk")}
+                className="text-[11px] bg-slate-900 border border-slate-700/80 text-slate-300 rounded-lg px-2 py-0.5 focus:outline-none focus:border-blue-500 cursor-pointer"
+              >
+                <option value="CPU">CPU</option>
+                <option value="Memory">Memory</option>
+                <option value="Disk">Disk</option>
+              </select>
+            </div>
+
+            <div className="overflow-x-auto my-2">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="text-[11px] text-slate-400 border-b border-slate-800/80 font-medium">
+                    <th className="py-2 px-1 font-normal">Device</th>
+                    <th className="py-2 px-1 font-normal">{selectedResource}</th>
+                    <th className="py-2 px-1 font-normal">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  {currentTopDevices.length > 0 ? (
+                    currentTopDevices.map((device) => (
+                      <tr key={device.id} className="hover:bg-slate-800/30 transition-colors">
+                        <td className="py-2 px-1 font-mono text-[11px] text-white whitespace-nowrap">
+                          <Link
+                            href={`/devices/${device.id}`}
+                            className="flex items-center gap-1.5 hover:text-blue-400 hover:underline transition-colors"
+                          >
+                            <Monitor className="w-3.5 h-3.5 text-slate-400" />
+                            <span>{device.name}</span>
+                          </Link>
+                        </td>
+                        <td className="py-2 px-1">
+                          <div className="flex items-center gap-2">
+                            <div className="w-16 sm:w-20 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full rounded-full ${device.barColor}`}
+                                style={{ width: `${Math.min(100, Math.max(5, device.usage))}%` }}
+                              />
+                            </div>
+                            <span className="text-[10px] font-mono text-slate-300">{device.usage}%</span>
+                          </div>
+                        </td>
+                        <td className="py-2 px-1 whitespace-nowrap">
+                          <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-300">
+                            <span className={`w-1.5 h-1.5 rounded-full ${device.statusDot}`} />
+                            {device.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={3} className="py-6 text-center text-xs text-slate-400">
+                        No enrolled workstations reporting telemetry.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
+              <span>Telemetry Ranking</span>
+              <span className="font-mono text-slate-300">Ranked by {selectedResource}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ========================================================================= */}
+      {/* SECTION 2: Security Incidents & SOAR Automated Response */}
+      {/* ========================================================================= */}
+      <div className="space-y-3 pt-4">
+        <div className="flex items-center justify-between pb-2 border-b border-slate-800/60">
+          <div className="flex items-center gap-2">
+            <ShieldAlert className="w-4 h-4 text-purple-400" />
+            <h2 className="text-sm font-bold text-white tracking-tight">
+              Security Incidents &amp; SOAR Response
             </h2>
           </div>
           <Link
             href="/alerts"
-            className="text-xs text-blue-400 hover:text-blue-300 font-medium flex items-center gap-1"
+            className="text-xs text-blue-400 hover:text-blue-300 font-medium flex items-center gap-1 group"
           >
-            <span>Open Incident &amp; Alert Triage</span>
-            <ChevronRight className="w-3.5 h-3.5" />
+            <span>All Incidents &amp; Alerts ({totalAlertsCount})</span>
+            <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
           </Link>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-4">
-          <Link
-            href="/alerts"
-            className="p-4 rounded-xl border border-slate-800/80 bg-slate-900/50 hover:border-rose-500/40 hover:bg-slate-800/40 transition-all group"
-          >
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-medium text-slate-400 group-hover:text-slate-200">
-                Malware / Cryptojacking
-              </p>
-              <ShieldAlert className="w-4 h-4 text-rose-400" />
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* Col 1: Alerts by Severity Widget (4 cols) */}
+          <div className="lg:col-span-4 glass-card p-5 border-slate-800/80 bg-[#091124]/90 flex flex-col justify-between shadow-lg">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
+              <h3 className="text-xs font-bold text-white tracking-tight">Alerts by Severity</h3>
+              <Link href="/alerts" className="text-xs text-blue-400 hover:text-blue-300 font-medium">
+                View all ({totalAlertsCount})
+              </Link>
             </div>
-            <p className="text-2xl font-bold text-white font-sans mt-1.5">{malwareCount}</p>
-            <p className="text-[11px] font-medium text-rose-400 mt-1">
-              {malwareCount > 0 ? `${malwareCount} signals detected` : "No active malware signals"}
-            </p>
-          </Link>
 
-          <Link
-            href="/alerts"
-            className="p-4 rounded-xl border border-slate-800/80 bg-slate-900/50 hover:border-amber-500/40 hover:bg-slate-800/40 transition-all group"
-          >
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-medium text-slate-400 group-hover:text-slate-200">
-                Unauthorized Access Events
-              </p>
-              <AlertTriangle className="w-4 h-4 text-amber-400" />
+            <div className="divide-y divide-slate-800/60 my-2">
+              {alertsSummary.map((alert, idx) => (
+                <Link
+                  key={idx}
+                  href={alert.href}
+                  className="py-2.5 flex items-center justify-between hover:bg-slate-800/30 px-2 rounded-lg transition-colors group"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <span className="flex-shrink-0">{alert.icon}</span>
+                    <span className="text-xs font-medium text-slate-200 group-hover:text-white transition-colors">
+                      {alert.title}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-white font-mono">
+                    <span className={alert.count > 0 ? alert.color : "text-slate-400"}>{alert.count}</span>
+                    <ChevronRight className="w-3.5 h-3.5 text-slate-500 group-hover:text-slate-300 transition-colors" />
+                  </div>
+                </Link>
+              ))}
             </div>
-            <p className="text-2xl font-bold text-white font-sans mt-1.5">
-              {unauthorizedAccessCount}
-            </p>
-            <p className="text-[11px] font-medium text-amber-400 mt-1">
-              Auth, brute-force &amp; port probes
-            </p>
-          </Link>
 
-          <Link
-            href="/alerts"
-            className="p-4 rounded-xl border border-slate-800/80 bg-slate-900/50 hover:border-blue-500/40 hover:bg-slate-800/40 transition-all group"
-          >
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-medium text-slate-400 group-hover:text-slate-200">
-                Total Security Events
-              </p>
-              <Shield className="w-4 h-4 text-blue-400" />
+            <div className="pt-2.5 border-t border-slate-800/80 flex items-center justify-between text-[11px]">
+              <span className="text-slate-400">Total Registered</span>
+              <Link
+                href="/alerts"
+                className="font-mono font-bold text-cyan-400 hover:text-cyan-300 transition-colors"
+              >
+                {totalAlertsCount} Alerts →
+              </Link>
             </div>
-            <p className="text-2xl font-bold text-white font-sans mt-1.5">{safeEvents.length}</p>
-            <p className="text-[11px] font-medium text-blue-400 mt-1">
-              {threatCount} active incidents • {securityPosturePct}% posture
-            </p>
-          </Link>
+          </div>
 
-          <Link
-            href="/devices?status=ISOLATED"
-            className="p-4 rounded-xl border border-purple-500/30 bg-purple-950/15 hover:border-purple-500/60 hover:bg-purple-950/25 transition-all group"
-          >
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-medium text-purple-200 group-hover:text-white">
-                Isolated Devices (SOAR)
-              </p>
-              <ShieldCheck className="w-4 h-4 text-purple-400" />
+          {/* Col 2: Recent Alerts & SOAR Execution Table (8 cols) */}
+          <div className="lg:col-span-8 glass-card p-5 border-slate-800/80 bg-[#091124]/90 shadow-lg flex flex-col justify-between">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center">
+                  <AlertCircle className="w-3.5 h-3.5" />
+                </div>
+                <h3 className="text-xs font-bold text-white tracking-tight">
+                  Recent Alerts &amp; Autonomous SOAR Playbooks
+                </h3>
+              </div>
+              <Link href="/alerts" className="text-xs text-blue-400 hover:text-blue-300 font-medium">
+                View stream ({alerts.length})
+              </Link>
             </div>
-            <p className="text-2xl font-bold text-white font-sans mt-1.5">{isolatedCount}</p>
-            <p className="text-[11px] font-medium text-purple-300 mt-1">
-              Host OS running • Sockets blocked →
-            </p>
-          </Link>
+
+            <div className="overflow-x-auto my-2">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="text-[11px] text-slate-400 border-b border-slate-800/80 font-medium">
+                    <th className="py-2.5 px-2 font-normal">Severity</th>
+                    <th className="py-2.5 px-2 font-normal">Source</th>
+                    <th className="py-2.5 px-2 font-normal">Alert Details</th>
+                    <th className="py-2.5 px-2 font-normal">Device</th>
+                    <th className="py-2.5 px-2 font-normal">SOAR Playbook</th>
+                    <th className="py-2.5 px-2 font-normal">Time</th>
+                    <th className="py-2.5 px-1 font-normal text-right"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 text-xs">
+                  {recentAlerts.length > 0 ? (
+                    recentAlerts.map((alert) => (
+                      <tr key={alert.id} className="hover:bg-slate-800/30 transition-colors">
+                        <td className="py-3 px-2 whitespace-nowrap">
+                          <span
+                            className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${alert.severityColor}`}
+                          >
+                            {alert.severity}
+                          </span>
+                        </td>
+                        <td className="py-3 px-2 whitespace-nowrap">
+                          <span
+                            className={`text-[10px] font-medium px-2 py-0.5 rounded-md border ${alert.sourceColor}`}
+                          >
+                            {alert.sourceLabel}
+                          </span>
+                        </td>
+                        <td className="py-3 px-2">
+                          <Link
+                            href="/alerts"
+                            className="font-semibold text-white tracking-tight hover:text-blue-400 transition-colors block"
+                          >
+                            {alert.title}
+                          </Link>
+                          <div className="text-[11px] text-slate-400 line-clamp-1">
+                            {alert.description}
+                          </div>
+                        </td>
+                        <td className="py-3 px-2 font-mono text-[11px] text-slate-300 whitespace-nowrap">
+                          <Link
+                            href={`/devices/${alert.deviceId}`}
+                            className="hover:text-blue-400 hover:underline transition-colors"
+                          >
+                            {alert.deviceName}
+                          </Link>
+                        </td>
+                        <td className="py-3 px-2 whitespace-nowrap">
+                          <span
+                            className={`text-[10px] font-medium px-2 py-0.5 rounded-md border inline-flex items-center gap-1 ${alert.playbookColor}`}
+                          >
+                            <Zap className="w-2.5 h-2.5" />
+                            <span>{alert.playbookLabel}</span>
+                          </span>
+                        </td>
+                        <td className="py-3 px-2 text-[11px] text-slate-400 whitespace-nowrap">
+                          {alert.time}
+                        </td>
+                        <td className="py-3 px-1 text-right">
+                          <Link
+                            href="/alerts"
+                            className="p-1 rounded text-slate-500 hover:text-slate-300 transition-colors inline-block"
+                            title="View alert"
+                          >
+                            <MoreVertical className="w-3.5 h-3.5" />
+                          </Link>
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={7} className="py-8 text-center text-xs text-slate-400">
+                        No active alerts registered in database. All monitored endpoints operating normally.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
+              <span>Automated SOAR Triage</span>
+              <Link href="/alerts" className="text-blue-400 hover:text-blue-300 font-medium">
+                Open Full Alert Operations Center →
+              </Link>
+            </div>
+          </div>
         </div>
       </div>
     </div>

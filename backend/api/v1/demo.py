@@ -285,8 +285,6 @@ async def trigger_demo_scenario(
             )
             session.add(sec_event)
 
-        await session.commit()
-
         # -------------------------------------------------------------
         # 4. CORRELATE, RESOLVE IDP CONTEXT & EVALUATE POLICY (Steps 6 & 7)
         # -------------------------------------------------------------

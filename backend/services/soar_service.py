@@ -340,8 +340,10 @@ class SOARService:
         valid_pids, rejected_pids = self.validate_pids(eval_res.target_pids)
         valid_ports, rejected_ports = self.validate_ports(eval_res.target_ports)
 
+        inc_id = uuid.uuid4()
         inc_num = f"INC-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
         inc = Incident(
+            id=inc_id,
             incident_number=inc_num,
             severity=eval_res.correlated_incident.severity,
             category="SECURITY_THREAT",
@@ -355,11 +357,12 @@ class SOARService:
             ),
         )
         self._session.add(inc)
-        await self._session.flush()
 
+        alert_id = uuid.uuid4()
         alert = Alert(
+            id=alert_id,
             source_type="CYBERSECURITY_THREAT",
-            source_id=inc.id,
+            source_id=inc_id,
             workstation_id=eval_res.workstation_id,
             severity=eval_res.correlated_incident.severity,
             status="OPEN",
@@ -370,7 +373,6 @@ class SOARService:
             playbook_initiated="PLAYBOOK_02_PROCESS_CONTAINMENT",
         )
         self._session.add(alert)
-        await self._session.flush()
 
         audit_entry = await self._audit.log(
             actor=operator,
@@ -378,8 +380,8 @@ class SOARService:
             resource=f"workstation:{eval_res.workstation_id}",
             result="success",
             metadata_={
-                "incident_id": str(inc.id),
-                "alert_id": str(alert.id),
+                "incident_id": str(inc_id),
+                "alert_id": str(alert_id),
                 "target_ports": valid_ports,
                 "rejected_ports": rejected_ports,
                 "target_pids": valid_pids,
@@ -437,8 +439,10 @@ class SOARService:
         if ws is not None:
             ws.status = "ISOLATED"
 
+        inc_id = uuid.uuid4()
         inc_num = f"INC-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
         inc = Incident(
+            id=inc_id,
             incident_number=inc_num,
             severity=eval_res.correlated_incident.severity,
             category="SECURITY_THREAT",
@@ -449,11 +453,12 @@ class SOARService:
             response_action="Surgical host network isolation applied. Host remains online; telemetry channel preserved.",
         )
         self._session.add(inc)
-        await self._session.flush()
 
+        alert_id = uuid.uuid4()
         alert = Alert(
+            id=alert_id,
             source_type="CYBERSECURITY_THREAT",
-            source_id=inc.id,
+            source_id=inc_id,
             workstation_id=eval_res.workstation_id,
             severity=eval_res.correlated_incident.severity,
             status="OPEN",
@@ -464,7 +469,6 @@ class SOARService:
             playbook_initiated="PLAYBOOK_03_SURGICAL_ISOLATION",
         )
         self._session.add(alert)
-        await self._session.flush()
 
         audit_entry = await self._audit.log(
             actor=operator,
@@ -472,8 +476,8 @@ class SOARService:
             resource=f"workstation:{eval_res.workstation_id}",
             result="success",
             metadata_={
-                "incident_id": str(inc.id),
-                "alert_id": str(alert.id),
+                "incident_id": str(inc_id),
+                "alert_id": str(alert_id),
                 "category": eval_res.correlated_incident.incident_category,
                 "evidence": eval_res.correlated_incident.evidence,
                 "role": eval_res.user_context.role,
@@ -535,7 +539,9 @@ class SOARService:
             else "Dispatched hardware inspection / predictive maintenance ticket."
         )
 
+        inc_id = uuid.uuid4()
         inc = Incident(
+            id=inc_id,
             incident_number=inc_num,
             severity=eval_res.correlated_incident.severity,
             category="MAINTENANCE",
@@ -546,8 +552,8 @@ class SOARService:
             response_action=inc_action,
         )
         self._session.add(inc)
-        await self._session.flush()
 
+        alert_id = uuid.uuid4()
         alert_title = (
             f"Authorized Research Workload Preserved: {eval_res.correlated_incident.incident_category}"
             if is_research_allow
@@ -560,8 +566,9 @@ class SOARService:
         )
 
         alert = Alert(
+            id=alert_id,
             source_type="PREDICTIVE_MAINTENANCE",
-            source_id=inc.id,
+            source_id=inc_id,
             workstation_id=eval_res.workstation_id,
             severity=eval_res.correlated_incident.severity,
             status="RESOLVED" if is_research_allow else "OPEN",
@@ -572,7 +579,6 @@ class SOARService:
             playbook_initiated="PLAYBOOK_04_MAINTENANCE",
         )
         self._session.add(alert)
-        await self._session.flush()
 
         audit_entry = await self._audit.log(
             actor=operator,
@@ -580,8 +586,8 @@ class SOARService:
             resource=f"workstation:{eval_res.workstation_id}",
             result="success",
             metadata_={
-                "incident_id": str(inc.id),
-                "alert_id": str(alert.id),
+                "incident_id": str(inc_id),
+                "alert_id": str(alert_id),
                 "category": eval_res.correlated_incident.incident_category,
                 "decision": eval_res.decision.value,
                 "preserved_workloads": eval_res.preserve_workloads,

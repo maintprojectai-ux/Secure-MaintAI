@@ -62,7 +62,9 @@ export function AlertProvider({ children }: { children: React.ReactNode }) {
     if (typeof window !== "undefined") {
       try {
         const token = getToken();
-        const streamUrl = `/api/v1/alerts/stream${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+        const streamBase =
+          process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+        const streamUrl = `${streamBase}/api/v1/alerts/stream${token ? `?token=${encodeURIComponent(token)}` : ""}`;
         const es = new EventSource(streamUrl);
         eventSourceRef.current = es;
 

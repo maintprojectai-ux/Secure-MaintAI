@@ -8,11 +8,8 @@ import {
   Server,
   AlertTriangle,
   Sparkles,
-  Calendar,
   FileText,
-  Users,
   ScrollText,
-  HelpCircle,
   LogOut,
   ChevronRight,
   Menu,
@@ -36,11 +33,8 @@ const NAV_ITEMS: NavItem[] = [
   { name: "Device Monitoring", href: "/devices", icon: Server },
   { name: "Alerts", href: "/alerts", icon: AlertTriangle, badgeColor: "bg-rose-500" },
   { name: "AI Predictions", href: "/predictions", icon: Sparkles, badge: "AI", badgeColor: "bg-purple-500" },
-  { name: "Maintenance", href: "/maintenance", icon: Calendar },
   { name: "Reports", href: "/reports", icon: FileText },
-  { name: "Users Management", href: "/users", icon: Users },
   { name: "Activity Logs", href: "/activity-logs", icon: ScrollText },
-  { name: "Help & Support", href: "/help", icon: HelpCircle },
 ];
 
 export const Sidebar: React.FC = () => {

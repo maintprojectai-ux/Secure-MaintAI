@@ -39,14 +39,6 @@ class UserCreate(BaseModel):
     role: RoleEnum = RoleEnum.STUDENT
 
 
-class UserUpdate(BaseModel):
-    """Schema for updating user details (admin)."""
-
-    email: EmailStr | None = None
-    role: RoleEnum | None = None
-    status: UserStatusEnum | None = None
-
-
 class PasswordChangeRequest(BaseModel):
     """Schema for authenticated user password change."""
 
@@ -109,16 +101,6 @@ class UserProfileResponse(BaseModel):
         return v
 
     model_config = {"from_attributes": True}
-
-
-class UserPaginatedResponse(BaseModel):
-    """Paginated user listing response."""
-
-    items: list[UserResponse]
-    total: int = Field(..., ge=0)
-    page: int = Field(..., ge=1)
-    page_size: int = Field(..., ge=1)
-    total_pages: int = Field(..., ge=0)
 
 
 class TokenResponse(BaseModel):

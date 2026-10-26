@@ -15,7 +15,6 @@ from backend.api.v1.dashboard import router as dashboard_router
 from backend.api.v1.demo import router as demo_router
 from backend.api.v1.health import router as health_router
 from backend.api.v1.incidents import router as incidents_router
-from backend.api.v1.maintenance import router as maintenance_router
 from backend.api.v1.policy import router as policy_router
 from backend.api.v1.reports import router as reports_router
 from backend.api.v1.security import router as security_router
@@ -63,9 +62,6 @@ api_v1_router.include_router(audit_router, prefix="/audit", tags=["audit"])
 
 # Workstation inventory and device management endpoints
 api_v1_router.include_router(workstations_router, prefix="/workstations", tags=["workstations"])
-
-# Predictive maintenance and scheduled tasks endpoints
-api_v1_router.include_router(maintenance_router, prefix="/maintenance", tags=["maintenance"])
 
 # Executive reports and forensic data export endpoints
 api_v1_router.include_router(reports_router, prefix="/reports", tags=["reports"])

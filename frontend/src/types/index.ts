@@ -108,7 +108,9 @@ export interface Alert {
   description: string;
   severity: AlertSeverity;
   status: AlertStatus;
-  source: string;
+  source?: string;
+  source_type?: string;
+  playbook_initiated?: string;
   workstation_id: string;
   workstation_hostname?: string;
   assigned_to?: string;
@@ -163,19 +165,6 @@ export interface ModelMetrics {
   status: "OPERATIONAL" | "OPTIMAL" | "RETRAINING";
 }
 
-export interface MaintenanceTask {
-  id: string;
-  title: string;
-  workstation_id: string;
-  workstation_hostname: string;
-  department: string;
-  status: "SCHEDULED" | "IN_PROGRESS" | "COMPLETED" | "OVERDUE";
-  scheduled_date: string;
-  duration_minutes: number;
-  technician: string;
-  type: "PATCH" | "SECURITY_SCAN" | "HARDWARE_CHECK" | "OPTIMIZATION";
-}
-
 export interface AuditLogEntry {
   id: string;
   timestamp: string;
@@ -198,37 +187,6 @@ export interface DashboardOverviewKPI {
   average_cpu: number;
   average_ram: number;
   average_disk: number;
-}
-
-export interface SupportTicket {
-  id: string;
-  ticket_number: string;
-  title: string;
-  description?: string;
-  category: string;
-  status: "OPEN" | "IN_PROGRESS" | "RESOLVED" | "CLOSED";
-  priority: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
-  created_at: string;
-  author: string;
-}
-
-export interface FAQItem {
-  id: string;
-  question: string;
-  answer: string;
-  category: string;
-}
-
-export interface UserManagementItem {
-  id: string;
-  full_name: string;
-  email: string;
-  role: UserRole;
-  department: string;
-  status: "ACTIVE" | "PENDING" | "SUSPENDED";
-  last_login: string;
-  two_factor_enabled: boolean;
-  avatar?: string;
 }
 
 export interface PredictionOverviewKPIs {
@@ -272,45 +230,6 @@ export interface AIModelMetadata {
   next_training: string;
   training_data: string;
   accuracy: string;
-}
-
-export interface MaintenanceOverviewKPIs {
-  total_scheduled: number;
-  total_scheduled_change: string;
-  completed: number;
-  completed_change: string;
-  in_progress: number;
-  in_progress_change: string;
-  upcoming: number;
-  upcoming_change: string;
-  overdue: number;
-  overdue_change: string;
-}
-
-export type MaintenanceCategory =
-  | "Database"
-  | "Security"
-  | "Network"
-  | "Backup"
-  | "System"
-  | "Application"
-  | "Virtualization";
-
-export type MaintenancePriority = "High" | "Medium" | "Low";
-
-export type MaintenanceStatus = "Upcoming" | "In Progress" | "Completed" | "Overdue";
-
-export interface ScheduledTaskItem {
-  id: string;
-  task_name: string;
-  category: MaintenanceCategory;
-  target_system: string;
-  scheduled_date_time: string;
-  duration: string;
-  priority: MaintenancePriority;
-  status: MaintenanceStatus;
-  created_by?: string;
-  description?: string;
 }
 
 export interface ExecutiveReportKPIs {

@@ -10,7 +10,6 @@ import {
   AlertTriangle,
   Flame,
   Calendar,
-  Ticket,
 } from "lucide-react";
 import { useAlerts } from "@/context/AlertContext";
 
@@ -19,11 +18,8 @@ const ROUTE_TITLES: Record<string, { title: string; subtitle: string }> = {
   "/devices": { title: "Devices Monitoring", subtitle: "Monitor and manage all university infrastructure devices in real-time" },
   "/alerts": { title: "Incident & Alert Management", subtitle: "Anomaly screening triage, evidence inspection, and SOAR response" },
   "/predictions": { title: "AI Predictive", subtitle: "Model 01 screening, Model 02 diagnostics, and empirical validation" },
-  "/maintenance": { title: "Predictive Maintenance Schedule", subtitle: "Autonomous task orchestration, calendar dispatch, and hardware health" },
   "/reports": { title: "Reports", subtitle: "Comprehensive overview of your infrastructure performance and security posture" },
-  "/users": { title: "Users Management", subtitle: "Manage system users, roles, permissions, and access control." },
   "/activity-logs": { title: "Activity Logs", subtitle: "Monitor and review all system activities and user actions" },
-  "/help": { title: "Help / Support", subtitle: "We're here to help you. Find answers, guides, and get support." },
 };
 
 export const TopNavbar: React.FC = () => {
@@ -95,17 +91,6 @@ export const TopNavbar: React.FC = () => {
 
       {/* Right Controls */}
       <div className="flex items-center gap-3">
-        {/* Tickets Shortcut Button (for /help) */}
-        {pathname === "/help" && (
-          <a
-            href="#tickets"
-            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-700/80 bg-[#091124] hover:bg-slate-800 text-slate-200 text-xs font-medium transition-colors cursor-pointer"
-          >
-            <Ticket className="w-3.5 h-3.5 text-blue-400" />
-            <span>Tickets</span>
-          </a>
-        )}
-
         {/* Current Date Pill */}
         {currentDate && (
           <div className="hidden xl:flex items-center gap-2 px-3 py-1.5 rounded-xl border border-slate-800 bg-[#091124] text-slate-300 text-xs font-sans select-none">

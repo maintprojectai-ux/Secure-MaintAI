@@ -9,7 +9,10 @@ import {
   TelemetryMetric,
 } from "@/types";
 
-const API_BASE = "/api/v1";
+const API_BASE =
+  typeof window !== "undefined"
+    ? (process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000") + "/api/v1"
+    : (process.env.BACKEND_API_URL || "http://127.0.0.1:8000") + "/api/v1";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public data?: unknown) {
@@ -343,52 +346,6 @@ export async function getSecurityEvents(params?: {
 }
 
 // -------------------------------------------------------------
-// Live Users Management API
-// -------------------------------------------------------------
-
-export interface UsersPaginatedResponse {
-  items: Array<{
-    id: string;
-    username: string;
-    email: string;
-    role: string;
-    status: string;
-    last_login_at?: string;
-    created_at: string;
-  }>;
-  total: number;
-  page: number;
-  page_size: number;
-  total_pages: number;
-}
-
-export async function getUsers(params?: {
-  page?: number;
-  pageSize?: number;
-  search?: string;
-  role?: string;
-}): Promise<UsersPaginatedResponse> {
-  const query = new URLSearchParams();
-  if (params?.page) query.set("page", params.page.toString());
-  if (params?.pageSize) query.set("page_size", params.pageSize.toString());
-  if (params?.search) query.set("search", params.search);
-  if (params?.role) query.set("role", params.role);
-
-  const qs = query.toString();
-  return apiFetch<UsersPaginatedResponse>(`/users${qs ? `?${qs}` : ""}`);
-}
-
-export async function updateUser(
-  userId: string,
-  payload: { status?: string; role?: string; email?: string }
-): Promise<any> {
-  return apiFetch<any>(`/users/${userId}`, {
-    method: "PATCH",
-    body: JSON.stringify(payload),
-  });
-}
-
-// -------------------------------------------------------------
 // Live Audit Log API
 // -------------------------------------------------------------
 
@@ -428,78 +385,6 @@ export async function getAuditLogs(params?: {
 
   const qs = query.toString();
   return apiFetch<AuditLogPaginatedResponse>(`/audit/logs${qs ? `?${qs}` : ""}`);
-}
-
-// -------------------------------------------------------------
-// Live Predictive Maintenance API
-// -------------------------------------------------------------
-
-export interface MaintenanceTaskItem {
-  id: string;
-  title: string;
-  workstation_id?: string;
-  workstation_hostname: string;
-  department: string;
-  status: "Scheduled" | "In Progress" | "Completed" | "Overdue";
-  scheduled_time: string;
-  duration: string;
-  duration_minutes: number;
-  assigned_to: string;
-  priority: "Low" | "Medium" | "High";
-  category: "System" | "Database" | "Network" | "Backup" | "Security" | "Application" | "Virtualization";
-  description: string;
-  affected_systems: string[];
-  incident_number?: string;
-}
-
-export interface MaintenanceKPIs {
-  scheduled_today: number;
-  in_progress: number;
-  completed_this_week: number;
-  overdue: number;
-  system_health_score: number;
-}
-
-export async function getMaintenanceTasks(params?: {
-  status?: string;
-  limit?: number;
-}): Promise<MaintenanceTaskItem[]> {
-  const query = new URLSearchParams();
-  if (params?.status) query.set("status", params.status);
-  if (params?.limit) query.set("limit", params.limit.toString());
-  const qs = query.toString();
-  return apiFetch<MaintenanceTaskItem[]>(`/maintenance/tasks${qs ? `?${qs}` : ""}`);
-}
-
-export async function getMaintenanceKPIs(): Promise<MaintenanceKPIs> {
-  return apiFetch<MaintenanceKPIs>("/maintenance/kpis");
-}
-
-export async function createMaintenanceTask(payload: {
-  title: string;
-  workstation_id?: string;
-  category?: string;
-  priority?: string;
-  scheduled_time?: string;
-  duration_minutes?: number;
-  description?: string;
-  assigned_to?: string;
-}): Promise<MaintenanceTaskItem> {
-  return apiFetch<MaintenanceTaskItem>("/maintenance/tasks", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
-export async function updateMaintenanceTaskStatus(
-  taskId: string,
-  status: string,
-  notes?: string
-): Promise<MaintenanceTaskItem> {
-  return apiFetch<MaintenanceTaskItem>(`/maintenance/tasks/${taskId}/status`, {
-    method: "PATCH",
-    body: JSON.stringify({ status, notes }),
-  });
 }
 
 // -------------------------------------------------------------
