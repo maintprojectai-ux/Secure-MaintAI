@@ -40,12 +40,10 @@ async def test_seed_roles_and_demo_data(monkeypatch):
         for u_data in DEMO_USERS:
             assert u_data["username"] in usernames
 
-        # Check workstations
+        # Check workstations (0 pre-seeded; fleet starts clean)
         ws_res = await session.execute(select(Workstation))
         workstations = ws_res.scalars().all()
-        hostnames = {w.hostname for w in workstations}
-        for w_data in DEMO_WORKSTATIONS:
-            assert w_data["hostname"] in hostnames
+        assert len(workstations) == len(DEMO_WORKSTATIONS)
 
     # 3. Test idempotency (run again without error)
     await seed_roles()

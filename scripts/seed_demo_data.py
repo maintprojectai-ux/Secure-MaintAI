@@ -3,16 +3,14 @@ Secure-MaintAI — Minimal Foundational Database Seeder.
 
 Reseeds the database cleanly and deterministically with only foundational entities:
 1. Purges all system-generated operational records (Alerts, Incidents, Anomalies,
-   Security Events, Telemetry Metrics, and Audit Logs) so the platform starts clean.
+   Security Events, Telemetry Metrics, Audit Logs, and Workstations) so the platform starts clean.
 2. Seeds the 3 canonical RBAC roles (ADMIN, RESEARCHER, STUDENT).
 3. Seeds the essential University Departments and Campus Locations.
 4. Seeds the 3 core RBAC login accounts (admin, researcher, student).
-5. Seeds strictly 2 workstations:
-   - 1 Student workstation (undergrad-pc-04, assigned to student)
-   - 1 Researcher workstation (quantum-node-01, assigned to researcher)
+5. Workstations: 0 pre-seeded devices; workstations enroll dynamically at runtime via agent.
 
-No alerts, incidents, anomalies, security events, telemetry, or audit logs are pre-seeded;
-all operational records are generated dynamically by the system at runtime.
+No alerts, incidents, anomalies, security events, telemetry, or workstations are pre-seeded;
+all operational and fleet records are generated dynamically by the system at runtime.
 
 Usage:
     python -m scripts.seed_demo_data
@@ -88,58 +86,16 @@ DEMO_USERS = [
     },
 ]
 
-DEMO_WORKSTATIONS = [
-    # 1. Student Workstation
-    {
-        "hostname": "undergrad-pc-04",
-        "asset_tag": "KKU-STD-001",
-        "ip_address": "10.20.4.104",
-        "operating_system": "Ubuntu 22.04 LTS",
-        "department": "Computer Science",
-        "department_code": "CS",
-        "lab": "Undergraduate Lab 301",
-        "assigned_username": "student",
-        "status": "ONLINE",
-        "agent_version": "1.0.0",
-        "hardware_specs": {
-            "cpu": "Intel Core i7-12700",
-            "cores": 12,
-            "ram_gb": 16,
-            "storage_gb": 512,
-            "disk_usage_pct": 42.0,
-        },
-    },
-    # 2. Researcher Workstation
-    {
-        "hostname": "quantum-node-01",
-        "asset_tag": "KKU-RES-001",
-        "ip_address": "10.30.2.1",
-        "operating_system": "Red Hat Enterprise Linux 9",
-        "department": "Physics & Advanced Computing",
-        "department_code": "PHYS",
-        "lab": "Quantum Computing Lab",
-        "assigned_username": "researcher",
-        "status": "ONLINE",
-        "agent_version": "1.0.0",
-        "hardware_specs": {
-            "cpu": "Dual AMD EPYC 7763",
-            "cores": 128,
-            "ram_gb": 64,
-            "storage_gb": 2000,
-            "gpu": "4x NVIDIA A100 80GB",
-            "disk_usage_pct": 38.0,
-        },
-    },
-]
+DEMO_WORKSTATIONS: list[dict] = []
 
 
 async def seed_demo_data() -> None:
-    """Cleanly reseed roles, lookup tables, 4 core RBAC users, and 2 workstations (Student & Researcher)."""
+    """Cleanly reseed roles, lookup tables, and core RBAC users (0 pre-seeded workstations)."""
     await seed_roles()
 
     async with async_session_factory() as session:
         # 0. Clean all system-generated operational records and orphan workstations
-        print("\n--- Purging System-Generated Operational Records ---")
+        print("\n--- Purging System-Generated Operational Records & Existing Workstations ---")
         for model in [Alert, Incident, SecurityEvent, AnomalyDetection, TelemetryMetric, AuditLog]:
             await session.execute(delete(model))
 
@@ -147,7 +103,7 @@ async def seed_demo_data() -> None:
         all_ws = (await session.execute(select(Workstation))).scalars().all()
         for ws in all_ws:
             if ws.hostname not in canonical_hostnames:
-                print(f"  [-] Removing orphan workstation: {ws.hostname} ({ws.ip_address})")
+                print(f"  [-] Removing workstation: {ws.hostname} ({ws.ip_address})")
                 await session.delete(ws)
         await session.flush()
 
@@ -254,60 +210,55 @@ async def seed_demo_data() -> None:
 
         await session.flush()
 
-        # 5. Seed the 2 Workstations (1 Student, 1 Researcher)
-        print("\n--- Seeding Student & Researcher Workstations (2 Devices) ---")
-        now = datetime.now(timezone.utc)
-        for wdata in DEMO_WORKSTATIONS:
-            ws_res = await session.execute(select(Workstation).where(Workstation.hostname == wdata["hostname"]))
-            existing_ws = ws_res.scalar_one_or_none()
-            assigned_user = users_by_username.get(wdata["assigned_username"])
-            dept = depts_by_code.get(wdata["department_code"])
-            loc = locs_by_room.get(wdata["lab"])
+        # 5. Workstations seeding (0 pre-seeded; endpoints enroll dynamically via agent)
+        if DEMO_WORKSTATIONS:
+            print("\n--- Seeding Workstations ---")
+            now = datetime.now(timezone.utc)
+            for wdata in DEMO_WORKSTATIONS:
+                ws_res = await session.execute(select(Workstation).where(Workstation.hostname == wdata["hostname"]))
+                existing_ws = ws_res.scalar_one_or_none()
+                assigned_user = users_by_username.get(wdata["assigned_username"])
+                dept = depts_by_code.get(wdata["department_code"])
+                loc = locs_by_room.get(wdata["lab"])
 
-            if existing_ws:
-                existing_ws.asset_tag = wdata["asset_tag"]
-                existing_ws.ip_address = wdata["ip_address"]
-                existing_ws.operating_system = wdata["operating_system"]
-                existing_ws.department = wdata["department"]
-                existing_ws.department_id = dept.id if dept else None
-                existing_ws.location_id = loc.id if loc else None
-                existing_ws.assigned_user_id = assigned_user.id if assigned_user else None
-                existing_ws.lab = wdata["lab"]
-                existing_ws.status = "ONLINE"
-                existing_ws.agent_version = wdata["agent_version"]
-                existing_ws.hardware_specs = wdata["hardware_specs"]
-                existing_ws.last_seen_at = now
-                print(
-                    f"  [*] Reset workstation:   {wdata['hostname']:<18} [{wdata['asset_tag']}] "
-                    f"-> Assigned to: {wdata['assigned_username']}"
-                )
-            else:
-                new_ws = Workstation(
-                    id=uuid.uuid4(),
-                    agent_id=uuid.uuid4(),
-                    hostname=wdata["hostname"],
-                    asset_tag=wdata["asset_tag"],
-                    ip_address=wdata["ip_address"],
-                    operating_system=wdata["operating_system"],
-                    department=wdata["department"],
-                    department_id=dept.id if dept else None,
-                    location_id=loc.id if loc else None,
-                    assigned_user_id=assigned_user.id if assigned_user else None,
-                    lab=wdata["lab"],
-                    status="ONLINE",
-                    agent_version=wdata["agent_version"],
-                    hardware_specs=wdata["hardware_specs"],
-                    last_seen_at=now,
-                )
-                session.add(new_ws)
-                print(
-                    f"  [+] Created workstation: {wdata['hostname']:<18} [{wdata['asset_tag']}] "
-                    f"-> Assigned to: {wdata['assigned_username']}"
-                )
+                if existing_ws:
+                    existing_ws.asset_tag = wdata["asset_tag"]
+                    existing_ws.ip_address = wdata["ip_address"]
+                    existing_ws.operating_system = wdata["operating_system"]
+                    existing_ws.department = wdata["department"]
+                    existing_ws.department_id = dept.id if dept else None
+                    existing_ws.location_id = loc.id if loc else None
+                    existing_ws.assigned_user_id = assigned_user.id if assigned_user else None
+                    existing_ws.lab = wdata["lab"]
+                    existing_ws.status = "ONLINE"
+                    existing_ws.agent_version = wdata["agent_version"]
+                    existing_ws.hardware_specs = wdata["hardware_specs"]
+                    existing_ws.last_seen_at = now
+                else:
+                    new_ws = Workstation(
+                        id=uuid.uuid4(),
+                        agent_id=uuid.uuid4(),
+                        hostname=wdata["hostname"],
+                        asset_tag=wdata["asset_tag"],
+                        ip_address=wdata["ip_address"],
+                        operating_system=wdata["operating_system"],
+                        department=wdata["department"],
+                        department_id=dept.id if dept else None,
+                        location_id=loc.id if loc else None,
+                        assigned_user_id=assigned_user.id if assigned_user else None,
+                        lab=wdata["lab"],
+                        status="ONLINE",
+                        agent_version=wdata["agent_version"],
+                        hardware_specs=wdata["hardware_specs"],
+                        last_seen_at=now,
+                    )
+                    session.add(new_ws)
+        else:
+            print("\n--- Workstations: 0 pre-seeded (fleet starts clean; endpoints enroll dynamically) ---")
 
         await session.commit()
 
-    print("\nDatabase Reseeding Complete (2 Workstations • 0 Pre-Seeded Alerts/Incidents/Telemetry)!\n")
+    print("\nDatabase Reseeding Complete (0 Pre-Seeded Workstations • 0 Alerts • 0 Incidents)!\n")
     print("=" * 65)
     print("CORE RBAC CREDENTIALS (Password: <Username>Secure2026!):")
     print("=" * 65)
@@ -317,5 +268,5 @@ async def seed_demo_data() -> None:
 
 
 if __name__ == "__main__":
-    print("Secure-MaintAI — Seeding Roles, Core Users & 2 Workstations (Student + Researcher)...")
+    print("Secure-MaintAI — Seeding Roles, Core Users & Foundational Entities (0 Workstations)...")
     asyncio.run(seed_demo_data())

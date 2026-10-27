@@ -279,8 +279,8 @@ export default function LoginPage() {
                 </div>
               </div>
 
-              {/* Controls Row: Remember me + Forgot Password */}
-              <div className="flex items-center justify-between text-xs pt-1">
+              {/* Controls Row: Remember me */}
+              <div className="flex items-center text-xs pt-1">
                 <label className="flex items-center gap-2 cursor-pointer text-slate-300 select-none">
                   <input
                     type="checkbox"
@@ -290,17 +290,6 @@ export default function LoginPage() {
                   />
                   <span>Remember me</span>
                 </label>
-
-                <a
-                  href="#forgot"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    setError("Please contact your IT administrator to reset institutional credentials.");
-                  }}
-                  className="text-blue-400 hover:text-blue-300 text-xs transition-colors"
-                >
-                  Forgot Password?
-                </a>
               </div>
 
               {/* Primary Action Button: Sign In -> */}
@@ -319,21 +308,6 @@ export default function LoginPage() {
                 )}
               </button>
             </form>
-
-            {/* Card Footer */}
-            <p className="text-xs text-slate-400 text-center mt-6">
-              Don&apos;t have an account?{" "}
-              <a
-                href="#contact"
-                onClick={(e) => {
-                  e.preventDefault();
-                  setError("Institutional access requests must be routed via King Khalid University IT Service Desk.");
-                }}
-                className="text-blue-400 hover:text-blue-300 transition-colors"
-              >
-                Contact your administrator
-              </a>
-            </p>
           </div>
         </div>
       </main>
