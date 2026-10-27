@@ -17,10 +17,11 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.database import get_async_session
-from backend.core.dependencies import get_current_active_user
+from backend.core.dependencies import get_current_active_user, require_roles
 from backend.core.security import decode_access_token
 from backend.models.alert import Alert
 from backend.models.user import UserAccount
+from backend.schemas.user import RoleEnum
 from backend.schemas.alert import (
     AlertApprove,
     AlertCreate,
@@ -257,7 +258,7 @@ async def resolve_alert(
 async def approve_human_intervention_alert(
     alert_id: UUID,
     session: Annotated[AsyncSession, Depends(get_async_session)],
-    current_user: Annotated[UserAccount, Depends(get_current_active_user)],
+    current_user: Annotated[UserAccount, Depends(require_roles([RoleEnum.ADMIN]))],
     payload: AlertApprove | None = None,
 ) -> AlertResponse:
     """
