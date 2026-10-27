@@ -9,16 +9,18 @@ Every privileged endpoint must explicitly verify permissions.
 """
 
 from collections.abc import Callable
+import hmac
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.core.database import get_async_session
+from backend.core.config import get_settings
 from backend.core.security import decode_access_token
 from backend.models.user import UserAccount
 from backend.schemas.user import RoleEnum, TokenPayload
@@ -179,3 +181,14 @@ def require_permission(*required_permissions: str) -> Callable:
         return current_user
 
     return _permission_checker
+
+
+async def verify_siem_ingest_key(
+    x_api_key: Annotated[str | None, Header(alias="X-API-Key")] = None,
+) -> None:
+    """Authenticate external SIEM/XDR ingestion using a configured shared API key."""
+    expected = get_settings().siem_ingest_api_key
+    if not expected:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="SIEM ingestion authentication is not configured.")
+    if not x_api_key or not hmac.compare_digest(x_api_key, expected):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing SIEM ingestion API key.", headers={"WWW-Authenticate": "ApiKey"})
