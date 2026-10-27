@@ -78,8 +78,8 @@ class WazuhAdapter(BaseSecurityAdapter):
         # 1. Cryptojacking detection
         if any(re.search(pat, combined_text) for pat in _CRYPTO_PATTERNS):
             return SecurityEventType.CRYPTOJACKING
-        if dest_port in {3333, 4444, 5555, 7777, 8888, 9999}:
-            return SecurityEventType.CRYPTOJACKING
+        # Ports alone are not evidence of cryptojacking: 8888 is commonly used
+        # by Jupyter notebooks, and other high ports are application-dependent.
 
         # 2. Sysmon Event ID mapping
         if event_id == 1:
