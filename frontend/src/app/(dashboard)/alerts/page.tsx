@@ -8,8 +8,11 @@ import {
   resolveAlert,
   approveAlert,
   getWorkstations,
+  isolateWorkstation,
+  rollbackWorkstationIsolation,
 } from "@/lib/api";
 import { useAlerts } from "@/context/AlertContext";
+import { useAuth } from "@/context/AuthContext";
 import {
   AlertCircle,
   AlertTriangle,
@@ -67,6 +70,7 @@ interface AlertItem {
   severity: SeverityType;
   status: StatusType;
   device: {
+    id?: string;
     name: string;
     ip: string;
     type: string;
@@ -138,6 +142,7 @@ function mapBackendAlertToItem(raw: any, workstationMap?: Map<string, any>): Ale
     ws?.os_type || ws?.operating_system || raw.workstation?.operating_system || "Linux / Windows Host";
   const deviceLocation = ws?.department || ws?.location?.building || "Academic Infrastructure";
   const deviceOwner = ws?.assigned_user?.full_name || ws?.assigned_user?.email || "SOC Managed";
+  const deviceId = raw.workstation_id ? String(raw.workstation_id) : ws?.id ? String(ws.id) : undefined;
   const rawSourceType = String(raw.source_type || "").toUpperCase();
 
   return {
@@ -148,6 +153,7 @@ function mapBackendAlertToItem(raw: any, workstationMap?: Map<string, any>): Ale
     severity,
     status,
     device: {
+      id: deviceId,
       name: deviceName,
       ip: deviceIp,
       type: "Endpoint",
@@ -247,7 +253,9 @@ function matchesSourceCategory(alt: AlertItem, categoryId: string): boolean {
 }
 
 export default function AlertsPage() {
+  const { user } = useAuth();
   const { refreshAlertCounts } = useAlerts();
+  const isAdmin = (user?.role || "").toUpperCase() === "ADMIN";
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [selectedAlertId, setSelectedAlertId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -274,6 +282,7 @@ export default function AlertsPage() {
   const [showAddNoteForm, setShowAddNoteForm] = useState(false);
   const [acknowledgingId, setAcknowledgingId] = useState<string | null>(null);
   const isAcknowledging = Boolean(acknowledgingId);
+  const [isRollingBack, setIsRollingBack] = useState(false);
 
   // End-to-End Live Alerts Loading
   const loadAlerts = async (isInitial = false) => {
@@ -359,6 +368,38 @@ export default function AlertsPage() {
     Low: alerts.filter((a) => a.severity === "Low").length,
   }), [alerts]);
 
+  // Active (unresolved) counts per severity: alerts requiring operator attention (status !== "Resolved")
+  const activeSeverityCounts = useMemo(() => ({
+    ALL: alerts.filter((a) => a.status !== "Resolved").length,
+    Critical: alerts.filter((a) => a.severity === "Critical" && a.status !== "Resolved").length,
+    High: alerts.filter((a) => a.severity === "High" && a.status !== "Resolved").length,
+    Medium: alerts.filter((a) => a.severity === "Medium" && a.status !== "Resolved").length,
+    Low: alerts.filter((a) => a.severity === "Low" && a.status !== "Resolved").length,
+  }), [alerts]);
+
+  // Resolved counts per severity
+  const resolvedSeverityCounts = useMemo(() => ({
+    ALL: alerts.filter((a) => a.status === "Resolved").length,
+    Critical: alerts.filter((a) => a.severity === "Critical" && a.status === "Resolved").length,
+    High: alerts.filter((a) => a.severity === "High" && a.status === "Resolved").length,
+    Medium: alerts.filter((a) => a.severity === "Medium" && a.status === "Resolved").length,
+    Low: alerts.filter((a) => a.severity === "Low" && a.status === "Resolved").length,
+  }), [alerts]);
+
+  // Helper to format concise, mathematically sound active/resolved subtitle
+  const formatSeverityDelta = (active: number, resolved: number): string => {
+    if (active > 0 && resolved > 0) {
+      return `${active} active · ${resolved} resolved`;
+    }
+    if (active > 0) {
+      return `${active} active`;
+    }
+    if (resolved > 0) {
+      return `0 active · ${resolved} resolved`;
+    }
+    return "0 active";
+  };
+
   // Dynamic counts for the 4-point report alert categories
   const categoryCounts = useMemo(() => ({
     ALL: alerts.length,
@@ -372,8 +413,8 @@ export default function AlertsPage() {
     {
       title: "All Alerts",
       value: alerts.length,
-      delta: "Total registered",
-      deltaColor: "text-blue-400",
+      delta: formatSeverityDelta(activeSeverityCounts.ALL, resolvedSeverityCounts.ALL),
+      deltaColor: activeSeverityCounts.ALL > 0 ? "text-blue-400" : "text-slate-400",
       border: "border-blue-500/40 bg-blue-950/20",
       icon: <Shield className="w-5 h-5 text-blue-400" />,
       severityKey: "All Alerts",
@@ -381,8 +422,8 @@ export default function AlertsPage() {
     {
       title: "Critical",
       value: severityCounts.Critical,
-      delta: `${severityCounts.Critical} active`,
-      deltaColor: "text-rose-400",
+      delta: formatSeverityDelta(activeSeverityCounts.Critical, resolvedSeverityCounts.Critical),
+      deltaColor: activeSeverityCounts.Critical > 0 ? "text-rose-400" : "text-slate-400",
       border: "border-rose-500/40 bg-rose-950/20",
       icon: <AlertCircle className="w-5 h-5 text-rose-400" />,
       severityKey: "Critical",
@@ -390,8 +431,8 @@ export default function AlertsPage() {
     {
       title: "High",
       value: severityCounts.High,
-      delta: `${severityCounts.High} active`,
-      deltaColor: "text-amber-400",
+      delta: formatSeverityDelta(activeSeverityCounts.High, resolvedSeverityCounts.High),
+      deltaColor: activeSeverityCounts.High > 0 ? "text-amber-400" : "text-slate-400",
       border: "border-orange-500/40 bg-orange-950/20",
       icon: <AlertTriangle className="w-5 h-5 text-orange-400" />,
       severityKey: "High",
@@ -399,8 +440,8 @@ export default function AlertsPage() {
     {
       title: "Medium",
       value: severityCounts.Medium,
-      delta: `${severityCounts.Medium} active`,
-      deltaColor: "text-amber-300",
+      delta: formatSeverityDelta(activeSeverityCounts.Medium, resolvedSeverityCounts.Medium),
+      deltaColor: activeSeverityCounts.Medium > 0 ? "text-amber-300" : "text-slate-400",
       border: "border-amber-500/40 bg-amber-950/20",
       icon: <AlertTriangle className="w-5 h-5 text-amber-300" />,
       severityKey: "Medium",
@@ -408,8 +449,8 @@ export default function AlertsPage() {
     {
       title: "Low",
       value: severityCounts.Low,
-      delta: `${severityCounts.Low} active`,
-      deltaColor: "text-cyan-400",
+      delta: formatSeverityDelta(activeSeverityCounts.Low, resolvedSeverityCounts.Low),
+      deltaColor: activeSeverityCounts.Low > 0 ? "text-cyan-400" : "text-slate-400",
       border: "border-cyan-500/40 bg-cyan-950/20",
       icon: <Info className="w-5 h-5 text-cyan-400" />,
       severityKey: "Low",
@@ -482,7 +523,7 @@ export default function AlertsPage() {
               notes: [
                 {
                   timestamp: "Just now",
-                  author: "SOC Operator",
+                  author: user?.full_name || user?.username || "SOC Analyst",
                   type: "Operator" as const,
                   content: "Alert acknowledged in system.",
                 },
@@ -492,7 +533,7 @@ export default function AlertsPage() {
                 ...(a.timeline || []),
                 {
                   time: "Just now",
-                  stage: "SOC Operator Acknowledged",
+                  stage: "SOC Analyst Acknowledged",
                   desc: "Incident acknowledged; triaging active.",
                   color: "bg-emerald-400",
                 },
@@ -501,7 +542,7 @@ export default function AlertsPage() {
             : a
         )
       );
-      setFeedbackMessage(`Alert ${id.slice(0, 8)} acknowledged by SOC operator.`);
+      setFeedbackMessage(`Alert ${id.slice(0, 8)} acknowledged by ${user?.username || "SOC analyst"}.`);
     } catch (err: any) {
       setFeedbackMessage(`Acknowledge failed: ${err?.message || "Error"}`);
     } finally {
@@ -527,11 +568,23 @@ export default function AlertsPage() {
 
   const handleApproveAlert = async (id: string) => {
     try {
-      await approveAlert(id, "Authorized by SOC operator via Dashboard");
+      const updated = await approveAlert(
+        id,
+        `Authorized by ${user?.username || "SOC analyst"} via Dashboard`
+      );
       refreshAlertCounts();
+      const newStatus: StatusType =
+        (updated?.status || "").toUpperCase() === "CONTAINED" ? "Monitored" : "Active";
       setAlerts((prev) =>
         prev.map((a) =>
-          a.id === id ? { ...a, status: "Active" as StatusType, requires_human_intervention: false } : a
+          a.id === id
+            ? {
+                ...a,
+                status: newStatus,
+                isAcknowledged: true,
+                requires_human_intervention: false,
+              }
+            : a
         )
       );
       setFeedbackMessage(`Action for Alert ${id.slice(0, 8)} authorized and executed.`);
@@ -541,22 +594,137 @@ export default function AlertsPage() {
     setTimeout(() => setFeedbackMessage(null), 4000);
   };
 
-  const executeSoarPlaybook = async () => {
+  // Workstation mapping & isolation state for surgical SOAR lifecycle
+  const selectedAlertWorkstation = useMemo(() => {
+    if (!selectedAlert?.device?.id) return null;
+    return workstations.find((w) => String(w.id) === String(selectedAlert.device.id)) || null;
+  }, [selectedAlert, workstations]);
+
+  const isWorkstationIsolated = useMemo(() => {
+    if (!selectedAlert) return false;
+    if (selectedAlertWorkstation) {
+      return (
+        (selectedAlertWorkstation.status || "").toUpperCase() === "ISOLATED" ||
+        Boolean(selectedAlertWorkstation.is_isolated)
+      );
+    }
+    const pb = (selectedAlert.playbook_initiated || "").toUpperCase();
+    return (
+      (pb.includes("PB-03") || pb.includes("ISOLATION")) &&
+      selectedAlert.status !== "Resolved"
+    );
+  }, [selectedAlert, selectedAlertWorkstation]);
+
+  // Escalation is permitted strictly for active CYBERSECURITY_THREAT alerts that have not yet been contained/isolated
+  const canManualEscalate = useMemo(() => {
+    if (!selectedAlert) return false;
+    if (selectedAlert.status === "Resolved") return false;
+    const src = (selectedAlert.source_type || "").toUpperCase();
+    const isCyber =
+      src === "CYBERSECURITY_THREAT" ||
+      src.includes("CYBER") ||
+      src.includes("THREAT") ||
+      src.includes("MALWARE");
+    if (!isCyber) return false;
+    if (isWorkstationIsolated) return false;
+    const pb = (selectedAlert.playbook_initiated || "").toUpperCase();
+    const hasContained =
+      pb.includes("PB-02") || pb.includes("PB-03") || pb.includes("CONTAINMENT");
+    return !hasContained;
+  }, [selectedAlert, isWorkstationIsolated]);
+
+  // Admin-authorized Rollback of Workstation Isolation (Rule 19)
+  const handleRollbackIsolation = async () => {
+    if (!selectedAlert?.device?.id) return;
+    setIsRollingBack(true);
+    try {
+      await rollbackWorkstationIsolation(selectedAlert.device.id);
+      setWorkstations((prev) =>
+        prev.map((w) =>
+          String(w.id) === String(selectedAlert.device.id)
+            ? { ...w, status: "ONLINE", is_isolated: false }
+            : w
+        )
+      );
+      setAlerts((prev) =>
+        prev.map((a) =>
+          a.id === selectedAlert.id
+            ? {
+                ...a,
+                notes: [
+                  {
+                    timestamp: "Just now",
+                    author: user?.full_name || user?.username || "SOC Analyst",
+                    type: "Operator",
+                    content: "Workstation isolation rolled back by Admin. Host restored to ONLINE.",
+                  },
+                  ...(a.notes || []),
+                ],
+              }
+            : a
+        )
+      );
+      setFeedbackMessage(
+        `Workstation ${selectedAlert.device.name} isolation successfully rolled back to ONLINE.`
+      );
+    } catch (err: any) {
+      setFeedbackMessage(`Isolation rollback failed: ${err?.message || "Error"}`);
+    } finally {
+      setIsRollingBack(false);
+      setShowActionsDropdown(false);
+    }
+    setTimeout(() => setFeedbackMessage(null), 5000);
+  };
+
+  // Manual Containment Escalation (SOC Operator Override for active cyber threats)
+  const executeManualContainmentPlaybook = async () => {
     if (!selectedAlert) return;
     setShowSoarModal(false);
     try {
-      await resolveAlert(selectedAlert.id, "SOAR Containment Playbook Executed");
+      const wsId = selectedAlert.device.id;
+      if (wsId) {
+        await isolateWorkstation(wsId).catch(() => {});
+      }
+      await resolveAlert(
+        selectedAlert.id,
+        "Manual SOAR Containment Playbook Enforced by SOC Analyst"
+      );
       refreshAlertCounts();
       setAlerts((prev) =>
-        prev.map((a) => (a.id === selectedAlert.id ? { ...a, status: "Resolved" } : a))
+        prev.map((a) =>
+          a.id === selectedAlert.id
+            ? {
+                ...a,
+                status: "Monitored",
+                playbook_initiated:
+                  a.playbook_initiated || "PB-03: Surgical Network Isolation (Manual Override)",
+                notes: [
+                  {
+                    timestamp: "Just now",
+                    author: user?.full_name || user?.username || "SOC Analyst",
+                    type: "Operator",
+                    content: "Manual SOAR Containment enforced via SOC Analyst override.",
+                  },
+                  ...(a.notes || []),
+                ],
+              }
+            : a
+        )
       );
+      if (wsId) {
+        setWorkstations((prev) =>
+          prev.map((w) =>
+            String(w.id) === String(wsId) ? { ...w, status: "ISOLATED", is_isolated: true } : w
+          )
+        );
+      }
       setFeedbackMessage(
-        `SOAR Containment Playbook Executed on ${selectedAlert.device.name}. Target sockets contained; host compute preserved.`
+        `Manual SOAR Containment enforced on ${selectedAlert.device.name}. Target sockets contained and host isolated.`
       );
     } catch (err: any) {
-      setFeedbackMessage(`SOAR execution failed: ${err?.message || "Error"}`);
+      setFeedbackMessage(`Containment execution failed: ${err?.message || "Error"}`);
     }
-    setTimeout(() => setFeedbackMessage(null), 6000);
+    setTimeout(() => setFeedbackMessage(null), 5000);
   };
 
   const handleAddNote = (e: React.FormEvent) => {
@@ -565,7 +733,7 @@ export default function AlertsPage() {
 
     const newNote: NoteItem = {
       timestamp: "Just now",
-      author: "IT Administrator",
+      author: user?.full_name || user?.username || "SOC Analyst",
       type: "Operator",
       content: newNoteText.trim(),
     };
@@ -1148,20 +1316,66 @@ export default function AlertsPage() {
                         </button>
                       )}
 
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowActionsDropdown(false);
-                          setShowSoarModal(true);
-                        }}
-                        className="w-full px-2.5 py-1.5 rounded-lg text-left text-rose-400 hover:bg-rose-500/15 flex items-center gap-2 transition-colors cursor-pointer"
-                      >
-                        <Zap className="w-3.5 h-3.5" />
-                        <span>Trigger SOAR Containment</span>
-                      </button>
+                      {/* Point 4: Authorize Held Action for Human-Intervention alerts */}
+                      {selectedAlert.requires_human_intervention && (
+                        <button
+                          type="button"
+                          disabled={!isAdmin}
+                          title={!isAdmin ? "Restricted to ADMIN role" : "Authorize held containment action"}
+                          onClick={() => {
+                            setShowActionsDropdown(false);
+                            handleApproveAlert(selectedAlert.id);
+                          }}
+                          className={`w-full px-2.5 py-1.5 rounded-lg text-left flex items-center gap-2 transition-colors ${
+                            isAdmin
+                              ? "text-rose-400 hover:bg-rose-500/15 cursor-pointer"
+                              : "text-slate-500 cursor-not-allowed"
+                          }`}
+                        >
+                          <ShieldCheck className="w-3.5 h-3.5" />
+                          <span>Authorize Held Mitigation {isAdmin ? "(Admin)" : "(Locked)"}</span>
+                        </button>
+                      )}
+
+                      {/* Manual Containment Override for active, uncontained cyber threats */}
+                      {canManualEscalate && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowActionsDropdown(false);
+                            setShowSoarModal(true);
+                          }}
+                          className="w-full px-2.5 py-1.5 rounded-lg text-left text-rose-400 hover:bg-rose-500/15 flex items-center gap-2 transition-colors cursor-pointer"
+                        >
+                          <Zap className="w-3.5 h-3.5" />
+                          <span>Escalate to Containment (Manual Override)</span>
+                        </button>
+                      )}
+
+                      {/* Rollback Isolation for isolated endpoints */}
+                      {isWorkstationIsolated && (
+                        <button
+                          type="button"
+                          disabled={!isAdmin || isRollingBack}
+                          title={!isAdmin ? "Restricted to ADMIN role" : "Restore isolated workstation to ONLINE"}
+                          onClick={handleRollbackIsolation}
+                          className={`w-full px-2.5 py-1.5 rounded-lg text-left flex items-center gap-2 transition-colors ${
+                            isAdmin
+                              ? "text-amber-400 hover:bg-amber-500/15 cursor-pointer"
+                              : "text-slate-500 cursor-not-allowed"
+                          }`}
+                        >
+                          {isRollingBack ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <RotateCcw className="w-3.5 h-3.5" />
+                          )}
+                          <span>Rollback Host Isolation {isAdmin ? "(Admin)" : "(Locked)"}</span>
+                        </button>
+                      )}
 
                       <Link
-                        href={`/devices`}
+                        href={selectedAlert.device.id ? `/devices/${selectedAlert.device.id}` : "/devices"}
                         className="w-full px-2.5 py-1.5 rounded-lg text-left text-slate-200 hover:bg-slate-800 flex items-center gap-2 transition-colors cursor-pointer"
                       >
                         <Server className="w-3.5 h-3.5 text-blue-400" />
@@ -1255,8 +1469,13 @@ export default function AlertsPage() {
                       </div>
                       <button
                         type="button"
+                        disabled={!isAdmin}
+                        title={!isAdmin ? "Restricted to ADMIN role" : "Authorize held containment action"}
                         onClick={() => handleApproveAlert(selectedAlert.id)}
-                        className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs shadow-md shadow-rose-600/40 transition-colors cursor-pointer"
+                        className={`px-3 py-1 rounded-lg font-semibold text-xs shadow-md transition-colors ${isAdmin
+                          ? "bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/40 cursor-pointer"
+                          : "bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed shadow-none"
+                          }`}
                       >
                         Authorize Action
                       </button>
@@ -1281,6 +1500,47 @@ export default function AlertsPage() {
                       <p className="text-[10px] font-mono text-cyan-400 pt-1">
                         Playbook Dispatched: {selectedAlert.playbook_initiated}
                       </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Autonomous SOAR Closed-Loop Execution Receipt */}
+                {selectedAlert.playbook_initiated && (
+                  <div className="p-3.5 rounded-xl border border-emerald-500/40 bg-emerald-950/20 text-xs space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 text-emerald-300 font-bold">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span>Autonomous SOAR Executed: {selectedAlert.playbook_initiated}</span>
+                      </div>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                        CONTROL-PLANE SIMULATION
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-emerald-100/85 leading-relaxed font-sans">
+                      Closed-loop SOAR mitigation executed autonomously upon anomaly detection. Targeted sockets contained with immutable SHA-256 audit trail preserved.
+                    </p>
+                    {isWorkstationIsolated && (
+                      <div className="flex items-center justify-between gap-2 pt-2 border-t border-emerald-500/30">
+                        <span className="text-[11px] font-mono text-amber-300 flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+                          Endpoint is in ISOLATED state
+                        </span>
+                        {isAdmin && (
+                          <button
+                            type="button"
+                            disabled={isRollingBack}
+                            onClick={handleRollbackIsolation}
+                            className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                          >
+                            {isRollingBack ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <RotateCcw className="w-3 h-3" />
+                            )}
+                            <span>Rollback Isolation</span>
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}
@@ -1343,7 +1603,7 @@ export default function AlertsPage() {
                     Quick Actions
                   </h4>
                   <Link
-                    href="/devices"
+                    href={selectedAlert.device.id ? `/devices/${selectedAlert.device.id}` : "/devices"}
                     className="p-2.5 rounded-lg bg-slate-900/60 hover:bg-slate-800 border border-slate-800 text-slate-300 flex items-center justify-between transition-colors text-xs"
                   >
                     <span className="flex items-center gap-1.5">
@@ -1513,12 +1773,12 @@ export default function AlertsPage() {
       </div>
 
 
-      {/* SOAR PLAYBOOK MODAL */}
+      {/* MANUAL SOAR CONTAINMENT ESCALATION MODAL */}
       {showSoarModal && selectedAlert && (
         <Modal
           isOpen={showSoarModal}
           onClose={() => setShowSoarModal(false)}
-          title={`Enforce SOAR Containment Playbook`}
+          title="Enforce SOAR Containment (Manual Override)"
           footer={
             <>
               <button
@@ -1530,43 +1790,47 @@ export default function AlertsPage() {
               </button>
               <button
                 type="button"
-                onClick={executeSoarPlaybook}
-                className="px-4 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-xs font-semibold text-white shadow-lg shadow-rose-600/30 cursor-pointer"
+                onClick={executeManualContainmentPlaybook}
+                className="px-4 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-xs font-semibold text-white shadow-lg shadow-rose-600/30 transition-colors cursor-pointer"
               >
-                Execute SOAR Containment Playbook
+                Enforce Containment Playbook
               </button>
             </>
           }
         >
           <div className="space-y-3 text-xs">
             <p className="text-slate-300 leading-relaxed">
-              Enforcing the automated SOAR Containment Playbook will execute the following surgical sequence:
+              Enforcing manual containment override on <strong className="text-white">{selectedAlert.device.name}</strong> will execute the following surgical sequence:
             </p>
 
-            <div className="p-3.5 rounded-xl border border-slate-800 bg-[#070d1e] space-y-2 font-mono text-[11px]">
-              <div className="flex items-center gap-2 text-rose-400 font-bold">
-                <Zap className="w-4 h-4 shrink-0" />
-                <span>Playbook 2: SIGTERM Targeted Anomalous Sockets / Processes</span>
+            <div className="p-3.5 rounded-xl border border-slate-800 bg-[#070d1e] space-y-2.5 font-mono text-[11px]">
+              <div>
+                <div className="flex items-center gap-2 text-rose-400 font-bold">
+                  <Zap className="w-4 h-4 shrink-0" />
+                  <span>Playbook 2: SIGTERM Targeted Anomalous Sockets</span>
+                </div>
+                <p className="text-slate-400 text-[10px] pl-6">
+                  Terminates offending PID sockets while preserving legitimate host compute state without rebooting.
+                </p>
               </div>
-              <p className="text-slate-400 text-[10px] pl-6">
-                Terminates offending PID sockets while preserving host execution without rebooting.
-              </p>
-
-              <div className="flex items-center gap-2 text-amber-400 font-bold pt-1 border-t border-slate-800/80">
-                <Shield className="w-4 h-4 shrink-0" />
-                <span>Playbook 3: Surgical Network Isolation (Ingress/Egress Filtering)</span>
+              <div className="pt-2 border-t border-slate-800/80">
+                <div className="flex items-center gap-2 text-amber-400 font-bold">
+                  <Shield className="w-4 h-4 shrink-0" />
+                  <span>Playbook 3: Surgical Network Isolation</span>
+                </div>
+                <p className="text-slate-400 text-[10px] pl-6">
+                  Drops unauthorized ingress/egress beaconing connections; transitions workstation status to ISOLATED.
+                </p>
               </div>
-              <p className="text-slate-400 text-[10px] pl-6">
-                Drops unauthorized C2 beaconing connections; preserves legitimate researcher compute state.
-              </p>
-
-              <div className="flex items-center gap-2 text-cyan-400 font-bold pt-1 border-t border-slate-800/80">
-                <CheckCircle2 className="w-4 h-4 shrink-0" />
-                <span>Cryptographic Audit Logging</span>
+              <div className="pt-2 border-t border-slate-800/80">
+                <div className="flex items-center gap-2 text-cyan-400 font-bold">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <span>Cryptographic Audit Logging</span>
+                </div>
+                <p className="text-slate-400 text-[10px] pl-6">
+                  Generates immutable SHA-256 audit event record registered in activity logs.
+                </p>
               </div>
-              <p className="text-slate-400 text-[10px] pl-6">
-                Generates immutable audit event record registered in activity logs.
-              </p>
             </div>
           </div>
         </Modal>

@@ -72,7 +72,7 @@ export default function ReportsPage() {
   const [selectedUptimePointIdx, setSelectedUptimePointIdx] = useState<number | null>(null);
 
   // Schedule Report Form
-  const [scheduleEmail, setScheduleEmail] = useState("admin@university.edu, secops@university.edu");
+  const [scheduleEmail, setScheduleEmail] = useState("admin@kku.edu.sa, secops@kku.edu.sa");
   const [scheduleCadence, setScheduleCadence] = useState("Weekly");
   const [scheduleTime, setScheduleTime] = useState("Wednesdays at 10:00 AM AST");
   const [scheduleIncludePdf, setScheduleIncludePdf] = useState(true);
@@ -125,6 +125,20 @@ export default function ReportsPage() {
       security_score_sub: summary.system_health_rating,
     };
   }, [summary]);
+
+  const healthRatingColor = useMemo(() => {
+    const r = (summary.system_health_rating || "").toUpperCase();
+    if (r.includes("OPTIMAL") || r.includes("A+") || r.includes("GOOD") || r.includes("(A)")) {
+      return "text-emerald-400";
+    }
+    if (r.includes("ATTENTION") || r.includes("WARNING")) {
+      return "text-amber-400";
+    }
+    if (r.includes("CRITICAL") || r.includes("DEGRADED") || r.includes("POOR")) {
+      return "text-rose-400";
+    }
+    return "text-slate-400";
+  }, [summary.system_health_rating]);
 
   // Section 1: Fleet percentages & Uptime Trend
   const healthStats = useMemo(() => {
@@ -310,7 +324,7 @@ export default function ReportsPage() {
     <div className="space-y-6">
       {/* Toast Feedback Notification */}
       {feedbackToast && (
-        <div className="p-3.5 rounded-xl bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 text-xs flex items-center justify-between shadow-lg shadow-emerald-950/40 animate-fade-in">
+        <div className="p-3.5 rounded-xl bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 text-xs flex items-center justify-between shadow-lg shadow-emerald-950/40 animate-fade-in print:hidden">
           <div className="flex items-center gap-2.5">
             <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
             <span>{feedbackToast}</span>
@@ -322,7 +336,7 @@ export default function ReportsPage() {
       )}
 
       {/* In-Page Sub-Toolbar */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 print:hidden">
         {/* Date Range Selector Dropdown */}
         <div className="flex items-center gap-2">
           <div className="relative">
@@ -503,7 +517,7 @@ export default function ReportsPage() {
                 </span>
                 <span className="text-xs text-slate-500 font-medium">/100</span>
               </div>
-              <div className="text-[11px] font-medium text-emerald-400 flex items-center gap-1">
+              <div className={`text-[11px] font-medium ${healthRatingColor} flex items-center gap-1`}>
                 <span>{kpis.security_score_sub}</span>
               </div>
             </div>
@@ -709,7 +723,7 @@ export default function ReportsPage() {
                   <span className="text-xs text-slate-500 font-medium">/100</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] text-emerald-400 font-medium">
+                  <span className={`text-[11px] ${healthRatingColor} font-medium`}>
                     {summary.system_health_rating}
                   </span>
                 </div>
@@ -1023,7 +1037,7 @@ export default function ReportsPage() {
 
       {/* Schedule Report Modal */}
       {showScheduleModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in print:hidden">
           <div className="bg-slate-900 border border-slate-700/90 rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-2xl animate-scale-in">
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
               <div className="flex items-center gap-2">
