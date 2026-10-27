@@ -142,7 +142,9 @@ async def agent_heartbeat(
 
     now = datetime.now(timezone.utc)
     workstation.last_seen_at = now
-    workstation.status = payload.status.value
+    # Isolation is a control-plane security state; routine heartbeats must not clear it.
+    if workstation.status != "ISOLATED":
+        workstation.status = payload.status.value
     workstation.agent_version = payload.agent_version
 
     await session.commit()
