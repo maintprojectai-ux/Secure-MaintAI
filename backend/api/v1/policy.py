@@ -52,7 +52,7 @@ class KillSwitchRequest(BaseModel):
 async def evaluate_workstation_policy(
     workstation_id: UUID,
     session: Annotated[AsyncSession, Depends(get_async_session)],
-    current_user: Annotated[UserAccount, Depends(get_current_active_user)],
+    current_user: Annotated[UserAccount, Depends(require_roles([RoleEnum.ADMIN]))],
     auto_execute: bool = Query(
         default=True,
         description="Whether to automatically execute the authorized SOAR playbook.",
