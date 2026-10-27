@@ -20,7 +20,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.database import get_async_session
-from backend.core.dependencies import get_current_active_user
+from backend.core.dependencies import get_current_active_user, verify_siem_ingest_key
 from backend.models.alert import Alert
 from backend.models.anomaly import AnomalyDetection
 from backend.models.security_event import SecurityEvent
@@ -57,6 +57,7 @@ class CorrelatedIncidentResponse(BaseModel):
 
 @router.post(
     "/events",
+    dependencies=[Depends(verify_siem_ingest_key)],
     response_model=SecurityEventResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Ingest a normalized security event",
@@ -116,6 +117,7 @@ async def ingest_security_event(
 
 @router.post(
     "/events/wazuh",
+    dependencies=[Depends(verify_siem_ingest_key)],
     response_model=SecurityEventResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Ingest a raw Wazuh SIEM alert payload",
@@ -140,6 +142,7 @@ async def ingest_wazuh_event(
 
 @router.post(
     "/events/batch",
+    dependencies=[Depends(verify_siem_ingest_key)],
     status_code=status.HTTP_201_CREATED,
     summary="Batch ingest normalized security events",
 )
