@@ -75,6 +75,7 @@ interface AlertItem {
     owner: string;
   };
   source: string;
+  source_type: string;
   time: string;
   lastOccurred: string;
   occurrences: number;
@@ -137,6 +138,7 @@ function mapBackendAlertToItem(raw: any, workstationMap?: Map<string, any>): Ale
     ws?.os_type || ws?.operating_system || raw.workstation?.operating_system || "Linux / Windows Host";
   const deviceLocation = ws?.department || ws?.location?.building || "Academic Infrastructure";
   const deviceOwner = ws?.assigned_user?.full_name || ws?.assigned_user?.email || "SOC Managed";
+  const rawSourceType = String(raw.source_type || "").toUpperCase();
 
   return {
     id,
@@ -154,12 +156,14 @@ function mapBackendAlertToItem(raw: any, workstationMap?: Map<string, any>): Ale
       owner: deviceOwner,
     },
     source: raw.source_type ? raw.source_type.replace(/_/g, " ") : "Monitoring Agent",
+    source_type: rawSourceType,
     time: formattedTime,
     lastOccurred: formattedTime,
     occurrences: 1,
     tags: [
-      String(raw.source_type || "system").toLowerCase(),
+      String(raw.source_type || "system").toLowerCase().replace(/_/g, " "),
       String(raw.severity || "info").toLowerCase(),
+      ...(raw.playbook_initiated ? [String(raw.playbook_initiated).toLowerCase()] : []),
     ],
     cpuMetrics: {
       current: 78,
@@ -203,6 +207,43 @@ function mapBackendAlertToItem(raw: any, workstationMap?: Map<string, any>): Ale
     isAcknowledged: Boolean(raw.acknowledged_at || (raw.status || "").toUpperCase() === "ACKNOWLEDGED"),
     acknowledgedAt: raw.acknowledged_at ? String(raw.acknowledged_at) : null,
   };
+}
+
+/**
+ * Strict 1-to-1 matcher for the university resilience platform's 4 canonical alert categories:
+ * - 1. Technical Anomaly: Direct telemetry ML anomaly screening (source_type = TECHNICAL_ANOMALY)
+ * - 2. Cyber Threat: SIEM/XDR threat correlation & process/host containment (source_type = CYBERSECURITY_THREAT)
+ * - 3. Predictive Maintenance: Equipment degradation & Playbook 04 maintenance advisories (source_type = PREDICTIVE_MAINTENANCE)
+ * - 4. Human Intervention: Policy holds requiring manual SOC operator authorization (requires_human_intervention = true)
+ *
+ * Each alert belongs strictly to its canonical category so sum(categories) === total alerts.
+ */
+function matchesSourceCategory(alt: AlertItem, categoryId: string): boolean {
+  if (categoryId === "ALL") return true;
+
+  const rawType = (alt.source_type || "").toUpperCase();
+
+  if (categoryId === "HUMAN_INTERVENTION_REQUIRED") {
+    return (
+      rawType === "HUMAN_INTERVENTION_REQUIRED" ||
+      Boolean(alt.requires_human_intervention) ||
+      (alt.source || "").toLowerCase().includes("human")
+    );
+  }
+
+  if (categoryId === "TECHNICAL_ANOMALY") {
+    return rawType === "TECHNICAL_ANOMALY";
+  }
+
+  if (categoryId === "CYBERSECURITY_THREAT") {
+    return rawType === "CYBERSECURITY_THREAT";
+  }
+
+  if (categoryId === "PREDICTIVE_MAINTENANCE") {
+    return rawType === "PREDICTIVE_MAINTENANCE";
+  }
+
+  return true;
 }
 
 export default function AlertsPage() {
@@ -285,6 +326,18 @@ export default function AlertsPage() {
       else if (sevParam === "HIGH") setActiveSeverityTab("High");
       else if (sevParam === "MEDIUM") setActiveSeverityTab("Medium");
       else if (sevParam === "LOW") setActiveSeverityTab("Low");
+
+      const catParam = (params.get("category") || params.get("source_type") || "").toUpperCase();
+      if (
+        [
+          "TECHNICAL_ANOMALY",
+          "CYBERSECURITY_THREAT",
+          "PREDICTIVE_MAINTENANCE",
+          "HUMAN_INTERVENTION_REQUIRED",
+        ].includes(catParam)
+      ) {
+        setSelectedSourceCategory(catParam);
+      }
     }
 
     loadAlerts(true);
@@ -298,16 +351,22 @@ export default function AlertsPage() {
     };
   }, []);
 
-  // Selected Alert
-  const selectedAlert = alerts.find((a) => a.id === selectedAlertId) || (alerts.length > 0 ? alerts[0] : null);
-
   // Severity counts computed directly from real live alerts (4 canonical severities)
-  const severityCounts = {
+  const severityCounts = useMemo(() => ({
     Critical: alerts.filter((a) => a.severity === "Critical").length,
     High: alerts.filter((a) => a.severity === "High").length,
     Medium: alerts.filter((a) => a.severity === "Medium").length,
     Low: alerts.filter((a) => a.severity === "Low").length,
-  };
+  }), [alerts]);
+
+  // Dynamic counts for the 4-point report alert categories
+  const categoryCounts = useMemo(() => ({
+    ALL: alerts.length,
+    TECHNICAL_ANOMALY: alerts.filter((a) => matchesSourceCategory(a, "TECHNICAL_ANOMALY")).length,
+    CYBERSECURITY_THREAT: alerts.filter((a) => matchesSourceCategory(a, "CYBERSECURITY_THREAT")).length,
+    PREDICTIVE_MAINTENANCE: alerts.filter((a) => matchesSourceCategory(a, "PREDICTIVE_MAINTENANCE")).length,
+    HUMAN_INTERVENTION_REQUIRED: alerts.filter((a) => matchesSourceCategory(a, "HUMAN_INTERVENTION_REQUIRED")).length,
+  }), [alerts]);
 
   const topSeverityCards = [
     {
@@ -369,31 +428,8 @@ export default function AlertsPage() {
         return false;
       }
       // Report 4-Point Source Category Filter
-      if (selectedSourceCategory !== "ALL") {
-        if (selectedSourceCategory === "HUMAN_INTERVENTION_REQUIRED") {
-          if (!alt.requires_human_intervention && !alt.source.toLowerCase().includes("human")) {
-            return false;
-          }
-        } else if (selectedSourceCategory === "TECHNICAL_ANOMALY") {
-          const isTech =
-            alt.source.toLowerCase().includes("technical") ||
-            alt.source.toLowerCase().includes("agent") ||
-            alt.tags.some((t) => t.includes("tech") || t.includes("cpu") || t.includes("disk"));
-          if (!isTech) return false;
-        } else if (selectedSourceCategory === "CYBERSECURITY_THREAT") {
-          const isCyber =
-            alt.source.toLowerCase().includes("cyber") ||
-            alt.source.toLowerCase().includes("xdr") ||
-            alt.source.toLowerCase().includes("siem") ||
-            alt.tags.some((t) => t.includes("cyber") || t.includes("c2") || t.includes("login"));
-          if (!isCyber) return false;
-        } else if (selectedSourceCategory === "PREDICTIVE_MAINTENANCE") {
-          const isMaint =
-            alt.source.toLowerCase().includes("maintenance") ||
-            alt.title.toLowerCase().includes("maintenance") ||
-            alt.tags.some((t) => t.includes("maint") || t.includes("capacity"));
-          if (!isMaint) return false;
-        }
+      if (!matchesSourceCategory(alt, selectedSourceCategory)) {
+        return false;
       }
       // Search Query
       if (searchQuery.trim()) {
@@ -403,13 +439,22 @@ export default function AlertsPage() {
         const matchHost = alt.device.name.toLowerCase().includes(q);
         const matchIp = alt.device.ip.toLowerCase().includes(q);
         const matchSource = alt.source.toLowerCase().includes(q);
-        if (!matchTitle && !matchDesc && !matchHost && !matchIp && !matchSource) {
+        const matchPlaybook = (alt.playbook_initiated || "").toLowerCase().includes(q);
+        if (!matchTitle && !matchDesc && !matchHost && !matchIp && !matchSource && !matchPlaybook) {
           return false;
         }
       }
       return true;
     });
   }, [alerts, activeSeverityTab, selectedStatusFilter, selectedSourceCategory, searchQuery]);
+
+  // Selected Alert is scoped to the filtered view for contextual alignment
+  const selectedAlert = useMemo(() => {
+    return (
+      filteredAlerts.find((a) => a.id === selectedAlertId) ||
+      (filteredAlerts.length > 0 ? filteredAlerts[0] : null)
+    );
+  }, [filteredAlerts, selectedAlertId]);
 
   // Reset to page 1 whenever search, filters or pageSize change
   useEffect(() => {
@@ -770,17 +815,26 @@ export default function AlertsPage() {
             {(["All Alerts", "Critical", "High", "Medium", "Low"] as const).map(
               (tab) => {
                 const isActive = activeSeverityTab === tab;
+                const count = tab === "All Alerts" ? alerts.length : severityCounts[tab];
                 return (
                   <button
                     key={tab}
                     type="button"
                     onClick={() => setActiveSeverityTab(tab)}
-                    className={`px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer whitespace-nowrap ${isActive
+                    className={`px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${isActive
                       ? "bg-rose-500/20 text-rose-300 border border-rose-500/40"
                       : "text-slate-400 hover:text-slate-200 hover:bg-slate-900/60"
                       }`}
                   >
-                    {tab}
+                    <span>{tab}</span>
+                    <span
+                      className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${isActive
+                          ? "bg-rose-500/30 text-rose-200 font-semibold"
+                          : "bg-slate-800/80 text-slate-400"
+                        }`}
+                    >
+                      {count}
+                    </span>
                   </button>
                 );
               }
@@ -788,26 +842,35 @@ export default function AlertsPage() {
           </div>
 
           {/* Report 4-Point Source Category Filter Pills */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px] scrollbar-none">
+          <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
             {[
               { id: "ALL", label: "All Categories" },
-              { id: "TECHNICAL_ANOMALY", label: "1. Technical Anomaly" },
-              { id: "CYBERSECURITY_THREAT", label: "2. Cyber Threat" },
-              { id: "PREDICTIVE_MAINTENANCE", label: "3. Predictive Maintenance" },
-              { id: "HUMAN_INTERVENTION_REQUIRED", label: "4. Human Intervention" },
+              { id: "TECHNICAL_ANOMALY", label: "Technical Anomaly" },
+              { id: "CYBERSECURITY_THREAT", label: "Cyber Threat" },
+              { id: "PREDICTIVE_MAINTENANCE", label: "Predictive Maintenance" },
+              { id: "HUMAN_INTERVENTION_REQUIRED", label: "Human Intervention" },
             ].map((cat) => {
               const isSelected = selectedSourceCategory === cat.id;
+              const count = categoryCounts[cat.id as keyof typeof categoryCounts] ?? 0;
               return (
                 <button
                   key={cat.id}
                   type="button"
                   onClick={() => setSelectedSourceCategory(cat.id)}
-                  className={`px-2.5 py-1 rounded-full font-medium transition-colors cursor-pointer whitespace-nowrap border ${isSelected
-                    ? "bg-blue-600/25 text-blue-300 border-blue-500/50"
+                  className={`px-2.5 py-1 rounded-full font-medium transition-colors cursor-pointer whitespace-nowrap border flex items-center gap-1.5 ${isSelected
+                    ? "bg-blue-600/25 text-blue-300 border-blue-500/50 shadow-sm shadow-blue-500/20"
                     : "text-slate-400 border-slate-800 bg-[#060b18]/60 hover:text-slate-200 hover:border-slate-700"
                     }`}
                 >
-                  {cat.label}
+                  <span>{cat.label}</span>
+                  <span
+                    className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${isSelected
+                        ? "bg-blue-500/30 text-blue-200 font-semibold"
+                        : "bg-slate-800/80 text-slate-400"
+                      }`}
+                  >
+                    {count}
+                  </span>
                 </button>
               );
             })}
@@ -862,15 +925,15 @@ export default function AlertsPage() {
 
           {/* Table Container */}
           <div className="overflow-x-auto rounded-xl border border-slate-800/80">
-            <table className="w-full text-left text-xs border-collapse">
+            <table className="w-full text-left text-xs border-collapse min-w-[660px]">
               <thead>
                 <tr className="border-b border-slate-800 bg-[#060b18]/80 text-[11px] font-medium text-slate-400">
-                  <th className="py-2.5 px-3">Severity</th>
-                  <th className="py-2.5 px-3">Alert Title</th>
-                  <th className="py-2.5 px-3">Device</th>
-                  <th className="py-2.5 px-3">Source</th>
-                  <th className="py-2.5 px-3">Time</th>
-                  <th className="py-2.5 px-3">Status</th>
+                  <th className="py-2.5 px-3 min-w-[80px]">Severity</th>
+                  <th className="py-2.5 px-3 min-w-[180px]">Alert Title</th>
+                  <th className="py-2.5 px-3 min-w-[120px]">Device</th>
+                  <th className="py-2.5 px-3 min-w-[150px]">Source</th>
+                  <th className="py-2.5 px-3 min-w-[90px] whitespace-nowrap">Time</th>
+                  <th className="py-2.5 px-3 min-w-[70px] whitespace-nowrap">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
@@ -890,9 +953,16 @@ export default function AlertsPage() {
                           {renderSeverityBadge(alt.severity)}
                         </td>
                         <td className="py-3 px-3 min-w-[180px]">
-                          <p className="font-semibold text-white tracking-tight line-clamp-1">
-                            {alt.title}
-                          </p>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <p className="font-semibold text-white tracking-tight line-clamp-1">
+                              {alt.title}
+                            </p>
+                            {alt.requires_human_intervention && (
+                              <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[9px] font-mono font-medium whitespace-nowrap">
+                                APPROVAL REQ
+                              </span>
+                            )}
+                          </div>
                           <p className="text-[10px] text-slate-400 mt-0.5 line-clamp-1">
                             {alt.description}
                           </p>
@@ -903,8 +973,16 @@ export default function AlertsPage() {
                             {alt.device.ip}
                           </p>
                         </td>
-                        <td className="py-3 px-3 whitespace-nowrap text-slate-300 text-[11px]">
-                          {alt.source}
+                        <td className="py-3 px-3 whitespace-nowrap">
+                          <span className="text-slate-300 text-[11px] font-medium block">
+                            {alt.source}
+                          </span>
+                          {alt.playbook_initiated && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-mono text-purple-300 mt-0.5">
+                              <Zap className="w-2.5 h-2.5 text-purple-400" />
+                              {alt.playbook_initiated.replace("PLAYBOOK_", "PB-").replace(/_/g, " ")}
+                            </span>
+                          )}
                         </td>
                         <td className="py-3 px-3 whitespace-nowrap text-slate-400 font-mono text-[10px]">
                           {alt.time}
@@ -1108,8 +1186,8 @@ export default function AlertsPage() {
                   disabled={selectedAlert.isAcknowledged || acknowledgingId === selectedAlert.id}
                   onClick={() => handleAcknowledge(selectedAlert.id)}
                   className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all shadow-md ${selectedAlert.isAcknowledged
-                      ? "bg-emerald-950/70 border border-emerald-500/40 text-emerald-400 cursor-default shadow-none"
-                      : "bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/30 cursor-pointer disabled:opacity-75"
+                    ? "bg-emerald-950/70 border border-emerald-500/40 text-emerald-400 cursor-default shadow-none"
+                    : "bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/30 cursor-pointer disabled:opacity-75"
                     }`}
                 >
                   {acknowledgingId === selectedAlert.id ? (
