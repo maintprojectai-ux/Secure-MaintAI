@@ -2,7 +2,7 @@
 
 **AI-Driven University Infrastructure Resilience Platform**
 
-[![Tests](https://img.shields.io/badge/Tests-182%20Passed-success?style=flat-square&logo=pytest)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-203%20Passed-success?style=flat-square&logo=pytest)](tests/)
 [![Python](https://img.shields.io/badge/Python-3.11%20%7C%20FastAPI-blue?style=flat-square&logo=python)](backend/)
 [![Next.js](https://img.shields.io/badge/Next.js-16.3.4%20(Turbopack)-black?style=flat-square&logo=next.js)](frontend/)
 [![TailwindCSS](https://img.shields.io/badge/TailwindCSS-v4.3.3%20(CSS--first)-38bdf8?style=flat-square&logo=tailwindcss)](frontend/)
@@ -83,8 +83,8 @@ Secure-MaintAI is an AI-driven infrastructure resilience and automated response 
                                        ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │            Administrative Dashboard UI (Next.js 16 + Tailwind v4)           │
-│    Dashboard │ Devices │ Alerts │ Cybersecurity │ AI Predictions │ Reports  │
-│       Maintenance │ Users Management │ Activity Logs │ Settings │ Help      │
+│  Dashboard │ Device Monitoring │ Alerts (4-Point) │ AI Predictions │ Reports│
+│                  Activity Logs │ Cryptographic Audit Trail                  │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -98,14 +98,14 @@ Secure-MaintAI is an AI-driven infrastructure resilience and automated response 
   - **Model 02-A**: 33-feature Random Forest classifier trained on RCAEval for technical root-cause diagnosis (`cpu`, `mem`, `disk`, `delay`, `loss`).
   - **Model 02-B**: 30-feature Random Forest classifier trained on Windows-APT 2025 for cyber attack detection (Cryptojacking, privilege escalation, lateral movement).
 - **SIEM / XDR Ingestion**: Vendor-agnostic security adapter layer normalizing Sysmon, Wazuh, and network socket telemetry (detecting Stratum mining pool beaconing on ports 3333, 4444).
-- **University IdP Context & RBAC**: Synchronizes identity profiles (`ADMIN`, `IT_OPERATOR`, `RESEARCHER`, `STUDENT`) with cached fallback protection against IdP service outages (Rule 18).
+- **University IdP Context & RBAC**: Synchronizes identity profiles with canonical university roles (`ADMIN`, `RESEARCHER`, `STUDENT`) with cached fallback protection against IdP service outages (Rule 8 & 18).
 - **Role-Aware Surgical Response**:
   - Legitimate compute workloads run by verified **Researchers** (e.g. PyTorch HPC simulations) are preserved without host disruption.
   - Rogue cryptomining executed under a **Student** profile triggers host network containment or targeted PID termination.
   - Network isolation is executed purely via packet-filtering rules without rebooting the host OS (Rule 19).
 - **Interactive 10-Stage Demonstration Controller**: Built into the Device Details page with live execution across 6 empirical resilience scenarios, supporting direct targeting of any active workstation.
 - **3-Tier Data Provenance System**: Strict mathematical and empirical attribution separating local training datasets (`TIER_1_LOCAL`), peer-reviewed benchmarks (`TIER_2_WEB`), and calibrated synthetic telemetry (`TIER_3_SYNTHETIC`).
-- **Comprehensive Next.js 16 Dashboard**: 15 dark-themed routes built with Turbopack matching approved UI specifications, live SVG dials, interactive radar simulators, and audit inspection.
+- **Comprehensive Next.js 16 Dashboard**: 6 core integrated modules built with Turbopack matching approved UI specifications, live SVG dials, interactive radar simulators, and audit inspection.
 
 ---
 
@@ -135,15 +135,15 @@ secure-maintai/
 │   ├── correlation_engine.py# Multi-source threat correlation engine
 │   └── policy_engine.py     # Role-sensitive security & containment policy engine
 ├── frontend/                # Next.js 16 (App Router) + Tailwind CSS v4 Dashboard
-│   ├── src/app/             # 13 Dashboard routes matching all approved UI mockups
+│   ├── src/app/             # 6 core integrated modules matching approved specifications
 │   ├── src/components/      # Reusable primitives, SVG charts, layout shell
-│   ├── src/context/         # AuthContext with 4-role live session simulation
+│   ├── src/context/         # AuthContext with 3-role live session simulation
 │   └── src/proxy.ts         # Next.js 16 edge request proxy and auth guard
 ├── database/                # Alembic database migrations and seed data
 │   └── migrations/versions/ # Foundation schema migrations
 ├── infrastructure/          # Docker compose and deployment configuration
 │   └── docker/              # Dockerfile.backend, compose configurations
-├── tests/                   # 182 automated tests across all test suites
+├── tests/                   # 203 automated tests across all test suites
 │   ├── unit/                # Unit tests (RBAC, policy, adapters, SOAR, IdP)
 │   ├── integration/         # Integration tests (APIs, anomaly persistence)
 │   ├── ml/                  # ML runtime inference and feature builder tests
@@ -217,11 +217,11 @@ Open [http://localhost:3000](http://localhost:3000) in your browser. All API req
 cd frontend
 npm run build
 ```
-Compiles with 0 errors across all 15 routes using Turbopack.
+Compiles with 0 errors across all routes using Turbopack.
 
 ---
 
-## 5. Automated Test Suite (182 Tests)
+## 5. Automated Test Suite (203 Tests)
 
 The repository includes a comprehensive test suite enforcing 100% test passing before code merging (Rule 4 & Rule 28):
 
@@ -234,22 +234,21 @@ pytest tests/ -v
 
 | Suite | Focus Areas | Tests | Status |
 | :--- | :--- | :---: | :---: |
-| **Unit Tests** | Security Policy Engine, SOAR Engine, IdP Service, RBAC, Adapters, Buffers, Schemas, JWT Security | 107 | **PASSED** |
-| **Integration Tests** | Telemetry Ingestion, Workstation Lifecycle, Security APIs, Incidents, Dashboard, Demo, Maintenance, Reports, System APIs | 52 | **PASSED** |
+| **Unit Tests** | Security Policy Engine, SOAR Engine, IdP Service, RBAC, Adapters, Buffers, Schemas, JWT Security | 97 | **PASSED** |
+| **Integration Tests** | Telemetry Ingestion, Workstation Lifecycle, Security APIs, Incidents, Dashboard, Demo, Maintenance, Reports, Alert 4-Point Taxonomy | 83 | **PASSED** |
 | **ML Runtime Tests** | Model 01/02-A/02-B loading, screening, diagnosis contracts, and latency benchmarks | 10 | **PASSED** |
 | **Rule 29 E2E Scenarios**| Mandatory verification scenarios (Cryptojacking, Research preservation, IdP fallback, Agent offline) | 13 | **PASSED** |
-| **Total** | | **182** | **100% GREEN** |
+| **Total** | | **203** | **100% GREEN** |
 
 ---
 
 ## 6. Role-Based Access Control (RBAC)
 
-The system implements strict, server-authoritative RBAC (Rule 8):
+The system implements strict, server-authoritative RBAC enforcing the 3 canonical university roles (Rule 8):
 
 | Role | Key Permissions | Target Use Case |
 | :--- | :--- | :--- |
-| **`ADMIN`** | Full platform administration, user account management, emergency kill switch activation, manual containment triggers, ML parameter tuning | University CISO & Lead Security Engineers |
-| **`IT_OPERATOR`** | Workstation fleet monitoring, alert acknowledgment, maintenance scheduling, process termination, isolation execution | Campus Network Operations Center (NOC) Engineers |
+| **`ADMIN`** | Full platform administration, isolation rollback, manual containment authorization, emergency kill switch activation, ML parameter tuning | University CISO, NOC & Lead Security Engineers |
 | **`RESEARCHER`** | Read access to own laboratory workstations, compute reservations, performance diagnostics; protected against automated containment | Faculty, Graduate Researchers, HPC Scientists |
 | **`STUDENT`** | Read-only telemetry access for assigned lab desktop; subject to strict automated containment playbooks on policy violation | Enrolled undergraduate and lab students |
 
@@ -269,20 +268,23 @@ The system implements strict, server-authoritative RBAC (Rule 8):
 | | `GET` | `/api/v1/telemetry/workstation/{id}` | Yes | Query historical telemetry time-series for workstation |
 | | `GET` | `/api/v1/telemetry/anomalies` | Yes | List recent ML anomaly detections and evidence |
 | **Workstations**| `GET` | `/api/v1/workstations` | Yes | Query fleet inventory with pagination and filters |
-| | `POST` | `/api/v1/workstations/{id}/isolate` | IT/Admin | Execute surgical network containment |
-| | `POST` | `/api/v1/workstations/{id}/rollback`| IT/Admin | Revert containment and restore normal networking |
+| | `GET` | `/api/v1/workstations/{id}` | Yes | Query single workstation metadata and telemetry summary |
 | **Security** | `POST` | `/api/v1/security/events` | Yes | Ingest normalized security events |
 | | `POST` | `/api/v1/security/events/wazuh` | Yes | Ingest raw Wazuh/Sysmon alerts |
 | | `POST` | `/api/v1/security/correlate/{id}` | Yes | Run multi-source threat correlation on workstation |
-| **SOAR & Policy**| `POST` | `/api/v1/policy/evaluate` | Yes | Evaluate security policies against threat context |
+| **SOAR & Policy**| `POST` | `/api/v1/policy/evaluate/{id}` | Yes | Evaluate security policies & dispatch role-sensitive containment |
+| | `POST` | `/api/v1/policy/rollback-isolation/{id}` | Admin | Revert surgical isolation and restore normal networking |
 | | `POST` | `/api/v1/policy/kill-switch` | Admin | Activate/deactivate global emergency containment |
 | **Incidents & Alerts** | `GET` | `/api/v1/incidents` | Yes | Query active incidents and forensic timelines |
-| | `GET` | `/api/v1/alerts` | Yes | Query active and acknowledged system alerts |
+| | `GET` | `/api/v1/alerts` | Yes | Query active and acknowledged system alerts (4-point taxonomy) |
+| | `POST` | `/api/v1/alerts/{id}/acknowledge` | Yes | Acknowledge alert by operator |
+| | `POST` | `/api/v1/alerts/{id}/resolve` | Yes | Mark alert as resolved |
+| | `POST` | `/api/v1/alerts/{id}/approve` | Admin | Authorize held containment action (Human Intervention Required) |
 | | `GET` | `/api/v1/alerts/stream` | Yes | Server-Sent Events (SSE) real-time alert stream |
 | **Maintenance** | `GET` | `/api/v1/maintenance/tasks` | Yes | Query predictive and scheduled maintenance work orders |
 | **Reports** | `GET` | `/api/v1/reports/summary` | Yes | Executive resilience and compliance summary reports |
 | **System & Audit**| `GET` | `/api/v1/system/settings` | Yes | Inspect runtime ML thresholds and IdP diagnostics |
-| | `GET` | `/api/v1/audit` | IT/Admin | Query immutable SHA-256 hash-chained audit logs |
+| | `GET` | `/api/v1/audit/logs` | Admin | Query immutable SHA-256 hash-chained audit logs |
 | **Users** | `GET` | `/api/v1/users` | Admin | List all registered user accounts and IdP statuses |
 | **Demonstration** | `POST` | `/api/v1/demo/simulate` | Yes | Dispatch authentic 10-stage simulation across 6 scenarios (with role-sensitive `CYBER_THREAT`: `STUDENT` vs `RESEARCHER`) |
 
