@@ -52,6 +52,14 @@ class Settings(BaseSettings):
     api_rate_limit: str = "100/minute"
     api_max_payload_size_mb: int = 10
 
+    # ---------- SIEM / XDR ingestion ----------
+    siem_ingest_api_key: str | None = Field(
+        default=None,
+        min_length=24,
+        description="Shared secret for external SIEM/XDR ingestion; set SIEM_INGEST_API_KEY.",
+        repr=False,
+    )
+
     # ---------- Database ----------
     database_host: str = "localhost"
     database_port: int = 5432
