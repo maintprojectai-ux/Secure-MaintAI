@@ -17,6 +17,7 @@ Per engineering rules Section 16 & 17:
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -142,8 +143,8 @@ class SecurityCorrelationEngine:
         has_ml_anomaly = any(a.score >= 0.50 for a in anomalies)
         has_crypto_event = any(
             e.event_type == SecurityEventType.CRYPTOJACKING.value
-            or "crypto" in (e.description or "").lower()
-            or "stratum" in (e.description or "").lower()
+            or re.search(r"\bcrypto(jacking|miner|mining)\b", (e.description or "").lower()) is not None
+            or re.search(r"\bstratum(?:\+tcp)?\b", (e.description or "").lower()) is not None
             for e in security_events
         )
         has_mining_evidence = any(
@@ -296,7 +297,7 @@ class SecurityCorrelationEngine:
                 or "sensor" in ev.lower()
                 or "memory" in ev.lower()
                 or "network" in ev.lower()
-                or "io" in ev.lower()
+                or re.search(r"\bi/o\b|\bio_wait\b", ev.lower()) is not None
                 for ev in aggregated_evidence
             )
 
