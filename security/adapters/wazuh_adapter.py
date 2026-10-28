@@ -75,10 +75,10 @@ class WazuhAdapter(BaseSecurityAdapter):
         """Determine normalized event type from Sysmon Event ID and command contents."""
         combined_text = f"{rule_desc} {image} {cmdline}".lower()
 
-        # 1. Cryptojacking detection
+        # 1. Cryptojacking detection (Stratum mining pool ports; excludes academic Jupyter port 8888)
         if any(re.search(pat, combined_text) for pat in _CRYPTO_PATTERNS):
             return SecurityEventType.CRYPTOJACKING
-        if dest_port in {3333, 4444, 5555, 7777, 8888, 9999}:
+        if dest_port in {3333, 4444, 5555, 7777, 9999}:
             return SecurityEventType.CRYPTOJACKING
 
         # 2. Sysmon Event ID mapping

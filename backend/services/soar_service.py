@@ -13,7 +13,7 @@ Per engineering rules:
 
 import uuid
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
@@ -233,6 +233,38 @@ class SOARService:
                 evaluation, operator=operator, execution_mode=exec_mode
             )
 
+    async def _find_active_cooldown_incident_alert(
+        self,
+        workstation_id: UUID,
+        category: str,
+        cooldown_seconds: int = 300,
+    ) -> tuple[Incident, Alert] | None:
+        """
+        Deduplication and rate-limiting guard (Rules 19 & 21).
+        Finds existing active OPEN or CONTAINED alert and incident for the same
+        workstation and category within the cooldown window to prevent alert flooding.
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=cooldown_seconds)
+        stmt = (
+            select(Alert)
+            .where(
+                Alert.workstation_id == workstation_id,
+                Alert.status.in_(["OPEN", "CONTAINED", "MONITORED"]),
+                Alert.created_at >= cutoff,
+            )
+            .order_by(Alert.created_at.desc())
+        )
+        res = await self._session.execute(stmt)
+        for alert in res.scalars().all():
+            if alert.source_id:
+                inc_res = await self._session.execute(
+                    select(Incident).where(Incident.id == alert.source_id)
+                )
+                inc = inc_res.scalar_one_or_none()
+                if inc and inc.category == category:
+                    return inc, alert
+        return None
+
     async def _execute_playbook_alert_only(
         self,
         eval_res: PolicyEvaluationResult,
@@ -241,57 +273,64 @@ class SOARService:
         execution_mode: str = "RECORDED_CONTROL_PLANE",
     ) -> PlaybookExecutionResult:
         """Playbook 1: Alert Only (v1.0.0). Creates Incident & Alert without host modification."""
-        inc_num = f"INC-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
-        inc = Incident(
-            incident_number=inc_num,
-            severity=eval_res.correlated_incident.severity,
-            category=("SECURITY_THREAT" if eval_res.correlated_incident.is_threat else "TECHNICAL_FAILURE"),
-            workstation_id=eval_res.workstation_id,
-            status="OPEN",
-            title=f"Alert: {eval_res.correlated_incident.incident_category}",
-            description=eval_res.reason,
-            response_action=f"PLAYBOOK_01_ALERT_ONLY (Suppression: {suppression_reason})"
-            if suppression_reason
-            else "PLAYBOOK_01_ALERT_ONLY",
-        )
-        self._session.add(inc)
-        await self._session.flush()
-
+        category = "SECURITY_THREAT" if eval_res.correlated_incident.is_threat else "TECHNICAL_FAILURE"
         is_human_intervention = eval_res.requires_human_approval or bool(suppression_reason)
-        source_type = (
-            "HUMAN_INTERVENTION_REQUIRED"
-            if is_human_intervention
-            else "CYBERSECURITY_THREAT"
-            if eval_res.correlated_incident.is_threat
-            else "TECHNICAL_ANOMALY"
-        )
-        title = (
-            f"Human Intervention Required: {eval_res.correlated_incident.incident_category}"
-            if is_human_intervention
-            else f"Cybersecurity Threat: {eval_res.correlated_incident.incident_category}"
-            if eval_res.correlated_incident.is_threat
-            else f"Technical Anomaly: {eval_res.correlated_incident.incident_category}"
-        )
-        recommendation = (
-            "Action halted: Requires manual SOC authorization to execute containment."
-            if is_human_intervention
-            else "Investigate threat telemetry and monitor endpoint activity."
-        )
+        existing = await self._find_active_cooldown_incident_alert(eval_res.workstation_id, category)
 
-        alert = Alert(
-            source_type=source_type,
-            source_id=inc.id,
-            workstation_id=eval_res.workstation_id,
-            severity=eval_res.correlated_incident.severity,
-            status="OPEN",
-            title=title,
-            description=eval_res.reason,
-            requires_human_intervention=is_human_intervention,
-            recommendation=recommendation,
-            playbook_initiated="PLAYBOOK_01_ALERT_ONLY",
-        )
-        self._session.add(alert)
-        await self._session.flush()
+        if existing:
+            inc, alert = existing
+            logger.info("soar_service: deduplicated active incident %s for workstation %s", inc.incident_number, eval_res.workstation_id)
+        else:
+            inc_num = f"INC-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+            inc = Incident(
+                incident_number=inc_num,
+                severity=eval_res.correlated_incident.severity,
+                category=category,
+                workstation_id=eval_res.workstation_id,
+                status="OPEN",
+                title=f"Alert: {eval_res.correlated_incident.incident_category}",
+                description=eval_res.reason,
+                response_action=f"PLAYBOOK_01_ALERT_ONLY (Suppression: {suppression_reason})"
+                if suppression_reason
+                else "PLAYBOOK_01_ALERT_ONLY",
+            )
+            self._session.add(inc)
+            await self._session.flush()
+
+            source_type = (
+                "HUMAN_INTERVENTION_REQUIRED"
+                if is_human_intervention
+                else "CYBERSECURITY_THREAT"
+                if eval_res.correlated_incident.is_threat
+                else "TECHNICAL_ANOMALY"
+            )
+            title = (
+                f"Human Intervention Required: {eval_res.correlated_incident.incident_category}"
+                if is_human_intervention
+                else f"Cybersecurity Threat: {eval_res.correlated_incident.incident_category}"
+                if eval_res.correlated_incident.is_threat
+                else f"Technical Anomaly: {eval_res.correlated_incident.incident_category}"
+            )
+            recommendation = (
+                "Action halted: Requires manual SOC authorization to execute containment."
+                if is_human_intervention
+                else "Investigate threat telemetry and monitor endpoint activity."
+            )
+
+            alert = Alert(
+                source_type=source_type,
+                source_id=inc.id,
+                workstation_id=eval_res.workstation_id,
+                severity=eval_res.correlated_incident.severity,
+                status="OPEN",
+                title=title,
+                description=eval_res.reason,
+                requires_human_intervention=is_human_intervention,
+                recommendation=recommendation,
+                playbook_initiated="PLAYBOOK_01_ALERT_ONLY",
+            )
+            self._session.add(alert)
+            await self._session.flush()
 
         audit_entry = await self._audit.log(
             actor=operator,
@@ -340,39 +379,46 @@ class SOARService:
         valid_pids, rejected_pids = self.validate_pids(eval_res.target_pids)
         valid_ports, rejected_ports = self.validate_ports(eval_res.target_ports)
 
-        inc_id = uuid.uuid4()
-        inc_num = f"INC-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
-        inc = Incident(
-            id=inc_id,
-            incident_number=inc_num,
-            severity=eval_res.correlated_incident.severity,
-            category="SECURITY_THREAT",
-            workstation_id=eval_res.workstation_id,
-            status="CONTAINED",
-            title=f"Surgical Containment: {eval_res.correlated_incident.incident_category}",
-            description=eval_res.reason,
-            response_action=(
-                f"[{execution_mode}] Surgically blocked ports {valid_ports} and targeted rogue PIDs {valid_pids} "
-                f"while protecting active research workloads: {eval_res.preserve_workloads}"
-            ),
-        )
-        self._session.add(inc)
+        existing = await self._find_active_cooldown_incident_alert(eval_res.workstation_id, "SECURITY_THREAT")
+        if existing:
+            inc, alert = existing
+            inc_id = inc.id
+            alert_id = alert.id
+            logger.info("soar_service: deduplicated active incident %s for workstation %s", inc.incident_number, eval_res.workstation_id)
+        else:
+            inc_id = uuid.uuid4()
+            inc_num = f"INC-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+            inc = Incident(
+                id=inc_id,
+                incident_number=inc_num,
+                severity=eval_res.correlated_incident.severity,
+                category="SECURITY_THREAT",
+                workstation_id=eval_res.workstation_id,
+                status="CONTAINED",
+                title=f"Surgical Containment: {eval_res.correlated_incident.incident_category}",
+                description=eval_res.reason,
+                response_action=(
+                    f"[{execution_mode}] Surgically blocked ports {valid_ports} and targeted rogue PIDs {valid_pids} "
+                    f"while protecting active research workloads: {eval_res.preserve_workloads}"
+                ),
+            )
+            self._session.add(inc)
 
-        alert_id = uuid.uuid4()
-        alert = Alert(
-            id=alert_id,
-            source_type="CYBERSECURITY_THREAT",
-            source_id=inc_id,
-            workstation_id=eval_res.workstation_id,
-            severity=eval_res.correlated_incident.severity,
-            status="OPEN",
-            title=f"Surgical Process Containment: {eval_res.correlated_incident.incident_category}",
-            description=eval_res.reason,
-            requires_human_intervention=False,
-            recommendation=f"Offending sockets/pids contained. Research workloads {eval_res.preserve_workloads} preserved.",
-            playbook_initiated="PLAYBOOK_02_PROCESS_CONTAINMENT",
-        )
-        self._session.add(alert)
+            alert_id = uuid.uuid4()
+            alert = Alert(
+                id=alert_id,
+                source_type="CYBERSECURITY_THREAT",
+                source_id=inc_id,
+                workstation_id=eval_res.workstation_id,
+                severity=eval_res.correlated_incident.severity,
+                status="OPEN",
+                title=f"Surgical Process Containment: {eval_res.correlated_incident.incident_category}",
+                description=eval_res.reason,
+                requires_human_intervention=False,
+                recommendation=f"Offending sockets/pids contained. Research workloads {eval_res.preserve_workloads} preserved.",
+                playbook_initiated="PLAYBOOK_02_PROCESS_CONTAINMENT",
+            )
+            self._session.add(alert)
 
         audit_entry = await self._audit.log(
             actor=operator,
@@ -439,36 +485,43 @@ class SOARService:
         if ws is not None:
             ws.status = "ISOLATED"
 
-        inc_id = uuid.uuid4()
-        inc_num = f"INC-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
-        inc = Incident(
-            id=inc_id,
-            incident_number=inc_num,
-            severity=eval_res.correlated_incident.severity,
-            category="SECURITY_THREAT",
-            workstation_id=eval_res.workstation_id,
-            status="CONTAINED",
-            title=f"Host Surgical Isolation: {eval_res.correlated_incident.incident_category}",
-            description=eval_res.reason,
-            response_action="Surgical host network isolation applied. Host remains online; telemetry channel preserved.",
-        )
-        self._session.add(inc)
+        existing = await self._find_active_cooldown_incident_alert(eval_res.workstation_id, "SECURITY_THREAT")
+        if existing:
+            inc, alert = existing
+            inc_id = inc.id
+            alert_id = alert.id
+            logger.info("soar_service: deduplicated active incident %s for workstation %s", inc.incident_number, eval_res.workstation_id)
+        else:
+            inc_id = uuid.uuid4()
+            inc_num = f"INC-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+            inc = Incident(
+                id=inc_id,
+                incident_number=inc_num,
+                severity=eval_res.correlated_incident.severity,
+                category="SECURITY_THREAT",
+                workstation_id=eval_res.workstation_id,
+                status="CONTAINED",
+                title=f"Host Surgical Isolation: {eval_res.correlated_incident.incident_category}",
+                description=eval_res.reason,
+                response_action="Surgical host network isolation applied. Host remains online; telemetry channel preserved.",
+            )
+            self._session.add(inc)
 
-        alert_id = uuid.uuid4()
-        alert = Alert(
-            id=alert_id,
-            source_type="CYBERSECURITY_THREAT",
-            source_id=inc_id,
-            workstation_id=eval_res.workstation_id,
-            severity=eval_res.correlated_incident.severity,
-            status="OPEN",
-            title=f"Host Surgical Isolation: {eval_res.correlated_incident.incident_category}",
-            description=eval_res.reason,
-            requires_human_intervention=False,
-            recommendation="Host network isolated. Review telemetry and perform malware eradication before reconnecting.",
-            playbook_initiated="PLAYBOOK_03_SURGICAL_ISOLATION",
-        )
-        self._session.add(alert)
+            alert_id = uuid.uuid4()
+            alert = Alert(
+                id=alert_id,
+                source_type="CYBERSECURITY_THREAT",
+                source_id=inc_id,
+                workstation_id=eval_res.workstation_id,
+                severity=eval_res.correlated_incident.severity,
+                status="OPEN",
+                title=f"Host Surgical Isolation: {eval_res.correlated_incident.incident_category}",
+                description=eval_res.reason,
+                requires_human_intervention=False,
+                recommendation="Host network isolated. Review telemetry and perform malware eradication before reconnecting.",
+                playbook_initiated="PLAYBOOK_03_SURGICAL_ISOLATION",
+            )
+            self._session.add(alert)
 
         audit_entry = await self._audit.log(
             actor=operator,

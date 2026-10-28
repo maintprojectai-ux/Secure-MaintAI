@@ -55,7 +55,8 @@ async def test_ingest_security_event_persists_record_and_generates_alert(
         "raw_event_reference": "wazuh-alert-9912",
     }
 
-    response = await async_client.post("/api/v1/security/events", json=payload)
+    siem_headers = {"X-API-Key": "dev-siem-ingest-key-change-in-prod"}
+    response = await async_client.post("/api/v1/security/events", json=payload, headers=siem_headers)
     assert response.status_code == 201
     data = response.json()
     assert data["event_type"] == "CRYPTOJACKING"
@@ -106,9 +107,11 @@ async def test_ingest_raw_wazuh_event(
         },
     }
 
+    siem_headers = {"X-API-Key": "dev-siem-ingest-key-change-in-prod"}
     response = await async_client.post(
         f"/api/v1/security/events/wazuh?workstation_id={ws_id}",
         json=raw_wazuh,
+        headers=siem_headers,
     )
     assert response.status_code == 201
     data = response.json()

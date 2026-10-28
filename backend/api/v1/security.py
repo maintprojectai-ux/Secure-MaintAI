@@ -20,7 +20,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.database import get_async_session
-from backend.core.dependencies import get_current_active_user
+from backend.core.dependencies import get_current_active_user, verify_siem_ingest_key
 from backend.models.alert import Alert
 from backend.models.anomaly import AnomalyDetection
 from backend.models.security_event import SecurityEvent
@@ -64,6 +64,7 @@ class CorrelatedIncidentResponse(BaseModel):
 async def ingest_security_event(
     item: SecurityEventCreate,
     session: Annotated[AsyncSession, Depends(get_async_session)],
+    _authorized: Annotated[bool, Depends(verify_siem_ingest_key)],
 ) -> SecurityEventResponse:
     """
     Ingest a normalized security event (e.g. from internal detection or security adapter).
@@ -123,6 +124,7 @@ async def ingest_security_event(
 async def ingest_wazuh_event(
     raw_payload: dict[str, Any],
     session: Annotated[AsyncSession, Depends(get_async_session)],
+    _authorized: Annotated[bool, Depends(verify_siem_ingest_key)],
     workstation_id: UUID | None = Query(default=None, description="Optional target workstation UUID"),
 ) -> SecurityEventResponse:
     """
@@ -135,7 +137,7 @@ async def ingest_wazuh_event(
             detail="Unable to parse Wazuh event payload.",
         )
 
-    return await ingest_security_event(parsed, session)
+    return await ingest_security_event(parsed, session, _authorized=True)
 
 
 @router.post(
@@ -146,6 +148,7 @@ async def ingest_wazuh_event(
 async def ingest_security_events_batch(
     items: list[SecurityEventCreate],
     session: Annotated[AsyncSession, Depends(get_async_session)],
+    _authorized: Annotated[bool, Depends(verify_siem_ingest_key)],
 ) -> dict[str, Any]:
     """Batch ingestion endpoint for security events."""
     if not items:

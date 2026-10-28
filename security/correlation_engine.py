@@ -17,6 +17,7 @@ Per engineering rules Section 16 & 17:
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -28,6 +29,9 @@ from backend.models.security_event import SecurityEvent
 from backend.schemas.security_event import SecurityEventSeverity, SecurityEventType
 
 logger = logging.getLogger(__name__)
+
+_CRYPTO_TOKEN_PATTERN = re.compile(r"\b(crypto(jacking|miner|mining|currency)?|stratum|xmrig)\b", re.IGNORECASE)
+_IO_HARDWARE_PATTERN = re.compile(r"\b(i/o|io_wait|disk_io|iops|io_delay)\b", re.IGNORECASE)
 
 
 class IncidentCategory(str, Enum):
@@ -142,12 +146,11 @@ class SecurityCorrelationEngine:
         has_ml_anomaly = any(a.score >= 0.50 for a in anomalies)
         has_crypto_event = any(
             e.event_type == SecurityEventType.CRYPTOJACKING.value
-            or "crypto" in (e.description or "").lower()
-            or "stratum" in (e.description or "").lower()
+            or bool(_CRYPTO_TOKEN_PATTERN.search(e.description or ""))
             for e in security_events
         )
         has_mining_evidence = any(
-            "stratum" in ev.lower() or "xmrig" in ev.lower() or "mining" in ev.lower()
+            bool(_CRYPTO_TOKEN_PATTERN.search(ev))
             for ev in aggregated_evidence
         )
 
@@ -295,8 +298,9 @@ class SecurityCorrelationEngine:
                 or "disk" in ev.lower()
                 or "sensor" in ev.lower()
                 or "memory" in ev.lower()
+                or "'mem'" in ev.lower()
                 or "network" in ev.lower()
-                or "io" in ev.lower()
+                or bool(_IO_HARDWARE_PATTERN.search(ev))
                 for ev in aggregated_evidence
             )
 

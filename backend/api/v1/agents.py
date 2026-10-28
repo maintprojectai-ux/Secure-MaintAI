@@ -142,7 +142,9 @@ async def agent_heartbeat(
 
     now = datetime.now(timezone.utc)
     workstation.last_seen_at = now
-    workstation.status = payload.status.value
+    # Preserve ISOLATED state: isolation can only be reverted via an audited Admin rollback (Rule 19)
+    if workstation.status != "ISOLATED":
+        workstation.status = payload.status.value
     workstation.agent_version = payload.agent_version
 
     await session.commit()

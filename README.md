@@ -2,7 +2,7 @@
 
 **AI-Driven University Infrastructure Resilience Platform**
 
-[![Tests](https://img.shields.io/badge/Tests-203%20Passed-success?style=flat-square&logo=pytest)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-210%20Passed-success?style=flat-square&logo=pytest)](tests/)
 [![Python](https://img.shields.io/badge/Python-3.11%20%7C%20FastAPI-blue?style=flat-square&logo=python)](backend/)
 [![Next.js](https://img.shields.io/badge/Next.js-16.3.4%20(Turbopack)-black?style=flat-square&logo=next.js)](frontend/)
 [![TailwindCSS](https://img.shields.io/badge/TailwindCSS-v4.3.3%20(CSS--first)-38bdf8?style=flat-square&logo=tailwindcss)](frontend/)
@@ -143,7 +143,7 @@ secure-maintai/
 │   └── migrations/versions/ # Foundation schema migrations
 ├── infrastructure/          # Docker compose and deployment configuration
 │   └── docker/              # Dockerfile.backend, compose configurations
-├── tests/                   # 203 automated tests across all test suites
+├── tests/                   # 210 automated tests across all test suites
 │   ├── unit/                # Unit tests (RBAC, policy, adapters, SOAR, IdP)
 │   ├── integration/         # Integration tests (APIs, anomaly persistence)
 │   ├── ml/                  # ML runtime inference and feature builder tests
@@ -221,7 +221,7 @@ Compiles with 0 errors across all routes using Turbopack.
 
 ---
 
-## 5. Automated Test Suite (203 Tests)
+## 5. Automated Test Suite (210 Tests)
 
 The repository includes a comprehensive test suite enforcing 100% test passing before code merging (Rule 4 & Rule 28):
 
@@ -234,11 +234,11 @@ pytest tests/ -v
 
 | Suite | Focus Areas | Tests | Status |
 | :--- | :--- | :---: | :---: |
-| **Unit Tests** | Security Policy Engine, SOAR Engine, IdP Service, RBAC, Adapters, Buffers, Schemas, JWT Security | 97 | **PASSED** |
+| **Unit Tests** | Security Policy Engine, SOAR Engine, IdP Service, RBAC, Adapters, Buffers, Schemas, JWT Security, Ingestion Auth | 104 | **PASSED** |
 | **Integration Tests** | Telemetry Ingestion, Workstation Lifecycle, Security APIs, Incidents, Dashboard, Demo, Maintenance, Reports, Alert 4-Point Taxonomy | 83 | **PASSED** |
 | **ML Runtime Tests** | Model 01/02-A/02-B loading, screening, diagnosis contracts, and latency benchmarks | 10 | **PASSED** |
 | **Rule 29 E2E Scenarios**| Mandatory verification scenarios (Cryptojacking, Research preservation, IdP fallback, Agent offline) | 13 | **PASSED** |
-| **Total** | | **203** | **100% GREEN** |
+| **Total** | | **210** | **100% GREEN** |
 
 ---
 

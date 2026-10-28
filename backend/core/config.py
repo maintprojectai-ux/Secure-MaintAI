@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     api_prefix: str = "/api/v1"
     api_rate_limit: str = "100/minute"
     api_max_payload_size_mb: int = 10
+    siem_ingest_api_key: str = Field(
+        default="dev-siem-ingest-key-change-in-prod",
+        description="API Key for SIEM/XDR event ingestion endpoints.",
+    )
 
     # ---------- Database ----------
     database_host: str = "localhost"

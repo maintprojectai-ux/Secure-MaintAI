@@ -9,15 +9,17 @@ Every privileged endpoint must explicitly verify permissions.
 """
 
 from collections.abc import Callable
+import hmac
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from backend.core.config import get_settings
 from backend.core.database import get_async_session
 from backend.core.security import decode_access_token
 from backend.models.user import UserAccount
@@ -179,3 +181,50 @@ def require_permission(*required_permissions: str) -> Callable:
         return current_user
 
     return _permission_checker
+
+
+async def verify_siem_ingest_key(
+    x_api_key: Annotated[str | None, Header(alias="X-API-Key")] = None,
+    authorization: Annotated[str | None, Header(alias="Authorization")] = None,
+    session: Annotated[AsyncSession, Depends(get_async_session)] = None,
+) -> bool:
+    """
+    Validates that incoming SIEM/XDR event ingestion requests provide an authorized
+    ingest API key or an active ADMIN JWT bearer token.
+    Uses constant-time comparison to prevent timing attacks.
+    """
+    settings = get_settings()
+    configured_key = settings.siem_ingest_api_key
+
+    # 1. Constant-time API Key verification
+    if x_api_key and hmac.compare_digest(x_api_key.strip(), configured_key.strip()):
+        return True
+
+    # 2. Alternatively allow active authenticated ADMIN bearer token
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split("Bearer ", 1)[1].strip()
+        payload = decode_access_token(token)
+        if payload and payload.get("sub"):
+            try:
+                user_id = UUID(str(payload.get("sub")))
+                result = await session.execute(
+                    select(UserAccount)
+                    .options(selectinload(UserAccount.role))
+                    .where(UserAccount.id == user_id)
+                )
+                user = result.scalar_one_or_none()
+                if (
+                    user
+                    and user.status == "active"
+                    and user.role
+                    and user.role.name == RoleEnum.ADMIN.value
+                ):
+                    return True
+            except Exception:
+                pass
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Unauthorized SIEM/XDR event ingestion: valid X-API-Key or ADMIN token required.",
+        headers={"WWW-Authenticate": "ApiKey"},
+    )
