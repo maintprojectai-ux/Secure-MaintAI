@@ -196,10 +196,6 @@ export default function DashboardPage() {
           setKpi((prev) => ({
             ...prev,
             active_alerts: (prev.active_alerts || 0) + 1,
-            critical_workstations:
-              (raw.severity || "").toUpperCase() === "CRITICAL"
-                ? (prev.critical_workstations || 0) + 1
-                : prev.critical_workstations,
           }));
         } else if (detail.event === "ALERT_RESOLVED") {
           setAlerts((prev) =>
@@ -247,20 +243,43 @@ export default function DashboardPage() {
   const isolatedPct = total > 0 ? ((isolatedCount / total) * 100).toFixed(1) : "0.0";
   const offlinePct = total > 0 ? ((offlineCount / total) * 100).toFixed(1) : "0.0";
 
-  // Alerts Summary strictly matching canonical AlertSeverity values (CRITICAL, HIGH, MEDIUM, LOW)
+  // Helper to determine if an alert is active (unresolved)
+  const isAlertActive = (a: any): boolean => {
+    const st = String(a.status || "OPEN").toUpperCase();
+    return st !== "RESOLVED";
+  };
+
+  const formatSeverityDelta = (active: number, resolved: number): string => {
+    if (active > 0 && resolved > 0) {
+      return `${active} active · ${resolved} resolved`;
+    }
+    if (active > 0) {
+      return `${active} active signals`;
+    }
+    if (resolved > 0) {
+      return `0 active · ${resolved} resolved`;
+    }
+    return "0 critical alerts";
+  };
+
+  // Active vs Resolved alerts strictly matching canonical AlertSeverity values (CRITICAL, HIGH, MEDIUM, LOW)
   const safeAlerts = Array.isArray(alerts) ? alerts : [];
-  const criticalAlertsCount = safeAlerts.filter(
-    (a) => (a.severity || "").toUpperCase() === "CRITICAL"
-  ).length;
-  const highAlertsCount = safeAlerts.filter(
-    (a) => (a.severity || "").toUpperCase() === "HIGH"
-  ).length;
-  const mediumAlertsCount = safeAlerts.filter(
-    (a) => (a.severity || "").toUpperCase() === "MEDIUM"
-  ).length;
-  const lowAlertsCount = safeAlerts.filter(
-    (a) => (a.severity || "").toUpperCase() === "LOW"
-  ).length;
+  const activeAlertsCount = useMemo(() => ({
+    ALL: safeAlerts.filter(isAlertActive).length,
+    Critical: safeAlerts.filter((a) => (a.severity || "").toUpperCase() === "CRITICAL" && isAlertActive(a)).length,
+    High: safeAlerts.filter((a) => (a.severity || "").toUpperCase() === "HIGH" && isAlertActive(a)).length,
+    Medium: safeAlerts.filter((a) => (a.severity || "").toUpperCase() === "MEDIUM" && isAlertActive(a)).length,
+    Low: safeAlerts.filter((a) => (a.severity || "").toUpperCase() === "LOW" && isAlertActive(a)).length,
+  }), [safeAlerts]);
+
+  const resolvedAlertsCount = useMemo(() => ({
+    ALL: safeAlerts.filter((a) => !isAlertActive(a)).length,
+    Critical: safeAlerts.filter((a) => (a.severity || "").toUpperCase() === "CRITICAL" && !isAlertActive(a)).length,
+    High: safeAlerts.filter((a) => (a.severity || "").toUpperCase() === "HIGH" && !isAlertActive(a)).length,
+    Medium: safeAlerts.filter((a) => (a.severity || "").toUpperCase() === "MEDIUM" && !isAlertActive(a)).length,
+    Low: safeAlerts.filter((a) => (a.severity || "").toUpperCase() === "LOW" && !isAlertActive(a)).length,
+  }), [safeAlerts]);
+
   const totalAlertsCount = safeAlerts.length;
 
   const securityPosturePct = Math.round(
@@ -298,9 +317,9 @@ export default function DashboardPage() {
     },
     {
       title: "Critical Alerts",
-      value: String(criticalAlertsCount > 0 ? criticalAlertsCount : (kpi.active_alerts ?? 0)),
-      delta: criticalAlertsCount > 0 ? `${criticalAlertsCount} critical signals active` : "0 critical alerts",
-      deltaColor: criticalAlertsCount > 0 ? "text-rose-400" : "text-emerald-400",
+      value: String(activeAlertsCount.Critical),
+      delta: formatSeverityDelta(activeAlertsCount.Critical, resolvedAlertsCount.Critical),
+      deltaColor: activeAlertsCount.Critical > 0 ? "text-rose-400" : "text-emerald-400",
       icon: <AlertCircle className="w-5 h-5 text-rose-400" />,
       iconBg: "bg-rose-600/20 border-rose-500/30",
       href: "/alerts?severity=CRITICAL",
@@ -368,32 +387,40 @@ export default function DashboardPage() {
     { label: "Offline", value: offlineCount, color: "#64748b" },
   ];
 
-  // Alerts Summary rows for the Severity Widget
+  // Alerts Summary rows for the Severity Widget (Active counts with resolved counts)
   const alertsSummary = [
     {
       title: "Critical",
-      count: criticalAlertsCount,
+      count: activeAlertsCount.Critical,
+      resolvedCount: resolvedAlertsCount.Critical,
+      totalCount: activeAlertsCount.Critical + resolvedAlertsCount.Critical,
       color: "text-rose-400",
       icon: <AlertCircle className="w-4 h-4 text-rose-400" />,
       href: "/alerts?severity=CRITICAL",
     },
     {
       title: "High",
-      count: highAlertsCount,
+      count: activeAlertsCount.High,
+      resolvedCount: resolvedAlertsCount.High,
+      totalCount: activeAlertsCount.High + resolvedAlertsCount.High,
       color: "text-orange-400",
       icon: <AlertTriangle className="w-4 h-4 text-orange-400" />,
       href: "/alerts?severity=HIGH",
     },
     {
       title: "Medium",
-      count: mediumAlertsCount,
+      count: activeAlertsCount.Medium,
+      resolvedCount: resolvedAlertsCount.Medium,
+      totalCount: activeAlertsCount.Medium + resolvedAlertsCount.Medium,
       color: "text-amber-300",
       icon: <AlertTriangle className="w-4 h-4 text-amber-300" />,
       href: "/alerts?severity=MEDIUM",
     },
     {
       title: "Low",
-      count: lowAlertsCount,
+      count: activeAlertsCount.Low,
+      resolvedCount: resolvedAlertsCount.Low,
+      totalCount: activeAlertsCount.Low + resolvedAlertsCount.Low,
       color: "text-cyan-400",
       icon: <Info className="w-4 h-4 text-cyan-400" />,
       href: "/alerts?severity=LOW",
@@ -902,7 +929,14 @@ export default function DashboardPage() {
                     </span>
                   </div>
                   <div className="flex items-center gap-1.5 text-xs font-bold text-white font-mono">
-                    <span className={alert.count > 0 ? alert.color : "text-slate-400"}>{alert.count}</span>
+                    <span className={alert.count > 0 ? alert.color : "text-slate-400"}>
+                      {alert.count}
+                    </span>
+                    {alert.resolvedCount > 0 && (
+                      <span className="text-[10px] text-slate-500 font-normal">
+                        ({alert.resolvedCount} res)
+                      </span>
+                    )}
                     <ChevronRight className="w-3.5 h-3.5 text-slate-500 group-hover:text-slate-300 transition-colors" />
                   </div>
                 </Link>
@@ -910,12 +944,12 @@ export default function DashboardPage() {
             </div>
 
             <div className="pt-2.5 border-t border-slate-800/80 flex items-center justify-between text-[11px]">
-              <span className="text-slate-400">Total Registered</span>
+              <span className="text-slate-400">Active vs Total</span>
               <Link
                 href="/alerts"
                 className="font-mono font-bold text-cyan-400 hover:text-cyan-300 transition-colors"
               >
-                {totalAlertsCount} Alerts →
+                {activeAlertsCount.ALL} Active ({totalAlertsCount} Total) →
               </Link>
             </div>
           </div>
