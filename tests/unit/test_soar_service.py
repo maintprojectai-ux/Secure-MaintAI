@@ -268,3 +268,132 @@ async def test_execute_playbook_no_action_for_nominal_baseline() -> None:
         assert receipt.audit_id is None
         assert "passive monitoring" in receipt.action_taken.lower()
 
+
+@pytest.mark.asyncio
+async def test_find_active_cooldown_with_acknowledged_alert() -> None:
+    """SOAR deduplication accounts for acknowledged alerts within the cooldown window."""
+    ws_id = uuid.uuid4()
+    inc_id = uuid.uuid4()
+    alert_id = uuid.uuid4()
+
+    async with TestAsyncSession() as session:
+        inc = Incident(
+            id=inc_id,
+            incident_number="INC-2026-TEST01",
+            severity="CRITICAL",
+            category="SECURITY_THREAT",
+            workstation_id=ws_id,
+            status="CONTAINED",
+            title="Surgical Isolation",
+            description="Cryptojacking contained.",
+        )
+        alert = Alert(
+            id=alert_id,
+            source_type="CYBERSECURITY_THREAT",
+            source_id=inc_id,
+            workstation_id=ws_id,
+            severity="CRITICAL",
+            status="ACKNOWLEDGED",
+            title="Host Surgical Isolation: CRYPTOJACKING",
+            description="Isolated.",
+        )
+        session.add(inc)
+        session.add(alert)
+        await session.commit()
+
+    async with TestAsyncSession() as session:
+        soar = SOARService(session)
+        result = await soar._find_active_cooldown_incident_alert(
+            workstation_id=ws_id,
+            category="SECURITY_THREAT",
+            cooldown_seconds=300,
+        )
+        assert result is not None
+        found_inc, found_alert = result
+        assert found_inc.id == inc_id
+        assert found_alert.id == alert_id
+
+
+@pytest.mark.asyncio
+async def test_find_active_cooldown_does_not_deduplicate_resolved_incident() -> None:
+    """SOAR deduplication does NOT match resolved incidents, allowing genuinely new alerts."""
+    ws_id = uuid.uuid4()
+    inc_id = uuid.uuid4()
+    alert_id = uuid.uuid4()
+
+    async with TestAsyncSession() as session:
+        inc = Incident(
+            id=inc_id,
+            incident_number="INC-2026-TEST02",
+            severity="CRITICAL",
+            category="SECURITY_THREAT",
+            workstation_id=ws_id,
+            status="RESOLVED",  # Resolved incident!
+            title="Surgical Isolation",
+            description="Cryptojacking contained and resolved.",
+        )
+        alert = Alert(
+            id=alert_id,
+            source_type="CYBERSECURITY_THREAT",
+            source_id=inc_id,
+            workstation_id=ws_id,
+            severity="CRITICAL",
+            status="RESOLVED",
+            title="Host Surgical Isolation: CRYPTOJACKING",
+            description="Isolated.",
+        )
+        session.add(inc)
+        session.add(alert)
+        await session.commit()
+
+    async with TestAsyncSession() as session:
+        soar = SOARService(session)
+        result = await soar._find_active_cooldown_incident_alert(
+            workstation_id=ws_id,
+            category="SECURITY_THREAT",
+            cooldown_seconds=300,
+        )
+        assert result is None  # Genuinely new incident can be created!
+
+
+@pytest.mark.asyncio
+async def test_find_active_cooldown_does_not_match_different_category() -> None:
+    """SOAR deduplication does NOT match incidents of a different category."""
+    ws_id = uuid.uuid4()
+    inc_id = uuid.uuid4()
+    alert_id = uuid.uuid4()
+
+    async with TestAsyncSession() as session:
+        inc = Incident(
+            id=inc_id,
+            incident_number="INC-2026-TEST03",
+            severity="MEDIUM",
+            category="TECHNICAL_FAILURE",
+            workstation_id=ws_id,
+            status="OPEN",
+            title="Hardware Failure",
+            description="Memory fault.",
+        )
+        alert = Alert(
+            id=alert_id,
+            source_type="TECHNICAL_ANOMALY",
+            source_id=inc_id,
+            workstation_id=ws_id,
+            severity="MEDIUM",
+            status="OPEN",
+            title="Technical Anomaly: mem",
+            description="Fault.",
+        )
+        session.add(inc)
+        session.add(alert)
+        await session.commit()
+
+    async with TestAsyncSession() as session:
+        soar = SOARService(session)
+        result = await soar._find_active_cooldown_incident_alert(
+            workstation_id=ws_id,
+            category="SECURITY_THREAT",  # Searching for SECURITY_THREAT, existing is TECHNICAL_FAILURE
+            cooldown_seconds=300,
+        )
+        assert result is None
+

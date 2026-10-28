@@ -249,7 +249,7 @@ class SOARService:
             select(Alert)
             .where(
                 Alert.workstation_id == workstation_id,
-                Alert.status.in_(["OPEN", "CONTAINED", "MONITORED"]),
+                Alert.status.in_(["OPEN", "CONTAINED", "MONITORED", "ACKNOWLEDGED"]),
                 Alert.created_at >= cutoff,
             )
             .order_by(Alert.created_at.desc())
@@ -261,7 +261,7 @@ class SOARService:
                     select(Incident).where(Incident.id == alert.source_id)
                 )
                 inc = inc_res.scalar_one_or_none()
-                if inc and inc.category == category:
+                if inc and inc.category == category and inc.status not in ["RESOLVED", "CLOSED"]:
                     return inc, alert
         return None
 

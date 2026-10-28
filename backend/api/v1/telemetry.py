@@ -23,6 +23,7 @@ from backend.core.database import get_async_session
 from backend.core.dependencies import get_current_active_user
 from backend.models.alert import Alert
 from backend.models.anomaly import AnomalyDetection
+from backend.models.incident import Incident
 from backend.models.telemetry import TelemetryMetric
 from backend.models.user import UserAccount
 from backend.models.workstation import Workstation
@@ -87,6 +88,84 @@ def _convert_telemetry_model(item: TelemetryCreate) -> TelemetryMetric:
     )
 
 
+async def _get_active_telemetry_suppression_state(
+    session: AsyncSession,
+    workstation_ids: set[UUID],
+    cooldown_seconds: int = 300,
+) -> tuple[dict[str, set[str]], set[str]]:
+    """
+    Retrieve active alert sources and active security threat incidents for workstations
+    within the cooldown window. Keys and IDs are normalized to strings for cross-driver consistency.
+    """
+    if not workstation_ids:
+        return {}, set()
+
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=cooldown_seconds)
+
+    # 1. Active or acknowledged alerts within cooldown window
+    alerts_query = await session.execute(
+        select(Alert.workstation_id, Alert.source_type)
+        .where(
+            Alert.workstation_id.in_(workstation_ids),
+            Alert.status.in_(["OPEN", "CONTAINED", "MONITORED", "ACKNOWLEDGED"]),
+            Alert.created_at >= cutoff,
+        )
+    )
+    active_sources_by_ws: dict[str, set[str]] = {}
+    for ws_id, src_type in alerts_query.all():
+        if ws_id and src_type:
+            active_sources_by_ws.setdefault(str(ws_id), set()).add(src_type)
+
+    # 2. Active or contained security incidents within cooldown window
+    incidents_query = await session.execute(
+        select(Incident.workstation_id)
+        .where(
+            Incident.workstation_id.in_(workstation_ids),
+            Incident.category == "SECURITY_THREAT",
+            Incident.status.in_(["OPEN", "CONTAINED", "INVESTIGATING", "ACKNOWLEDGED"]),
+            Incident.created_at >= cutoff,
+        )
+    )
+    active_threat_ws_ids: set[str] = {
+        str(row[0]) for row in incidents_query.all() if row[0] is not None
+    }
+
+    return active_sources_by_ws, active_threat_ws_ids
+
+
+def _should_create_telemetry_alert(
+    anomaly_type: AnomalyType,
+    workstation_status: str,
+    active_sources: set[str],
+    has_active_threat_incident: bool,
+) -> bool:
+    """
+    Determine whether an evaluated anomaly should create an alert or be suppressed.
+
+    Rules:
+    - If TECHNICAL_ANOMALY:
+      - Suppress if workstation is ISOLATED (containment in progress).
+      - Suppress if workstation has an active cyber threat alert or incident (prevent secondary fault noise).
+      - Suppress if TECHNICAL_ANOMALY was already alerted within cooldown (prevent flooding).
+    - If SECURITY_ANOMALY:
+      - Suppress if CYBERSECURITY_THREAT was already alerted within cooldown.
+      - A genuinely distinct / non-cooldown security anomaly remains eligible.
+    """
+    is_isolated = workstation_status == "ISOLATED"
+    has_active_cyber_threat = ("CYBERSECURITY_THREAT" in active_sources) or has_active_threat_incident
+
+    if anomaly_type == AnomalyType.TECHNICAL_ANOMALY:
+        return (
+            not is_isolated
+            and not has_active_cyber_threat
+            and ("TECHNICAL_ANOMALY" not in active_sources)
+        )
+    elif anomaly_type == AnomalyType.SECURITY_ANOMALY:
+        return "CYBERSECURITY_THREAT" not in active_sources
+
+    return False
+
+
 @router.post(
     "",
     response_model=TelemetryIngestResponse,
@@ -133,26 +212,22 @@ async def ingest_single_telemetry(
         session.add(anomaly_record)
         await session.flush()
 
-        # Telemetry Alert Deduplication & Isolation Guard (Rules 19 & 21):
-        # 1. If workstation is ISOLATED, suppress generating secondary technical alerts
-        #    as metrics reflect the contained threat / background monitoring.
-        # 2. Check for active alerts within 5-minute cooldown to prevent alert flooding.
-        cutoff = datetime.now(timezone.utc) - timedelta(seconds=300)
-        active_alert_res = await session.execute(
-            select(Alert.source_type)
-            .where(
-                Alert.workstation_id == item.workstation_id,
-                Alert.status.in_(["OPEN", "CONTAINED", "MONITORED"]),
-                Alert.created_at >= cutoff,
-            )
+        # Telemetry Alert Deduplication & Isolation Guard (Rules 19 & 21)
+        active_sources_by_ws, active_threat_ws_ids = await _get_active_telemetry_suppression_state(
+            session=session,
+            workstation_ids={item.workstation_id},
+            cooldown_seconds=300,
         )
-        active_sources = {row[0] for row in active_alert_res.all()}
-        is_isolated = workstation.status == "ISOLATED"
-        has_active_cyber_threat = "CYBERSECURITY_THREAT" in active_sources
+        ws_id_str = str(item.workstation_id)
+        active_sources = active_sources_by_ws.get(ws_id_str, set())
+        has_active_threat_incident = ws_id_str in active_threat_ws_ids
 
-        should_create_alert = not is_isolated and not (
-            eval_res.anomaly_type == AnomalyType.TECHNICAL_ANOMALY and has_active_cyber_threat
-        ) and (eval_res.anomaly_type.value not in active_sources)
+        should_create_alert = _should_create_telemetry_alert(
+            anomaly_type=eval_res.anomaly_type,
+            workstation_status=workstation.status,
+            active_sources=active_sources,
+            has_active_threat_incident=has_active_threat_incident,
+        )
 
         if should_create_alert:
             evidence_str = "; ".join(eval_res.evidence) if eval_res.evidence else "Anomalous telemetry metric observed."
@@ -227,27 +302,21 @@ async def ingest_telemetry_batch(
     # Cache workstations in this batch
     ws_ids = {item.workstation_id for item in payload.items}
     ws_result = await session.execute(select(Workstation).where(Workstation.id.in_(ws_ids)))
-    ws_map = {w.id: w for w in ws_result.scalars().all()}
+    ws_map = {str(w.id): w for w in ws_result.scalars().all()}
 
-    cutoff = datetime.now(timezone.utc) - timedelta(seconds=300)
-    active_alerts_res = await session.execute(
-        select(Alert.workstation_id, Alert.source_type)
-        .where(
-            Alert.workstation_id.in_(ws_ids),
-            Alert.status.in_(["OPEN", "CONTAINED", "MONITORED"]),
-            Alert.created_at >= cutoff,
-        )
+    active_sources_by_ws, active_threat_ws_ids = await _get_active_telemetry_suppression_state(
+        session=session,
+        workstation_ids=ws_ids,
+        cooldown_seconds=300,
     )
-    active_sources_by_ws: dict[UUID, set[str]] = {}
-    for ws_id, src_type in active_alerts_res.all():
-        active_sources_by_ws.setdefault(ws_id, set()).add(src_type)
 
     records = []
     anomalies = []
     alerts = []
 
     for item in payload.items:
-        ws = ws_map.get(item.workstation_id)
+        ws_id_str = str(item.workstation_id)
+        ws = ws_map.get(ws_id_str)
         if not ws:
             continue
 
@@ -271,16 +340,22 @@ async def ingest_telemetry_batch(
             )
             anomalies.append(anom)
 
-            is_isolated = ws.status == "ISOLATED"
-            active_sources = active_sources_by_ws.setdefault(item.workstation_id, set())
-            has_active_cyber_threat = "CYBERSECURITY_THREAT" in active_sources
+            active_sources = active_sources_by_ws.setdefault(ws_id_str, set())
+            has_active_threat_incident = ws_id_str in active_threat_ws_ids
 
-            should_create_alert = not is_isolated and not (
-                eval_res.anomaly_type == AnomalyType.TECHNICAL_ANOMALY and has_active_cyber_threat
-            ) and (eval_res.anomaly_type.value not in active_sources)
+            should_create_alert = _should_create_telemetry_alert(
+                anomaly_type=eval_res.anomaly_type,
+                workstation_status=ws.status,
+                active_sources=active_sources,
+                has_active_threat_incident=has_active_threat_incident,
+            )
 
             if should_create_alert:
-                active_sources.add(eval_res.anomaly_type.value)
+                if eval_res.anomaly_type == AnomalyType.TECHNICAL_ANOMALY:
+                    active_sources.add("TECHNICAL_ANOMALY")
+                elif eval_res.anomaly_type == AnomalyType.SECURITY_ANOMALY:
+                    active_sources.add("CYBERSECURITY_THREAT")
+
                 evidence_str = "; ".join(eval_res.evidence) if eval_res.evidence else "Anomalous telemetry metric observed."
                 if eval_res.anomaly_type == AnomalyType.TECHNICAL_ANOMALY:
                     is_critical = (
