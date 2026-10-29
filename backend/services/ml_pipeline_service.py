@@ -596,16 +596,30 @@ def evaluate_telemetry_snapshot(
             cyber_threat_probability=cyber_prob,
         )
 
-    # Technical anomaly validation: require diagnostic confidence >= 0.60
-    # OR genuine severe hardware saturation (CPU >= 85%, RAM >= 90%, disk IO >= 50 MB/s, procs >= 800)
+    # Technical anomaly validation: require genuine hardware stress OR elevated metrics with high diagnostic certainty
     cpu_val = float(item.cpu.usage_percent)
     mem_val = float(item.memory.usage_percent)
     disk_bytes = float(item.disk.read_bytes_per_sec + item.disk.write_bytes_per_sec)
     proc_cnt = float(item.process_count)
 
-    is_hardware_stressed = cpu_val >= 85.0 or mem_val >= 90.0 or disk_bytes >= 5.0e7 or proc_cnt >= 800.0
+    is_hardware_stressed = (
+        cpu_val >= 85.0
+        or mem_val >= 90.0
+        or disk_bytes >= 5.0e7
+        or proc_cnt >= 800.0
+    )
+    is_elevated_metric = (
+        cpu_val >= 75.0
+        or mem_val >= 85.0
+        or disk_bytes >= 3.0e7
+        or proc_cnt >= 600.0
+    )
+    is_technical_anomaly = (
+        (is_hardware_stressed and fault_conf >= 0.50)
+        or (is_elevated_metric and fault_conf >= 0.85)
+    )
 
-    if fault_conf >= 0.60 or is_hardware_stressed:
+    if is_technical_anomaly:
         anomaly_type = AnomalyType.TECHNICAL_ANOMALY
         evidence_list.append(f"Model 02-A diagnosed technical fault '{pred_fault}' with confidence {fault_conf:.2%}.")
         final_conf = float(fault_conf)
@@ -623,7 +637,7 @@ def evaluate_telemetry_snapshot(
             cyber_threat_probability=cyber_prob,
         )
 
-    # Low diagnostic confidence without hardware stress indicates benign baseline variance
+    # Benign operational variance without hardware saturation
     return AnomalyEvaluationResult(
         is_anomaly=False,
         anomaly_type=AnomalyType.NORMAL,
@@ -635,7 +649,8 @@ def evaluate_telemetry_snapshot(
         evidence=[
             (
                 f"Stage 1 screening flagged statistical variation ({raw_score:.4f} >= {threshold:.4f}), "
-                f"but Stage 2 diagnostic confidence was low ({fault_conf:.2%}) with normal hardware metrics — classified as benign operational variance."
+                f"but hardware utilization remained within safe thresholds (CPU: {cpu_val:.1f}%, RAM: {mem_val:.1f}%) "
+                f"— classified as benign operational variance."
             )
         ],
         predicted_fault=None,

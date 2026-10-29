@@ -92,13 +92,14 @@ async def _get_active_telemetry_suppression_state(
     session: AsyncSession,
     workstation_ids: set[UUID],
     cooldown_seconds: int = 300,
-) -> tuple[dict[str, set[str]], set[str]]:
+) -> tuple[dict[str, set[str]], set[str], set[str]]:
     """
-    Retrieve active alert sources and active security threat incidents for workstations
-    within the cooldown window. Keys and IDs are normalized to strings for cross-driver consistency.
+    Retrieve active alert sources, active security threat incidents, and active maintenance
+    incidents for workstations within the cooldown window.
+    Keys and IDs are normalized to strings for cross-driver consistency.
     """
     if not workstation_ids:
-        return {}, set()
+        return {}, set(), set()
 
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=cooldown_seconds)
 
@@ -116,21 +117,28 @@ async def _get_active_telemetry_suppression_state(
         if ws_id and src_type:
             active_sources_by_ws.setdefault(str(ws_id), set()).add(src_type)
 
-    # 2. Active or contained security incidents within cooldown window
+    # 2. Active or contained incidents within cooldown window
     incidents_query = await session.execute(
-        select(Incident.workstation_id)
+        select(Incident.workstation_id, Incident.category)
         .where(
             Incident.workstation_id.in_(workstation_ids),
-            Incident.category == "SECURITY_THREAT",
+            Incident.category.in_(["SECURITY_THREAT", "MAINTENANCE", "TECHNICAL_FAILURE"]),
             Incident.status.in_(["OPEN", "CONTAINED", "INVESTIGATING", "ACKNOWLEDGED"]),
             Incident.created_at >= cutoff,
         )
     )
-    active_threat_ws_ids: set[str] = {
-        str(row[0]) for row in incidents_query.all() if row[0] is not None
-    }
+    active_threat_ws_ids: set[str] = set()
+    active_maintenance_ws_ids: set[str] = set()
+    for row in incidents_query.all():
+        if row[0] is not None:
+            ws_str = str(row[0])
+            cat = str(row[1])
+            if cat == "SECURITY_THREAT":
+                active_threat_ws_ids.add(ws_str)
+            elif cat in ("MAINTENANCE", "TECHNICAL_FAILURE"):
+                active_maintenance_ws_ids.add(ws_str)
 
-    return active_sources_by_ws, active_threat_ws_ids
+    return active_sources_by_ws, active_threat_ws_ids, active_maintenance_ws_ids
 
 
 def _should_create_telemetry_alert(
@@ -138,6 +146,7 @@ def _should_create_telemetry_alert(
     workstation_status: str,
     active_sources: set[str],
     has_active_threat_incident: bool,
+    has_active_maintenance_incident: bool = False,
 ) -> bool:
     """
     Determine whether an evaluated anomaly should create an alert or be suppressed.
@@ -146,19 +155,23 @@ def _should_create_telemetry_alert(
     - If TECHNICAL_ANOMALY:
       - Suppress if workstation is ISOLATED (containment in progress).
       - Suppress if workstation has an active cyber threat alert or incident (prevent secondary fault noise).
-      - Suppress if TECHNICAL_ANOMALY was already alerted within cooldown (prevent flooding).
+      - Suppress if active maintenance/technical alert (PREDICTIVE_MAINTENANCE, TECHNICAL_ANOMALY) or maintenance incident exists within cooldown.
     - If SECURITY_ANOMALY:
       - Suppress if CYBERSECURITY_THREAT was already alerted within cooldown.
       - A genuinely distinct / non-cooldown security anomaly remains eligible.
     """
     is_isolated = workstation_status == "ISOLATED"
     has_active_cyber_threat = ("CYBERSECURITY_THREAT" in active_sources) or has_active_threat_incident
+    has_active_maintenance = (
+        bool({"PREDICTIVE_MAINTENANCE", "TECHNICAL_ANOMALY"}.intersection(active_sources))
+        or has_active_maintenance_incident
+    )
 
     if anomaly_type == AnomalyType.TECHNICAL_ANOMALY:
         return (
             not is_isolated
             and not has_active_cyber_threat
-            and ("TECHNICAL_ANOMALY" not in active_sources)
+            and not has_active_maintenance
         )
     elif anomaly_type == AnomalyType.SECURITY_ANOMALY:
         return "CYBERSECURITY_THREAT" not in active_sources
@@ -213,20 +226,24 @@ async def ingest_single_telemetry(
         await session.flush()
 
         # Telemetry Alert Deduplication & Isolation Guard (Rules 19 & 21)
-        active_sources_by_ws, active_threat_ws_ids = await _get_active_telemetry_suppression_state(
-            session=session,
-            workstation_ids={item.workstation_id},
-            cooldown_seconds=300,
+        active_sources_by_ws, active_threat_ws_ids, active_maintenance_ws_ids = (
+            await _get_active_telemetry_suppression_state(
+                session=session,
+                workstation_ids={item.workstation_id},
+                cooldown_seconds=300,
+            )
         )
         ws_id_str = str(item.workstation_id)
         active_sources = active_sources_by_ws.get(ws_id_str, set())
         has_active_threat_incident = ws_id_str in active_threat_ws_ids
+        has_active_maintenance_incident = ws_id_str in active_maintenance_ws_ids
 
         should_create_alert = _should_create_telemetry_alert(
             anomaly_type=eval_res.anomaly_type,
             workstation_status=workstation.status,
             active_sources=active_sources,
             has_active_threat_incident=has_active_threat_incident,
+            has_active_maintenance_incident=has_active_maintenance_incident,
         )
 
         if should_create_alert:
@@ -304,10 +321,12 @@ async def ingest_telemetry_batch(
     ws_result = await session.execute(select(Workstation).where(Workstation.id.in_(ws_ids)))
     ws_map = {str(w.id): w for w in ws_result.scalars().all()}
 
-    active_sources_by_ws, active_threat_ws_ids = await _get_active_telemetry_suppression_state(
-        session=session,
-        workstation_ids=ws_ids,
-        cooldown_seconds=300,
+    active_sources_by_ws, active_threat_ws_ids, active_maintenance_ws_ids = (
+        await _get_active_telemetry_suppression_state(
+            session=session,
+            workstation_ids=ws_ids,
+            cooldown_seconds=300,
+        )
     )
 
     records = []
@@ -342,12 +361,14 @@ async def ingest_telemetry_batch(
 
             active_sources = active_sources_by_ws.setdefault(ws_id_str, set())
             has_active_threat_incident = ws_id_str in active_threat_ws_ids
+            has_active_maintenance_incident = ws_id_str in active_maintenance_ws_ids
 
             should_create_alert = _should_create_telemetry_alert(
                 anomaly_type=eval_res.anomaly_type,
                 workstation_status=ws.status,
                 active_sources=active_sources,
                 has_active_threat_incident=has_active_threat_incident,
+                has_active_maintenance_incident=has_active_maintenance_incident,
             )
 
             if should_create_alert:

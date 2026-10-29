@@ -68,6 +68,30 @@ def test_should_create_telemetry_alert_allows_technical_when_no_active_threat() 
     assert should_alert is True
 
 
+def test_should_create_telemetry_alert_suppresses_technical_when_predictive_maintenance_active() -> None:
+    """Active PREDICTIVE_MAINTENANCE alert suppresses secondary technical anomaly alerts."""
+    should_alert = _should_create_telemetry_alert(
+        anomaly_type=AnomalyType.TECHNICAL_ANOMALY,
+        workstation_status="ONLINE",
+        active_sources={"PREDICTIVE_MAINTENANCE"},
+        has_active_threat_incident=False,
+        has_active_maintenance_incident=False,
+    )
+    assert should_alert is False
+
+
+def test_should_create_telemetry_alert_suppresses_technical_when_maintenance_incident_active() -> None:
+    """Active MAINTENANCE incident suppresses secondary technical anomaly alerts."""
+    should_alert = _should_create_telemetry_alert(
+        anomaly_type=AnomalyType.TECHNICAL_ANOMALY,
+        workstation_status="ONLINE",
+        active_sources=set(),
+        has_active_threat_incident=False,
+        has_active_maintenance_incident=True,
+    )
+    assert should_alert is False
+
+
 def test_should_create_telemetry_alert_suppresses_duplicate_technical_within_cooldown() -> None:
     """Technical anomaly alert is suppressed if TECHNICAL_ANOMALY already alerted within cooldown."""
     should_alert = _should_create_telemetry_alert(
@@ -75,17 +99,19 @@ def test_should_create_telemetry_alert_suppresses_duplicate_technical_within_coo
         workstation_status="ONLINE",
         active_sources={"TECHNICAL_ANOMALY"},
         has_active_threat_incident=False,
+        has_active_maintenance_incident=False,
     )
     assert should_alert is False
 
 
 def test_should_create_telemetry_alert_permits_distinct_security_anomaly() -> None:
-    """Security anomaly alert is permitted if CYBERSECURITY_THREAT is not in active cooldown."""
+    """Security anomaly alert is permitted even when maintenance is active."""
     should_alert = _should_create_telemetry_alert(
         anomaly_type=AnomalyType.SECURITY_ANOMALY,
-        workstation_status="ISOLATED",
-        active_sources=set(),
+        workstation_status="ONLINE",
+        active_sources={"PREDICTIVE_MAINTENANCE"},
         has_active_threat_incident=False,
+        has_active_maintenance_incident=True,
     )
     assert should_alert is True
 
@@ -119,13 +145,14 @@ async def test_get_active_telemetry_suppression_state_with_acknowledged_alert() 
         await session.commit()
 
     async with TestAsyncSession() as session:
-        sources_by_ws, threat_ws_ids = await _get_active_telemetry_suppression_state(
+        sources_by_ws, threat_ws_ids, maintenance_ws_ids = await _get_active_telemetry_suppression_state(
             session=session,
             workstation_ids={ws_id},
             cooldown_seconds=300,
         )
         assert str(ws_id) in sources_by_ws
         assert "CYBERSECURITY_THREAT" in sources_by_ws[str(ws_id)]
+        assert str(ws_id) not in maintenance_ws_ids
 
 
 @pytest.mark.asyncio
@@ -158,10 +185,50 @@ async def test_get_active_telemetry_suppression_state_with_active_incident() -> 
         await session.commit()
 
     async with TestAsyncSession() as session:
-        sources_by_ws, threat_ws_ids = await _get_active_telemetry_suppression_state(
+        sources_by_ws, threat_ws_ids, maintenance_ws_ids = await _get_active_telemetry_suppression_state(
             session=session,
             workstation_ids={ws_id},
             cooldown_seconds=300,
         )
         assert str(ws_id) in threat_ws_ids
+        assert str(ws_id) not in maintenance_ws_ids
+
+
+@pytest.mark.asyncio
+async def test_get_active_telemetry_suppression_state_with_maintenance_incident() -> None:
+    """Verifies that an active MAINTENANCE incident is captured in maintenance_ws_ids."""
+    ws_id = uuid.uuid4()
+    inc_id = uuid.uuid4()
+
+    async with TestAsyncSession() as session:
+        ws = Workstation(
+            id=ws_id,
+            hostname="test-ws-maint",
+            ip_address="10.10.1.52",
+            operating_system="Windows 11",
+            status="ONLINE",
+        )
+        session.add(ws)
+        inc = Incident(
+            id=inc_id,
+            incident_number=f"INC-{uuid.uuid4().hex[:6].upper()}",
+            severity="HIGH",
+            category="MAINTENANCE",
+            workstation_id=ws_id,
+            status="OPEN",
+            title="Predictive Maintenance Advisory",
+            description="Hardware memory stress detected.",
+            created_at=datetime.now(timezone.utc),
+        )
+        session.add(inc)
+        await session.commit()
+
+    async with TestAsyncSession() as session:
+        sources_by_ws, threat_ws_ids, maintenance_ws_ids = await _get_active_telemetry_suppression_state(
+            session=session,
+            workstation_ids={ws_id},
+            cooldown_seconds=300,
+        )
+        assert str(ws_id) in maintenance_ws_ids
+        assert str(ws_id) not in threat_ws_ids
 

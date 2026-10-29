@@ -170,6 +170,42 @@ class TestMLTelemetryScreening:
         assert result.score < 0.50
         assert result.confidence >= 0.85
 
+    def test_windows_desktop_active_developer_metrics_returns_no_anomaly(self):
+        """Verify that real background agent telemetry (28% CPU, 64-77% RAM, 300-450 processes) evaluates as NORMAL."""
+        telemetry = _make_telemetry(
+            cpu_pct=28.0,
+            mem_pct=63.7,
+            disk_read=4770.0,
+            disk_write=168089.0,
+            net_in=522.0,
+            net_out=718.0,
+            processes=299,
+        )
+        result = ml_pipeline_service.evaluate_telemetry_snapshot(
+            telemetry, workstation_name="DESKTOP-3LBP28J"
+        )
+
+        assert result.is_anomaly is False
+        assert result.anomaly_type == AnomalyType.NORMAL
+        assert result.score < 0.50
+
+        telemetry_76 = _make_telemetry(
+            cpu_pct=19.5,
+            mem_pct=76.9,
+            disk_read=10000.0,
+            disk_write=50000.0,
+            net_in=5000.0,
+            net_out=5000.0,
+            processes=452,
+        )
+        result_76 = ml_pipeline_service.evaluate_telemetry_snapshot(
+            telemetry_76, workstation_name="DESKTOP-3LBP28J"
+        )
+
+        assert result_76.is_anomaly is False
+        assert result_76.anomaly_type == AnomalyType.NORMAL
+        assert result_76.score < 0.50
+
     def test_diagnose_cyber_threat_output(self):
         telemetry = _make_telemetry(processes=300, net_out=5000000.0)
         is_threat, prob, ev = ml_pipeline_service._diagnose_cyber_threat(telemetry)

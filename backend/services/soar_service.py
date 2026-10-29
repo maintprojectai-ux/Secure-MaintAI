@@ -579,8 +579,6 @@ class SOARService:
         or records authorized research compute preservation without false fault alerts (Scenario 3).
         """
         is_research_allow = eval_res.decision == PolicyDecisionType.ALLOW_LEGITIMATE_RESEARCH
-        inc_num = f"INC-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
-
         inc_title = (
             f"Authorized Research Compute: {eval_res.correlated_incident.incident_category}"
             if is_research_allow
@@ -592,46 +590,58 @@ class SOARService:
             else "Dispatched hardware inspection / predictive maintenance ticket."
         )
 
-        inc_id = uuid.uuid4()
-        inc = Incident(
-            id=inc_id,
-            incident_number=inc_num,
-            severity=eval_res.correlated_incident.severity,
-            category="MAINTENANCE",
-            workstation_id=eval_res.workstation_id,
-            status="RESOLVED" if is_research_allow else "OPEN",
-            title=inc_title,
-            description=eval_res.reason,
-            response_action=inc_action,
-        )
-        self._session.add(inc)
+        existing = await self._find_active_cooldown_incident_alert(eval_res.workstation_id, "MAINTENANCE")
+        if existing and not is_research_allow:
+            inc, alert = existing
+            inc_id = inc.id
+            alert_id = alert.id
+            logger.info(
+                "soar_service: deduplicated active maintenance incident %s for workstation %s",
+                inc.incident_number,
+                eval_res.workstation_id,
+            )
+        else:
+            inc_num = f"INC-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+            inc_id = uuid.uuid4()
+            inc = Incident(
+                id=inc_id,
+                incident_number=inc_num,
+                severity=eval_res.correlated_incident.severity,
+                category="MAINTENANCE",
+                workstation_id=eval_res.workstation_id,
+                status="RESOLVED" if is_research_allow else "OPEN",
+                title=inc_title,
+                description=eval_res.reason,
+                response_action=inc_action,
+            )
+            self._session.add(inc)
 
-        alert_id = uuid.uuid4()
-        alert_title = (
-            f"Authorized Research Workload Preserved: {eval_res.correlated_incident.incident_category}"
-            if is_research_allow
-            else f"Predictive Maintenance: {eval_res.correlated_incident.incident_category}"
-        )
-        alert_rec = (
-            f"Authorized research compute verified ({eval_res.preserve_workloads}). State preserved without containment or service interruption."
-            if is_research_allow
-            else "Hardware degradation or technical fault diagnosed. Technician inspection and maintenance servicing recommended."
-        )
+            alert_id = uuid.uuid4()
+            alert_title = (
+                f"Authorized Research Workload Preserved: {eval_res.correlated_incident.incident_category}"
+                if is_research_allow
+                else f"Predictive Maintenance: {eval_res.correlated_incident.incident_category}"
+            )
+            alert_rec = (
+                f"Authorized research compute verified ({eval_res.preserve_workloads}). State preserved without containment or service interruption."
+                if is_research_allow
+                else "Hardware degradation or technical fault diagnosed. Technician inspection and maintenance servicing recommended."
+            )
 
-        alert = Alert(
-            id=alert_id,
-            source_type="PREDICTIVE_MAINTENANCE",
-            source_id=inc_id,
-            workstation_id=eval_res.workstation_id,
-            severity=eval_res.correlated_incident.severity,
-            status="RESOLVED" if is_research_allow else "OPEN",
-            title=alert_title,
-            description=eval_res.reason,
-            requires_human_intervention=False,
-            recommendation=alert_rec,
-            playbook_initiated="PLAYBOOK_04_MAINTENANCE",
-        )
-        self._session.add(alert)
+            alert = Alert(
+                id=alert_id,
+                source_type="PREDICTIVE_MAINTENANCE",
+                source_id=inc_id,
+                workstation_id=eval_res.workstation_id,
+                severity=eval_res.correlated_incident.severity,
+                status="RESOLVED" if is_research_allow else "OPEN",
+                title=alert_title,
+                description=eval_res.reason,
+                requires_human_intervention=False,
+                recommendation=alert_rec,
+                playbook_initiated="PLAYBOOK_04_MAINTENANCE",
+            )
+            self._session.add(alert)
 
         audit_entry = await self._audit.log(
             actor=operator,
