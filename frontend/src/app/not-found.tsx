@@ -31,7 +31,7 @@ export default function NotFound() {
           href="/devices"
           className="px-4 py-2 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-2 transition-colors"
         >
-          <ArrowLeft className="w-3.5 h-3.5" /> View Fleet Inventory
+          <ArrowLeft className="w-3.5 h-3.5" /> View Workstation Inventory
         </Link>
       </div>
     </div>

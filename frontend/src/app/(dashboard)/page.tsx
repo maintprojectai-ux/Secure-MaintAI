@@ -10,9 +10,6 @@ import {
   ShieldAlert,
   ShieldCheck,
   ChevronRight,
-  MoreVertical,
-  PieChart,
-  BarChart2,
   Clock,
   Shield,
   Info,
@@ -24,7 +21,6 @@ import {
   getDashboardKpis,
   getWorkstations,
   getAlerts,
-  getSecurityEvents,
 } from "@/lib/api";
 import { DashboardKpis, Workstation, Alert } from "@/types";
 
@@ -107,15 +103,56 @@ function formatPlaybook(rawPlaybook?: string): { label: string; color: string } 
   };
 }
 
+function MiniGauge({
+  label,
+  value,
+  strokeColor,
+  statusLabel,
+  statusColorClass,
+}: {
+  label: string;
+  value: number;
+  strokeColor: string;
+  statusLabel: string;
+  statusColorClass: string;
+}) {
+  const clamped = Math.min(100, Math.max(0, value));
+  const strokeDashoffset = 251.32 * (1 - clamped / 100);
+
+  return (
+    <div className="flex flex-col items-center">
+      <span className="text-[11px] font-medium text-slate-400 mb-2">{label}</span>
+      <div className="relative w-16 h-16 sm:w-20 sm:h-20 flex items-center justify-center">
+        <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
+          <circle cx="50" cy="50" r="40" stroke="#1e293b" strokeWidth="8" fill="none" />
+          <circle
+            cx="50"
+            cy="50"
+            r="40"
+            stroke={strokeColor}
+            strokeWidth="8"
+            strokeDasharray="251.32"
+            strokeDashoffset={strokeDashoffset}
+            strokeLinecap="round"
+            fill="none"
+          />
+        </svg>
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
+          <span className="text-xs sm:text-sm font-bold text-white">{clamped}%</span>
+        </div>
+      </div>
+      <span className={`mt-2 text-[10px] font-medium ${statusColorClass}`}>{statusLabel}</span>
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   const [mounted, setMounted] = useState(false);
   const [isLoadingInitial, setIsLoadingInitial] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastUpdatedTime, setLastUpdatedTime] = useState<Date>(new Date());
-
   const [selectedResource, setSelectedResource] = useState<"CPU" | "Memory" | "Disk">("CPU");
 
-  // Dynamic live state from backend APIs
   const [kpi, setKpi] = useState<DashboardKpis>({
     total_workstations: 0,
     online_workstations: 0,
@@ -133,28 +170,23 @@ export default function DashboardPage() {
   });
   const [workstations, setWorkstations] = useState<Workstation[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
-  const [securityEvents, setSecurityEvents] = useState<any[]>([]);
 
   const isSyncingRef = useRef(false);
   const initialLoadedRef = useRef(false);
 
   const loadLiveData = async (isManual = false) => {
-    // Prevent overlapping concurrent sync requests
     if (isSyncingRef.current) return;
     isSyncingRef.current = true;
 
     if (isManual) setIsRefreshing(true);
     try {
-      // Only fetch alerts and security events once on initial load or manual refresh.
-      // Background interval only syncs KPIs and device telemetry, alerts are pushed in real time via SSE.
       const isInitialOrManual = isManual || !initialLoadedRef.current;
       initialLoadedRef.current = true;
 
-      const [liveKpiRes, liveWsRes, liveAlertsRes, liveEventsRes] = await Promise.allSettled([
+      const [liveKpiRes, liveWsRes, liveAlertsRes] = await Promise.allSettled([
         getDashboardKpis(),
         getWorkstations({ pageSize: 50 }),
         isInitialOrManual ? getAlerts({ limit: 50 }) : Promise.resolve(null),
-        isInitialOrManual ? getSecurityEvents({ limit: 50 }) : Promise.resolve(null),
       ]);
 
       if (liveKpiRes.status === "fulfilled" && liveKpiRes.value) {
@@ -165,9 +197,6 @@ export default function DashboardPage() {
       }
       if (isInitialOrManual && liveAlertsRes.status === "fulfilled" && Array.isArray(liveAlertsRes.value)) {
         setAlerts(liveAlertsRes.value);
-      }
-      if (isInitialOrManual && liveEventsRes.status === "fulfilled" && Array.isArray(liveEventsRes.value)) {
-        setSecurityEvents(liveEventsRes.value);
       }
 
       setLastUpdatedTime(new Date());
@@ -182,10 +211,8 @@ export default function DashboardPage() {
 
   useEffect(() => {
     setMounted(true);
-    // Initial load on mount
     loadLiveData(true);
 
-    // Real-time alert stream updates (SSE via AlertContext)
     const handleAlertsUpdated = (e: Event) => {
       const customEvent = e as CustomEvent;
       const detail = customEvent.detail;
@@ -214,7 +241,6 @@ export default function DashboardPage() {
     };
     window.addEventListener("alerts-updated", handleAlertsUpdated);
 
-    // Background telemetry polling every 30 seconds when active
     const interval = setInterval(() => {
       if (typeof document !== "undefined" && document.hidden) return;
       loadLiveData(false);
@@ -226,7 +252,6 @@ export default function DashboardPage() {
     };
   }, []);
 
-  // Compute dynamic derived metrics from live state
   const total = kpi.total_workstations || workstations.length;
   const healthyCount = kpi.online_workstations;
   const warningCount = kpi.warning_workstations;
@@ -235,7 +260,6 @@ export default function DashboardPage() {
     kpi.isolated_workstations ??
     workstations.filter((w) => w.is_isolated || w.status === "ISOLATED").length;
   const offlineCount = kpi.offline_workstations;
-  const threatCount = kpi.active_threats;
 
   const healthyPct = total > 0 ? ((healthyCount / total) * 100).toFixed(1) : "0.0";
   const warningPct = total > 0 ? ((warningCount / total) * 100).toFixed(1) : "0.0";
@@ -243,26 +267,18 @@ export default function DashboardPage() {
   const isolatedPct = total > 0 ? ((isolatedCount / total) * 100).toFixed(1) : "0.0";
   const offlinePct = total > 0 ? ((offlineCount / total) * 100).toFixed(1) : "0.0";
 
-  // Helper to determine if an alert is active (unresolved)
   const isAlertActive = (a: any): boolean => {
     const st = String(a.status || "OPEN").toUpperCase();
     return st !== "RESOLVED";
   };
 
   const formatSeverityDelta = (active: number, resolved: number): string => {
-    if (active > 0 && resolved > 0) {
-      return `${active} active · ${resolved} resolved`;
-    }
-    if (active > 0) {
-      return `${active} active signals`;
-    }
-    if (resolved > 0) {
-      return `0 active · ${resolved} resolved`;
-    }
+    if (active > 0 && resolved > 0) return `${active} active · ${resolved} resolved`;
+    if (active > 0) return `${active} active signals`;
+    if (resolved > 0) return `0 active · ${resolved} resolved`;
     return "0 critical alerts";
   };
 
-  // Active vs Resolved alerts strictly matching canonical AlertSeverity values (CRITICAL, HIGH, MEDIUM, LOW)
   const safeAlerts = Array.isArray(alerts) ? alerts : [];
   const activeAlertsCount = useMemo(() => ({
     ALL: safeAlerts.filter(isAlertActive).length,
@@ -281,15 +297,13 @@ export default function DashboardPage() {
   }), [safeAlerts]);
 
   const totalAlertsCount = safeAlerts.length;
-
   const securityPosturePct = Math.round(
     kpi.system_resilience_score ?? kpi.security_posture ?? 100
   );
 
-  // Top KPI metrics - Designed so counts add up logically and match actual incident/isolation state
   const kpiCards = [
     {
-      title: "Total Fleet",
+      title: "Total Workstations",
       value: String(total),
       delta: `${total} enrolled workstations`,
       deltaColor: "text-blue-400",
@@ -327,7 +341,7 @@ export default function DashboardPage() {
     {
       title: "Resilience Posture",
       value: `${securityPosturePct}%`,
-      delta: securityPosturePct >= 90 ? "Optimal fleet posture" : "Impacted by active threats",
+      delta: securityPosturePct >= 90 ? "Optimal security posture" : "Impacted by active threats",
       deltaColor: securityPosturePct >= 90 ? "text-emerald-400" : "text-amber-400",
       icon: <Shield className="w-5 h-5 text-cyan-400" />,
       iconBg: "bg-cyan-600/20 border-cyan-500/30",
@@ -335,48 +349,12 @@ export default function DashboardPage() {
     },
   ];
 
-  // Devices health distribution for donut chart (all 5 operational states)
   const deviceStatus = [
-    {
-      label: "Online",
-      count: healthyCount,
-      percent: `${healthyPct}%`,
-      color: "#10b981",
-      bg: "bg-emerald-500",
-      href: "/devices?status=ONLINE",
-    },
-    {
-      label: "Warning",
-      count: warningCount,
-      percent: `${warningPct}%`,
-      color: "#f59e0b",
-      bg: "bg-amber-500",
-      href: "/devices?status=WARNING",
-    },
-    {
-      label: "Critical",
-      count: criticalCount,
-      percent: `${criticalPct}%`,
-      color: "#ef4444",
-      bg: "bg-rose-500",
-      href: "/devices?status=CRITICAL",
-    },
-    {
-      label: "Isolated (SOAR)",
-      count: isolatedCount,
-      percent: `${isolatedPct}%`,
-      color: "#a855f7",
-      bg: "bg-purple-500",
-      href: "/devices?status=ISOLATED",
-    },
-    {
-      label: "Offline",
-      count: offlineCount,
-      percent: `${offlinePct}%`,
-      color: "#64748b",
-      bg: "bg-slate-500",
-      href: "/devices?status=OFFLINE",
-    },
+    { label: "Online", count: healthyCount, percent: `${healthyPct}%`, color: "#10b981", bg: "bg-emerald-500", href: "/devices?status=ONLINE" },
+    { label: "Warning", count: warningCount, percent: `${warningPct}%`, color: "#f59e0b", bg: "bg-amber-500", href: "/devices?status=WARNING" },
+    { label: "Critical", count: criticalCount, percent: `${criticalPct}%`, color: "#ef4444", bg: "bg-rose-500", href: "/devices?status=CRITICAL" },
+    { label: "Isolated (SOAR)", count: isolatedCount, percent: `${isolatedPct}%`, color: "#a855f7", bg: "bg-purple-500", href: "/devices?status=ISOLATED" },
+    { label: "Offline", count: offlineCount, percent: `${offlinePct}%`, color: "#64748b", bg: "bg-slate-500", href: "/devices?status=OFFLINE" },
   ];
 
   const deviceStatusDonutData: DonutSegment[] = [
@@ -387,61 +365,18 @@ export default function DashboardPage() {
     { label: "Offline", value: offlineCount, color: "#64748b" },
   ];
 
-  // Alerts Summary rows for the Severity Widget (Active counts with resolved counts)
   const alertsSummary = [
-    {
-      title: "Critical",
-      count: activeAlertsCount.Critical,
-      resolvedCount: resolvedAlertsCount.Critical,
-      totalCount: activeAlertsCount.Critical + resolvedAlertsCount.Critical,
-      color: "text-rose-400",
-      icon: <AlertCircle className="w-4 h-4 text-rose-400" />,
-      href: "/alerts?severity=CRITICAL",
-    },
-    {
-      title: "High",
-      count: activeAlertsCount.High,
-      resolvedCount: resolvedAlertsCount.High,
-      totalCount: activeAlertsCount.High + resolvedAlertsCount.High,
-      color: "text-orange-400",
-      icon: <AlertTriangle className="w-4 h-4 text-orange-400" />,
-      href: "/alerts?severity=HIGH",
-    },
-    {
-      title: "Medium",
-      count: activeAlertsCount.Medium,
-      resolvedCount: resolvedAlertsCount.Medium,
-      totalCount: activeAlertsCount.Medium + resolvedAlertsCount.Medium,
-      color: "text-amber-300",
-      icon: <AlertTriangle className="w-4 h-4 text-amber-300" />,
-      href: "/alerts?severity=MEDIUM",
-    },
-    {
-      title: "Low",
-      count: activeAlertsCount.Low,
-      resolvedCount: resolvedAlertsCount.Low,
-      totalCount: activeAlertsCount.Low + resolvedAlertsCount.Low,
-      color: "text-cyan-400",
-      icon: <Info className="w-4 h-4 text-cyan-400" />,
-      href: "/alerts?severity=LOW",
-    },
+    { title: "Critical", count: activeAlertsCount.Critical, resolvedCount: resolvedAlertsCount.Critical, color: "text-rose-400", icon: <AlertCircle className="w-4 h-4 text-rose-400" />, href: "/alerts?severity=CRITICAL" },
+    { title: "High", count: activeAlertsCount.High, resolvedCount: resolvedAlertsCount.High, color: "text-orange-400", icon: <AlertTriangle className="w-4 h-4 text-orange-400" />, href: "/alerts?severity=HIGH" },
+    { title: "Medium", count: activeAlertsCount.Medium, resolvedCount: resolvedAlertsCount.Medium, color: "text-amber-300", icon: <AlertTriangle className="w-4 h-4 text-amber-300" />, href: "/alerts?severity=MEDIUM" },
+    { title: "Low", count: activeAlertsCount.Low, resolvedCount: resolvedAlertsCount.Low, color: "text-cyan-400", icon: <Info className="w-4 h-4 text-cyan-400" />, href: "/alerts?severity=LOW" },
   ];
 
-  // Recent Alerts list derived from live alerts (preserving canonical severities, source type, and SOAR playbook)
   const recentAlerts = useMemo(() => {
-    if (!safeAlerts || safeAlerts.length === 0) {
-      return [];
-    }
+    if (!safeAlerts || safeAlerts.length === 0) return [];
     return safeAlerts.slice(0, 6).map((a: any) => {
       const sev = (a.severity || "MEDIUM").toUpperCase();
-      const severity =
-        sev === "CRITICAL"
-          ? "Critical"
-          : sev === "HIGH"
-            ? "High"
-            : sev === "LOW"
-              ? "Low"
-              : "Medium";
+      const severity = sev === "CRITICAL" ? "Critical" : sev === "HIGH" ? "High" : sev === "LOW" ? "Low" : "Medium";
       const severityColor =
         severity === "Critical"
           ? "bg-rose-500/15 text-rose-400 border-rose-500/30"
@@ -452,14 +387,12 @@ export default function DashboardPage() {
               : "bg-cyan-500/15 text-cyan-400 border-cyan-500/30";
 
       const sourceInfo = formatAlertSourceType(a.source_type || a.source);
-      const playbookInfo = formatPlaybook(
-        a.playbook_initiated || a.playbook_executed || a.playbook
-      );
+      const playbookInfo = formatPlaybook(a.playbook_initiated || a.playbook_executed || a.playbook);
 
       const matchedWs = workstations.find(
         (w) => w.id === a.workstation_id || w.hostname === a.workstation_id
       );
-      const deviceName = matchedWs?.hostname || a.workstation_hostname || a.device || "Fleet Node";
+      const deviceName = matchedWs?.hostname || a.workstation_hostname || a.device || "Workstation Node";
       const deviceId = matchedWs?.id || a.workstation_id || deviceName;
 
       return {
@@ -479,18 +412,13 @@ export default function DashboardPage() {
     });
   }, [safeAlerts, workstations]);
 
-  // Top Devices by Resource Usage (sorted dynamically from live workstations, showing real workstation status)
   const currentTopDevices = useMemo(() => {
     if (!workstations || workstations.length === 0) return [];
 
     const sorted = [...workstations].sort((a, b) => {
-      if (selectedResource === "CPU") {
-        return (b.cpu_usage ?? 0) - (a.cpu_usage ?? 0);
-      } else if (selectedResource === "Memory") {
-        return (b.memory_usage ?? 0) - (a.memory_usage ?? 0);
-      } else {
-        return (b.disk_usage ?? 0) - (a.disk_usage ?? 0);
-      }
+      if (selectedResource === "CPU") return (b.cpu_usage ?? 0) - (a.cpu_usage ?? 0);
+      if (selectedResource === "Memory") return (b.memory_usage ?? 0) - (a.memory_usage ?? 0);
+      return (b.disk_usage ?? 0) - (a.disk_usage ?? 0);
     });
 
     return sorted.slice(0, 5).map((w) => {
@@ -501,8 +429,7 @@ export default function DashboardPage() {
             ? w.memory_usage
             : w.disk_usage) ?? 0;
       const usage = Math.round(rawVal);
-      const barColor =
-        usage >= 80 ? "bg-rose-500" : usage >= 60 ? "bg-amber-500" : "bg-emerald-500";
+      const barColor = usage >= 80 ? "bg-rose-500" : usage >= 60 ? "bg-amber-500" : "bg-emerald-500";
 
       const rawStatus = (w.status || "ONLINE").toUpperCase();
       const status =
@@ -526,46 +453,26 @@ export default function DashboardPage() {
                 ? "bg-slate-500"
                 : "bg-emerald-500";
 
-      return {
-        id: w.id,
-        name: w.hostname,
-        usage,
-        barColor,
-        status,
-        statusDot,
-      };
+      return { id: w.id, name: w.hostname, usage, barColor, status, statusDot };
     });
   }, [workstations, selectedResource]);
 
-  // System gauges values based on live KPI
   const liveAvgCpu = Math.round(kpi.average_cpu || 0);
   const liveAvgRam = Math.round(kpi.average_ram || 0);
   const liveAvgDisk = Math.round(kpi.average_disk || 0);
-  const cpuGaugeStroke = liveAvgCpu >= 80 ? "#ef4444" : liveAvgCpu >= 60 ? "#f59e0b" : "#3b82f6";
-  const cpuGaugeTextClass = liveAvgCpu >= 80 ? "text-rose-400" : liveAvgCpu >= 60 ? "text-amber-400" : "text-blue-400";
 
-  // Shimmer loading skeleton screen
   if (isLoadingInitial && !mounted) {
     return (
       <div className="space-y-6 font-sans animate-pulse">
-        {/* Row 1: KPI Skeleton */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
           {Array.from({ length: 5 }).map((_, i) => (
             <div key={i} className="glass-card p-4 h-24 border-slate-800 bg-[#091124]/90 rounded-2xl" />
           ))}
         </div>
-
-        {/* Section 1: Device Infrastructure Skeleton */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           <div className="lg:col-span-4 glass-card p-5 h-64 border-slate-800 bg-[#091124]/90 rounded-2xl" />
           <div className="lg:col-span-4 glass-card p-5 h-64 border-slate-800 bg-[#091124]/90 rounded-2xl" />
           <div className="lg:col-span-4 glass-card p-5 h-64 border-slate-800 bg-[#091124]/90 rounded-2xl" />
-        </div>
-
-        {/* Section 2: Security & SOAR Alerts Skeleton */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          <div className="lg:col-span-4 glass-card p-5 h-72 border-slate-800 bg-[#091124]/90 rounded-2xl" />
-          <div className="lg:col-span-8 glass-card p-5 h-72 border-slate-800 bg-[#091124]/90 rounded-2xl" />
         </div>
       </div>
     );
@@ -573,13 +480,11 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6 font-sans">
-      {/* Top Header Live Status Bar */}
+      {/* Live Status Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-1 border-b border-slate-800/60">
-        <div>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Real-time telemetry, anomaly classification, and SOAR automated response across campus fleet
-          </p>
-        </div>
+        <p className="text-xs text-slate-400">
+          Real-time workstation telemetry, ML anomaly classification, and automated SOAR response across campus endpoints.
+        </p>
 
         <div className="flex items-center gap-2.5 self-end sm:self-auto">
           <span className="text-[11px] font-mono text-emerald-400 bg-emerald-950/50 border border-emerald-500/30 px-2.5 py-1 rounded-xl flex items-center gap-1.5 shadow-sm">
@@ -593,15 +498,13 @@ export default function DashboardPage() {
             disabled={isRefreshing}
             className="px-3 py-1 rounded-xl border border-slate-700/80 bg-slate-900/60 hover:bg-slate-800 text-xs font-medium text-slate-300 flex items-center gap-1.5 transition-colors cursor-pointer"
           >
-            <RotateCw
-              className={`w-3.5 h-3.5 text-slate-400 ${isRefreshing ? "animate-spin text-blue-400" : ""}`}
-            />
+            <RotateCw className={`w-3.5 h-3.5 text-slate-400 ${isRefreshing ? "animate-spin text-blue-400" : ""}`} />
             <span>{isRefreshing ? "Syncing..." : "Refresh"}</span>
           </button>
         </div>
       </div>
 
-      {/* Row 1: Top 5 Stat KPI Cards */}
+      {/* Row 1: Top 5 KPI Metrics */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         {kpiCards.map((card, i) => (
           <Link
@@ -613,48 +516,43 @@ export default function DashboardPage() {
               <p className="text-xs font-medium text-slate-400 tracking-wide group-hover:text-slate-300">
                 {card.title}
               </p>
-              <h3 className="text-2xl font-bold text-white mt-1 font-sans tracking-tight">
+              <h3 className="text-2xl font-bold text-white mt-1 tracking-tight font-sans">
                 {card.value}
               </h3>
               <p className={`text-[11px] font-medium mt-1 ${card.deltaColor}`}>{card.delta}</p>
             </div>
-            <div
-              className={`w-11 h-11 rounded-xl border flex items-center justify-center flex-shrink-0 ${card.iconBg}`}
-            >
+            <div className={`w-11 h-11 rounded-xl border flex items-center justify-center flex-shrink-0 ${card.iconBg}`}>
               {card.icon}
             </div>
           </Link>
         ))}
       </div>
 
-      {/* ========================================================================= */}
-      {/* SECTION 1: Device Infrastructure & Fleet Telemetry */}
-      {/* ========================================================================= */}
+      {/* Section 1: Workstation Infrastructure & Telemetry */}
       <div className="space-y-3 pt-1">
         <div className="flex items-center justify-between pb-2 border-b border-slate-800/60">
           <div className="flex items-center gap-2">
             <Monitor className="w-4 h-4 text-blue-400" />
             <h2 className="text-sm font-bold text-white tracking-tight">
-              Device Infrastructure &amp; Fleet Telemetry
+              Workstation Infrastructure &amp; Live Telemetry
             </h2>
           </div>
           <Link
             href="/devices"
             className="text-xs text-blue-400 hover:text-blue-300 font-medium flex items-center gap-1 group"
           >
-            <span>Fleet Inventory ({total})</span>
+            <span>Workstation Inventory ({total})</span>
             <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
           </Link>
         </div>
 
-        {/* 3-Column Dedicated Device Grid: Telemetry Gauges | Status Distribution | Top Usage */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Col 1: System Telemetry Gauges */}
+          {/* Col 1: Telemetry Gauges (CPU, Memory, Disk) */}
           <div className="lg:col-span-4 glass-card p-5 border-slate-800/80 bg-[#091124]/90 flex flex-col justify-between shadow-lg">
             <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
               <div className="flex items-center gap-2">
                 <Activity className="w-4 h-4 text-blue-400" />
-                <h3 className="text-xs font-bold text-white tracking-tight">Fleet Telemetry Gauges</h3>
+                <h3 className="text-xs font-bold text-white tracking-tight">System Telemetry Gauges</h3>
               </div>
               <span className="text-[10px] font-mono px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-400">
                 Live Average
@@ -662,86 +560,27 @@ export default function DashboardPage() {
             </div>
 
             <div className="grid grid-cols-3 gap-2 py-4 text-center">
-              {/* CPU Gauge */}
-              <div className="flex flex-col items-center">
-                <span className="text-[11px] font-medium text-slate-400 mb-2">CPU</span>
-                <div className="relative w-16 h-16 sm:w-20 sm:h-20 flex items-center justify-center">
-                  <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
-                    <circle cx="50" cy="50" r="40" stroke="#1e293b" strokeWidth="8" fill="none" />
-                    <circle
-                      cx="50"
-                      cy="50"
-                      r="40"
-                      stroke={cpuGaugeStroke}
-                      strokeWidth="8"
-                      strokeDasharray="251.32"
-                      strokeDashoffset={251.32 * (1 - liveAvgCpu / 100)}
-                      strokeLinecap="round"
-                      fill="none"
-                    />
-                  </svg>
-                  <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    <span className="text-xs sm:text-sm font-bold text-white">{liveAvgCpu}%</span>
-                  </div>
-                </div>
-                <span className={`mt-2 text-[10px] font-medium ${cpuGaugeTextClass}`}>
-                  {liveAvgCpu >= 80 ? "High Load" : liveAvgCpu >= 60 ? "Moderate" : "Normal"}
-                </span>
-              </div>
-
-              {/* Memory Gauge */}
-              <div className="flex flex-col items-center">
-                <span className="text-[11px] font-medium text-slate-400 mb-2">Memory</span>
-                <div className="relative w-16 h-16 sm:w-20 sm:h-20 flex items-center justify-center">
-                  <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
-                    <circle cx="50" cy="50" r="40" stroke="#1e293b" strokeWidth="8" fill="none" />
-                    <circle
-                      cx="50"
-                      cy="50"
-                      r="40"
-                      stroke="#10b981"
-                      strokeWidth="8"
-                      strokeDasharray="251.32"
-                      strokeDashoffset={251.32 * (1 - liveAvgRam / 100)}
-                      strokeLinecap="round"
-                      fill="none"
-                    />
-                  </svg>
-                  <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    <span className="text-xs sm:text-sm font-bold text-white">{liveAvgRam}%</span>
-                  </div>
-                </div>
-                <span className="mt-2 text-[10px] font-medium text-emerald-400">
-                  {liveAvgRam >= 85 ? "High Load" : liveAvgRam >= 70 ? "Elevated" : "Healthy"}
-                </span>
-              </div>
-
-              {/* Disk Gauge */}
-              <div className="flex flex-col items-center">
-                <span className="text-[11px] font-medium text-slate-400 mb-2">Disk</span>
-                <div className="relative w-16 h-16 sm:w-20 sm:h-20 flex items-center justify-center">
-                  <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
-                    <circle cx="50" cy="50" r="40" stroke="#1e293b" strokeWidth="8" fill="none" />
-                    <circle
-                      cx="50"
-                      cy="50"
-                      r="40"
-                      stroke="#8b5cf6"
-                      strokeWidth="8"
-                      strokeDasharray="251.32"
-                      strokeDashoffset={251.32 * (1 - liveAvgDisk / 100)}
-                      strokeLinecap="round"
-                      fill="none"
-                    />
-                  </svg>
-                  <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    <span className="text-xs sm:text-sm font-bold text-white">{liveAvgDisk}%</span>
-                  </div>
-                </div>
-                <span className="mt-2 text-[10px] font-medium text-purple-400">
-                  {liveAvgDisk >= 85 ? "Low Space" : liveAvgDisk >= 70 ? "Moderate" : "Healthy Space"}
-                </span>
-              </div>
+              <MiniGauge
+                label="CPU"
+                value={liveAvgCpu}
+                strokeColor={liveAvgCpu >= 80 ? "#ef4444" : liveAvgCpu >= 60 ? "#f59e0b" : "#3b82f6"}
+                statusLabel={liveAvgCpu >= 80 ? "High Load" : liveAvgCpu >= 60 ? "Moderate" : "Normal"}
+                statusColorClass={liveAvgCpu >= 80 ? "text-rose-400" : liveAvgCpu >= 60 ? "text-amber-400" : "text-blue-400"}
+              />
+              <MiniGauge
+                label="Memory"
+                value={liveAvgRam}
+                strokeColor="#10b981"
+                statusLabel={liveAvgRam >= 85 ? "High Load" : liveAvgRam >= 70 ? "Elevated" : "Healthy"}
+                statusColorClass="text-emerald-400"
+              />
+              <MiniGauge
+                label="Disk"
+                value={liveAvgDisk}
+                strokeColor="#8b5cf6"
+                statusLabel={liveAvgDisk >= 85 ? "Low Space" : liveAvgDisk >= 70 ? "Moderate" : "Healthy"}
+                statusColorClass="text-purple-400"
+              />
             </div>
 
             <div className="pt-2.5 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
@@ -750,13 +589,10 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Col 2: Devices Status Overview (Donut Chart & Active Legend) */}
+          {/* Col 2: Workstations Operational Distribution */}
           <div className="lg:col-span-4 glass-card p-5 border-slate-800/80 bg-[#091124]/90 flex flex-col justify-between shadow-lg">
             <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
-              <div className="flex items-center gap-2">
-                <PieChart className="w-4 h-4 text-emerald-400" />
-                <h3 className="text-xs font-bold text-white tracking-tight">Devices Status Distribution</h3>
-              </div>
+              <h3 className="text-xs font-bold text-white tracking-tight">Devices Status Distribution</h3>
               <span className="text-[10px] font-mono px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-400">
                 {total} Total
               </span>
@@ -774,7 +610,6 @@ export default function DashboardPage() {
                 />
               </div>
 
-              {/* Legend Breakdown: Only display active states to prevent visual clutter */}
               <div className="space-y-1.5 flex-1 text-xs">
                 {deviceStatus.filter((item) => item.count > 0).map((item, idx) => (
                   <Link
@@ -807,13 +642,10 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Col 3: Top Devices by Resource Usage */}
+          {/* Col 3: Top Workstations by Resource Usage */}
           <div className="lg:col-span-4 glass-card p-5 border-slate-800/80 bg-[#091124]/90 shadow-lg flex flex-col justify-between">
             <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
-              <div className="flex items-center gap-2">
-                <BarChart2 className="w-4 h-4 text-emerald-400" />
-                <h3 className="text-xs font-bold text-white tracking-tight">Top Workstations by Resource</h3>
-              </div>
+              <h3 className="text-xs font-bold text-white tracking-tight">Top Workstations by Resource</h3>
               <select
                 value={selectedResource}
                 onChange={(e) => setSelectedResource(e.target.value as "CPU" | "Memory" | "Disk")}
@@ -885,10 +717,8 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* ========================================================================= */}
-      {/* SECTION 2: Security Incidents & SOAR Automated Response */}
-      {/* ========================================================================= */}
-      <div className="space-y-3 pt-4">
+      {/* Section 2: Security Incidents & SOAR Automated Response */}
+      <div className="space-y-3 pt-3">
         <div className="flex items-center justify-between pb-2 border-b border-slate-800/60">
           <div className="flex items-center gap-2">
             <ShieldAlert className="w-4 h-4 text-purple-400" />
@@ -906,7 +736,7 @@ export default function DashboardPage() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Col 1: Alerts by Severity Widget (4 cols) */}
+          {/* Col 1: Alerts by Severity */}
           <div className="lg:col-span-4 glass-card p-5 border-slate-800/80 bg-[#091124]/90 flex flex-col justify-between shadow-lg">
             <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
               <h3 className="text-xs font-bold text-white tracking-tight">Alerts by Severity</h3>
@@ -920,7 +750,7 @@ export default function DashboardPage() {
                 <Link
                   key={idx}
                   href={alert.href}
-                  className="py-2.5 flex items-center justify-between hover:bg-slate-800/30 px-2 rounded-lg transition-colors group"
+                  className="py-2.5 flex items-center justify-between hover:bg-slate-800/30 px-2 rounded-lg transition-colors group cursor-pointer"
                 >
                   <div className="flex items-center gap-2.5">
                     <span className="flex-shrink-0">{alert.icon}</span>
@@ -954,7 +784,7 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Col 2: Recent Alerts & SOAR Execution Table (8 cols) */}
+          {/* Col 2: Recent Alerts & SOAR Execution Table */}
           <div className="lg:col-span-8 glass-card p-5 border-slate-800/80 bg-[#091124]/90 shadow-lg flex flex-col justify-between">
             <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
               <div className="flex items-center gap-2">
@@ -974,34 +804,29 @@ export default function DashboardPage() {
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="text-[11px] text-slate-400 border-b border-slate-800/80 font-medium">
-                    <th className="py-2.5 px-2 font-normal">Severity</th>
-                    <th className="py-2.5 px-2 font-normal">Source</th>
-                    <th className="py-2.5 px-2 font-normal">Alert Details</th>
-                    <th className="py-2.5 px-2 font-normal">Device</th>
-                    <th className="py-2.5 px-2 font-normal">SOAR Playbook</th>
-                    <th className="py-2.5 px-2 font-normal">Time</th>
-                    <th className="py-2.5 px-1 font-normal text-right"></th>
+                    <th className="py-2 px-2 font-normal">Severity</th>
+                    <th className="py-2 px-2 font-normal">Source</th>
+                    <th className="py-2 px-2 font-normal">Alert Details</th>
+                    <th className="py-2 px-2 font-normal">Device</th>
+                    <th className="py-2 px-2 font-normal">SOAR Playbook</th>
+                    <th className="py-2 px-2 font-normal">Time</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60 text-xs">
                   {recentAlerts.length > 0 ? (
                     recentAlerts.map((alert) => (
                       <tr key={alert.id} className="hover:bg-slate-800/30 transition-colors">
-                        <td className="py-3 px-2 whitespace-nowrap">
-                          <span
-                            className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${alert.severityColor}`}
-                          >
+                        <td className="py-2.5 px-2 whitespace-nowrap">
+                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${alert.severityColor}`}>
                             {alert.severity}
                           </span>
                         </td>
-                        <td className="py-3 px-2 whitespace-nowrap">
-                          <span
-                            className={`text-[10px] font-medium px-2 py-0.5 rounded-md border ${alert.sourceColor}`}
-                          >
+                        <td className="py-2.5 px-2 whitespace-nowrap">
+                          <span className={`text-[10px] font-medium px-2 py-0.5 rounded-md border ${alert.sourceColor}`}>
                             {alert.sourceLabel}
                           </span>
                         </td>
-                        <td className="py-3 px-2">
+                        <td className="py-2.5 px-2">
                           <Link
                             href="/alerts"
                             className="font-semibold text-white tracking-tight hover:text-blue-400 transition-colors block"
@@ -1012,7 +837,7 @@ export default function DashboardPage() {
                             {alert.description}
                           </div>
                         </td>
-                        <td className="py-3 px-2 font-mono text-[11px] text-slate-300 whitespace-nowrap">
+                        <td className="py-2.5 px-2 font-mono text-[11px] text-slate-300 whitespace-nowrap">
                           <Link
                             href={`/devices/${alert.deviceId}`}
                             className="hover:text-blue-400 hover:underline transition-colors"
@@ -1020,31 +845,20 @@ export default function DashboardPage() {
                             {alert.deviceName}
                           </Link>
                         </td>
-                        <td className="py-3 px-2 whitespace-nowrap">
-                          <span
-                            className={`text-[10px] font-medium px-2 py-0.5 rounded-md border inline-flex items-center gap-1 ${alert.playbookColor}`}
-                          >
+                        <td className="py-2.5 px-2 whitespace-nowrap">
+                          <span className={`text-[10px] font-medium px-2 py-0.5 rounded-md border inline-flex items-center gap-1 ${alert.playbookColor}`}>
                             <Zap className="w-2.5 h-2.5" />
                             <span>{alert.playbookLabel}</span>
                           </span>
                         </td>
-                        <td className="py-3 px-2 text-[11px] text-slate-400 whitespace-nowrap">
+                        <td className="py-2.5 px-2 text-[11px] text-slate-400 whitespace-nowrap">
                           {alert.time}
-                        </td>
-                        <td className="py-3 px-1 text-right">
-                          <Link
-                            href="/alerts"
-                            className="p-1 rounded text-slate-500 hover:text-slate-300 transition-colors inline-block"
-                            title="View alert"
-                          >
-                            <MoreVertical className="w-3.5 h-3.5" />
-                          </Link>
                         </td>
                       </tr>
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={7} className="py-8 text-center text-xs text-slate-400">
+                      <td colSpan={6} className="py-8 text-center text-xs text-slate-400">
                         No active alerts registered in database. All monitored endpoints operating normally.
                       </td>
                     </tr>
