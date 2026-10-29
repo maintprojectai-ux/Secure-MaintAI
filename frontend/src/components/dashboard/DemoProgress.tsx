@@ -244,7 +244,7 @@ export function DemoProgress({ receipt, activeStep, onStepSelect, onReset }: Dem
                         <Terminal className="w-3.5 h-3.5 text-cyan-400" />
                         <span>Scenario Reference Process Snapshot</span>
                       </div>
-                      <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
+                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
                         Preset Seed Profile
                       </span>
                     </div>
@@ -259,7 +259,7 @@ export function DemoProgress({ receipt, activeStep, onStepSelect, onReset }: Dem
                           <div className="flex items-center gap-2 text-slate-400">
                             <span>CPU: {proc.cpu_percent}%</span>
                             <span>RAM: {proc.memory_mb.toFixed(0)}MB</span>
-                            <span className={`px-1 rounded text-[9px] ${
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${
                               proc.status === "contained"
                                 ? "bg-rose-500/20 text-rose-300 border border-rose-500/40"
                                 : "bg-slate-800 text-slate-300"
@@ -281,7 +281,7 @@ export function DemoProgress({ receipt, activeStep, onStepSelect, onReset }: Dem
                         <Network className="w-3.5 h-3.5 text-indigo-400" />
                         <span>Scenario Reference Network Sockets</span>
                       </div>
-                      <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
+                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
                         Preset Seed Profile
                       </span>
                     </div>
@@ -292,10 +292,10 @@ export function DemoProgress({ receipt, activeStep, onStepSelect, onReset }: Dem
                             <span className="text-slate-500">{sock.protocol}</span>
                             <span className="text-slate-300">{sock.local_address} → {sock.remote_address}</span>
                             {sock.threat_note && (
-                              <span className="text-amber-400 italic text-[9px]">({sock.threat_note})</span>
+                              <span className="text-amber-400 italic text-[10px]">({sock.threat_note})</span>
                             )}
                           </div>
-                          <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold ${
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
                             sock.state === "BLOCKED"
                               ? "bg-rose-500/20 text-rose-300 border border-rose-500/40"
                               : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"

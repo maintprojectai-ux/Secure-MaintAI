@@ -588,7 +588,7 @@ export default function PredictionsPage() {
                   </svg>
                   <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                     <span className="text-2xl font-bold font-mono text-white">{dynamicKpis.meanConfidence}%</span>
-                    <span className="text-[9px] text-slate-400 font-medium">Mean Conviction</span>
+                    <span className="text-[10px] text-slate-400 font-medium">Mean Conviction</span>
                   </div>
                 </div>
               </div>
@@ -1023,7 +1023,7 @@ export default function PredictionsPage() {
                             }`}
                           >
                             <span>{cell}</span>
-                            <span className="text-[9px] text-slate-400 font-normal mt-0.5">{labels[idx]}</span>
+                            <span className="text-[10px] text-slate-400 font-normal mt-0.5">{labels[idx]}</span>
                           </div>
                         );
                       })}

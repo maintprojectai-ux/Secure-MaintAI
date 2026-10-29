@@ -114,7 +114,7 @@ export const TopNavbar: React.FC = () => {
           >
             <Bell className="w-4 h-4" />
             {openAlertsCount > 0 && (
-              <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-rose-500 text-white font-mono text-[9px] font-bold flex items-center justify-center animate-pulse">
+              <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-rose-500 text-white font-mono text-[10px] font-bold flex items-center justify-center animate-pulse">
                 {openAlertsCount}
               </span>
             )}
@@ -146,7 +146,7 @@ export const TopNavbar: React.FC = () => {
                         <p className="text-xs font-semibold text-white truncate">
                           {alert.title}
                         </p>
-                        <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-400 font-bold border border-rose-500/30">
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-rose-500/20 text-rose-400 font-bold border border-rose-500/30">
                           {alert.severity}
                         </span>
                       </div>

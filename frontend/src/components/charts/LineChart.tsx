@@ -139,7 +139,7 @@ export const LineChart: React.FC<LineChartProps> = ({
                   x={paddingLeft - 6}
                   y={y + 3}
                   textAnchor="end"
-                  className="text-[9px] fill-slate-500 font-mono"
+                  className="text-[10px] fill-slate-400 font-mono"
                 >
                   {tickVal}
                   {unit}
