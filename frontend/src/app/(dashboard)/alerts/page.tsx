@@ -996,7 +996,7 @@ export default function AlertsPage() {
                   >
                     <span>{tab}</span>
                     <span
-                      className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${isActive
+                      className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono ${isActive
                           ? "bg-rose-500/30 text-rose-200 font-semibold"
                           : "bg-slate-800/80 text-slate-400"
                         }`}
@@ -1032,7 +1032,7 @@ export default function AlertsPage() {
                 >
                   <span>{cat.label}</span>
                   <span
-                    className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${isSelected
+                    className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono ${isSelected
                         ? "bg-blue-500/30 text-blue-200 font-semibold"
                         : "bg-slate-800/80 text-slate-400"
                       }`}
@@ -1126,7 +1126,7 @@ export default function AlertsPage() {
                               {alt.title}
                             </p>
                             {alt.requires_human_intervention && (
-                              <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[9px] font-mono font-medium whitespace-nowrap">
+                              <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-mono font-semibold whitespace-nowrap">
                                 APPROVAL REQ
                               </span>
                             )}

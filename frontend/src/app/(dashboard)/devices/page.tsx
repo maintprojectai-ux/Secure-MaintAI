@@ -670,7 +670,7 @@ export default function DevicesPage() {
                               {device.name}
                             </Link>
                             {device.is_isolated && (
-                              <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-rose-500/20 text-rose-400 border border-rose-500/30 font-bold">
+                              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-400 border border-rose-500/30 font-bold">
                                 ISOLATED
                               </span>
                             )}

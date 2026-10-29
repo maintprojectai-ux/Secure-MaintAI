@@ -98,11 +98,11 @@ export const Sidebar: React.FC = () => {
                 <span className="font-extrabold text-sm tracking-tight text-white font-sans">
                   Secure-MaintAI
                 </span>
-                <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-blue-500/20 text-blue-400 font-semibold border border-blue-500/30">
+                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-semibold border border-blue-500/30">
                   KKU
                 </span>
               </div>
-              <p className="text-[10px] text-slate-400 font-mono">Resilience Platform</p>
+              <p className="text-[10px] text-slate-400 font-sans">Resilience Platform</p>
             </div>
           </div>
 
@@ -138,7 +138,7 @@ export const Sidebar: React.FC = () => {
                     {item.badge && (
                       <span
                         className={cn(
-                          "text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-full text-white",
+                          "text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-full text-white",
                           item.badgeColor || "bg-blue-600"
                         )}
                       >
@@ -165,7 +165,7 @@ export const Sidebar: React.FC = () => {
                   {user?.full_name || "Admin User"}
                 </p>
                 <div className="flex items-center gap-1.5 mt-0.5">
-                  <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 font-medium border border-emerald-500/30">
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 font-semibold border border-emerald-500/30">
                     {user?.role || "ADMIN"}
                   </span>
                 </div>
