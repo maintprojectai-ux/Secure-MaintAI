@@ -15,23 +15,15 @@ import {
   RotateCw,
   Slash,
   Network,
-  ChevronDown,
   ChevronRight,
   ShieldCheck,
-  KeyRound,
-  ShieldAlert as ShieldAlertIcon,
   HardDrive,
   User as UserIcon,
-  MapPin,
   Clock,
   Sparkles,
-  Info,
   ArrowRight,
-  Check,
-  Radio,
   Sliders,
-  HelpCircle,
-  Zap,
+  ShieldAlert as ShieldAlertIcon,
 } from "lucide-react";
 import { Workstation, DemoExecutionReceipt, WorkstationStatus } from "@/types";
 import { Modal } from "@/components/ui/Modal";
@@ -79,6 +71,37 @@ function formatUptime(createdAt?: string | null): string {
   return `${diffMins}m`;
 }
 
+function CircularGauge({
+  value,
+  strokeColor,
+}: {
+  value: number;
+  strokeColor: string;
+}) {
+  const clamped = Math.min(100, Math.max(0, value));
+  const strokeDashoffset = 238.76 * (1 - clamped / 100);
+
+  return (
+    <div className="relative w-18 h-18 shrink-0 flex items-center justify-center">
+      <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
+        <circle cx="50" cy="50" r="38" stroke="#1e293b" strokeWidth="9" fill="none" />
+        <circle
+          cx="50"
+          cy="50"
+          r="38"
+          stroke={strokeColor}
+          strokeWidth="9"
+          strokeDasharray="238.76"
+          strokeDashoffset={strokeDashoffset}
+          strokeLinecap="round"
+          fill="none"
+        />
+      </svg>
+      <span className="absolute text-sm font-bold text-white">{clamped}%</span>
+    </div>
+  );
+}
+
 export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
   deviceId,
   initialWorkstation = null,
@@ -94,7 +117,6 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
   const [showEditModal, setShowEditModal] = useState(false);
   const [isSubmittingEdit, setIsSubmittingEdit] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
-  const [showRestartModal, setShowRestartModal] = useState(false);
 
   // Edit form state
   const [editForm, setEditForm] = useState<{
@@ -113,7 +135,7 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
   const [demoReceipt, setDemoReceipt] = useState<DemoExecutionReceipt | null>(null);
   const [demoActiveStep, setDemoActiveStep] = useState<number>(1);
 
-  // Dynamic live telemetry metrics (default 0 until database telemetry arrives)
+  // Dynamic live telemetry metrics
   const [liveCpu, setLiveCpu] = useState<number>(initialWorkstation?.cpu_usage ?? 0);
   const [liveMemory, setLiveMemory] = useState<number>(initialWorkstation?.memory_usage ?? 0);
   const [liveDisk, setLiveDisk] = useState<number>(initialWorkstation?.disk_usage ?? 0);
@@ -130,15 +152,10 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
   const [sparkCpu, setSparkCpu] = useState<number[]>([0, 0, 0, 0, 0, 0, 0, 0]);
   const [sparkMemory, setSparkMemory] = useState<number[]>([0, 0, 0, 0, 0, 0, 0, 0]);
   const [sparkDiskIO, setSparkDiskIO] = useState<number[]>([0, 0, 0, 0, 0, 0, 0, 0]);
-  const [sparkLabels, setSparkLabels] = useState<string[]>([
-    "--:--", "--:--", "--:--", "--:--", "--:--", "--:--", "--:--", "--:--",
-  ]);
 
-  // Polling control refs to prevent duplicate/overlapping requests
   const isFetchingRef = useRef(false);
   const pollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Load workstation from live backend API
   useEffect(() => {
     let active = true;
 
@@ -180,13 +197,11 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
     };
   }, [deviceId]);
 
-  // Controlled, deduplicated telemetry polling
   useEffect(() => {
     if (!workstation?.id) return;
     let active = true;
 
     const fetchTelemetry = async () => {
-      // Prevent overlapping concurrent requests
       if (isFetchingRef.current) return;
       if (typeof document !== "undefined" && document.hidden) return;
 
@@ -224,7 +239,6 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
           setLiveCpu(Math.round(latest.cpu_usage));
           setLiveMemory(Math.round(latest.memory_usage));
 
-          // Real disk I/O and network throughput in MB/s (converting bytes/sec -> MB/s)
           const ioRateMb =
             Math.round(((latest.disk_read + latest.disk_write) / (1024 * 1024)) * 100) / 100;
           const netInMb = Math.round((latest.network_in / (1024 * 1024)) * 100) / 100;
@@ -244,33 +258,14 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
               (m) => Math.round(((m.disk_read + m.disk_write) / (1024 * 1024)) * 100) / 100
             )
           );
-          setSparkLabels(
-            sorted.map((m) => {
-              const d = new Date(m.timestamp);
-              return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
-            })
-          );
-        } else {
-          setLiveCpu(0);
-          setLiveMemory(0);
-          setLiveDisk(0);
-          setLiveDiskIO(0);
-          setLiveNetworkInMb(0);
-          setLiveNetworkOutMb(0);
-          setLiveProcessCount(0);
-          setLatestTelemetryTime(null);
-          setSparkCpu([0, 0, 0, 0, 0, 0, 0, 0]);
-          setSparkMemory([0, 0, 0, 0, 0, 0, 0, 0]);
-          setSparkDiskIO([0, 0, 0, 0, 0, 0, 0, 0]);
         }
       } catch {
-        // Retain current metrics if endpoint offline
+        // Retain current metrics if endpoint is transiently unreachable
       } finally {
         isFetchingRef.current = false;
       }
     };
 
-    // Self-scheduling loop: waits 15 seconds AFTER previous request completes before polling again
     const scheduleNext = () => {
       if (!active) return;
       if (pollTimeoutRef.current) clearTimeout(pollTimeoutRef.current);
@@ -282,10 +277,8 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
       }, 15000);
     };
 
-    // Initial fetch, then schedule next
     fetchTelemetry().then(() => scheduleNext());
 
-    // Pause polling when browser tab is hidden; resume when visible
     const handleVisibilityChange = () => {
       if (!document.hidden && active && activeTab === "overview") {
         fetchTelemetry();
@@ -337,49 +330,8 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
         }
         : null
     );
-    if (workstation?.id) {
-      Promise.allSettled([
-        getWorkstationTelemetry(workstation.id, 8),
-        getRecentAnomalies(5, workstation.id),
-        getIncidents({ workstationId: workstation.id, limit: 5 }),
-        getAlerts({ workstationId: workstation.id, limit: 5 }),
-      ]).then(([metricsRes, anomaliesRes, incidentsRes, alertsRes]) => {
-        if (metricsRes.status === "fulfilled" && metricsRes.value?.length > 0) {
-          const sorted = [...metricsRes.value].sort(
-            (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-          );
-          const latest = sorted[sorted.length - 1];
-          const ioRateMb =
-            Math.round(((latest.disk_read + latest.disk_write) / (1024 * 1024)) * 100) / 100;
-          setLiveDiskIO(ioRateMb);
-          setLiveNetworkInMb(Math.round((latest.network_in / (1024 * 1024)) * 100) / 100);
-          setLiveNetworkOutMb(Math.round((latest.network_out / (1024 * 1024)) * 100) / 100);
-          setSparkCpu(sorted.map((m) => Math.round(m.cpu_usage)));
-          setSparkMemory(sorted.map((m) => Math.round(m.memory_usage)));
-          setSparkDiskIO(
-            sorted.map(
-              (m) => Math.round(((m.disk_read + m.disk_write) / (1024 * 1024)) * 100) / 100
-            )
-          );
-        }
-        if (anomaliesRes.status === "fulfilled" && Array.isArray(anomaliesRes.value)) {
-          setDeviceAnomalies(
-            anomaliesRes.value.filter(
-              (a) => !a.workstation_id || String(a.workstation_id) === String(workstation.id)
-            )
-          );
-        }
-        if (incidentsRes.status === "fulfilled" && Array.isArray(incidentsRes.value)) {
-          setDeviceIncidents(incidentsRes.value);
-        }
-        if (alertsRes.status === "fulfilled" && Array.isArray(alertsRes.value)) {
-          setDeviceAlerts(alertsRes.value);
-        }
-      });
-    }
   };
 
-  // Actions
   const handleToggleIsolation = async () => {
     if (!workstation) return;
     const nextState = !workstation.is_isolated;
@@ -399,7 +351,7 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
           }
         }
       } catch (err) {
-        console.warn("Could not reach isolation endpoint:", err);
+        console.warn("Isolation endpoint error:", err);
       }
     }
 
@@ -415,19 +367,11 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
     setShowIsolationModal(false);
 
     const message = nextState
-      ? `Surgical network isolation enforced on ${workstation.hostname}. Unauthorized traffic blocked; host OS and research work stay running.`
+      ? `Surgical network isolation enforced on ${workstation.hostname}. Unauthorized traffic severed; operating system and research workloads preserved.`
       : `Surgical network isolation lifted for ${workstation.hostname}. Full connectivity and data streams restored.`;
 
     setFeedbackMessage(message);
-    setTimeout(() => setFeedbackMessage(null), 6000);
-  };
-
-  const handleRestartService = () => {
-    setShowRestartModal(false);
-    setFeedbackMessage(
-      `Background monitoring agent restarted successfully on ${workstation?.hostname || "this device"}. Operating system remained online.`
-    );
-    setTimeout(() => setFeedbackMessage(null), 4000);
+    setTimeout(() => setFeedbackMessage(null), 5000);
   };
 
   const handleSaveEdit = async (e: React.FormEvent) => {
@@ -456,38 +400,34 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
       );
 
       setShowEditModal(false);
-      setFeedbackMessage(`Device details updated successfully for ${workstation.hostname}.`);
+      setFeedbackMessage(`Workstation configuration updated successfully for ${workstation.hostname}.`);
       setTimeout(() => setFeedbackMessage(null), 5000);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to update device details";
+      const msg = err instanceof Error ? err.message : "Failed to update workstation configuration";
       setEditError(msg);
     } finally {
       setIsSubmittingEdit(false);
     }
   };
 
-  // Helper for human-readable CPU status
   const getCpuStatus = (usage: number) => {
     if (usage >= 85) return { label: "Heavy Workload", color: "text-rose-400", bg: "bg-rose-500/10", border: "border-rose-500/30" };
     if (usage >= 65) return { label: "Moderate Activity", color: "text-amber-400", bg: "bg-amber-500/10", border: "border-amber-500/30" };
     return { label: "Normal Load", color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/30" };
   };
 
-  // Helper for human-readable Memory status
   const getMemoryStatus = (usage: number) => {
     if (usage >= 90) return { label: "High Memory Load", color: "text-rose-400", bg: "bg-rose-500/10", border: "border-rose-500/30" };
     if (usage >= 75) return { label: "Elevated Usage", color: "text-amber-400", bg: "bg-amber-500/10", border: "border-amber-500/30" };
     return { label: "Healthy Usage", color: "text-cyan-400", bg: "bg-cyan-500/10", border: "border-cyan-500/30" };
   };
 
-  // Helper for human-readable Storage status
   const getDiskStatus = (usage: number) => {
     if (usage >= 90) return { label: "Low Free Space", color: "text-rose-400", bg: "bg-rose-500/10", border: "border-rose-500/30" };
     if (usage >= 75) return { label: "Moderate Storage", color: "text-amber-400", bg: "bg-amber-500/10", border: "border-amber-500/30" };
     return { label: "Ample Free Space", color: "text-purple-400", bg: "bg-purple-500/10", border: "border-purple-500/30" };
   };
 
-  // Loading skeleton state
   if (isLoading && !workstation) {
     return (
       <div className="space-y-6 font-sans animate-pulse">
@@ -500,44 +440,32 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
               <div className="h-4 w-72 bg-slate-800/50 rounded" />
             </div>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3 pt-4 border-t border-slate-800/80">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="h-10 bg-slate-800/50 rounded" />
-            ))}
-          </div>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          <div className="h-44 bg-slate-800/40 rounded-2xl" />
-          <div className="h-44 bg-slate-800/40 rounded-2xl" />
-          <div className="h-44 bg-slate-800/40 rounded-2xl" />
         </div>
       </div>
     );
   }
 
-  // Not Found / Error state
   if (!workstation) {
     return (
       <div className="space-y-6 font-sans">
         <nav className="flex items-center gap-2 text-xs text-slate-400">
           <Link href="/devices" className="hover:text-white transition-colors">
-            Devices Fleet
+            Workstations
           </Link>
           <ChevronRight className="w-3.5 h-3.5 text-slate-600" />
-          <span className="text-slate-200 font-medium">Device Details</span>
+          <span className="text-slate-200 font-medium">Workstation Details</span>
         </nav>
 
         <div className="glass-card p-10 rounded-2xl border-slate-800/80 bg-[#091124]/95 text-center space-y-4 max-w-lg mx-auto mt-12 shadow-2xl">
           <div className="w-16 h-16 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
             <AlertCircle className="w-8 h-8" />
           </div>
-          <h2 className="text-xl font-bold text-white tracking-tight">Device Not Found</h2>
+          <h2 className="text-xl font-bold text-white tracking-tight">Workstation Not Found</h2>
           <p className="text-xs text-slate-400 leading-relaxed">
             {loadError || (
               <>
-                No device found with identifier{" "}
-                <span className="font-mono text-cyan-400 font-bold">{deviceId}</span>. It may have
-                been decommissioned or the ID is mistyped.
+                No workstation registered with identifier{" "}
+                <span className="font-mono text-cyan-400 font-bold">{deviceId}</span>.
               </>
             )}
           </p>
@@ -546,7 +474,7 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
               href="/devices"
               className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition-colors shadow-md shadow-blue-600/20"
             >
-              Back to Devices Fleet
+              Back to Workstations
             </Link>
           </div>
         </div>
@@ -564,13 +492,11 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
     ((workstation.hardware_specs?.processor as string) || "").toLowerCase().includes("xeon") ||
     ((workstation.hardware_specs?.cpu as string) || "").toLowerCase().includes("epyc");
 
-  // User identity derivation
   const assignedUser = workstation.assigned_user;
   const simulatedIdp = demoReceipt?.step_6_idp_context;
   const hasAssignedUser = Boolean(assignedUser);
   const hasSimulatedSession = Boolean(simulatedIdp);
 
-  // Top assigned user display string
   const topAssignedUserText = assignedUser?.full_name
     ? assignedUser.full_name
     : assignedUser?.username
@@ -583,7 +509,6 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
     ? `${workstation.lab} (Public Lab Station)`
     : "Shared Academic Workstation";
 
-  // University Identity Card values
   const idpDisplayName = assignedUser?.full_name
     ? assignedUser.full_name
     : assignedUser?.username
@@ -633,7 +558,6 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
           .toUpperCase()
       : "KKU";
 
-  // Real Database-Backed Telemetry & Hardware Vitals
   const isQuarantined = Boolean(workstation.is_isolated);
   const isOffline = workstation.status === "OFFLINE";
   const isDegraded =
@@ -667,14 +591,12 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
       ? { label: "Nominal Disk I/O", color: "text-emerald-400" }
       : { label: "No Telemetry Yet", color: "text-slate-400" };
 
-  // Network Link & Process state
   const networkLinkStatus = isQuarantined
     ? {
         speed: "0 Mbps",
         sub: "Quarantined by SOAR",
         color: "text-rose-400",
         border: "border-rose-500/40 bg-rose-950/20",
-        badge: "Quarantined",
       }
     : isOffline
     ? {
@@ -682,7 +604,6 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
         sub: "No Carrier Detected",
         color: "text-slate-400",
         border: "border-slate-800 bg-[#060b18]",
-        badge: "Disconnected",
       }
     : {
         speed: isServer ? "10 Gbps" : "1 Gbps",
@@ -691,10 +612,8 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
           : "Full Duplex Connected",
         color: "text-emerald-400",
         border: "border-slate-800/80 bg-[#060b18]",
-        badge: "Connected",
       };
 
-  // Overall telemetry & hardware status badge
   const overallEnvBadge = isQuarantined
     ? { text: "Network Quarantined", color: "text-rose-400", icon: Slash }
     : isDegraded || liveDiskIO >= 50.0
@@ -707,7 +626,6 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
     ? { text: "Telemetry Verified", color: "text-emerald-400", icon: CheckCircle2 }
     : { text: "Awaiting Telemetry", color: "text-slate-400", icon: Clock };
 
-  // Build real chronological protection activity feed from DB records
   const protectionActivityItems: Array<{
     id: string;
     title: string;
@@ -736,7 +654,7 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
     protectionActivityItems.push({
       id: `anom-${a.id}`,
       title: `ML Anomaly Detected: ${a.anomaly_type}`,
-      description: `${a.model_name || "ML Engine"} (${a.model_version || "v1"}) scored ${(Number(a.score ?? 0) * 100).toFixed(1)}% (Confidence: ${(Number(a.confidence ?? 0) * 100).toFixed(1)}%)${evidenceStr}`,
+      description: `${a.model_name || "ML Engine"} scored ${(Number(a.score ?? 0) * 100).toFixed(1)}% (Confidence: ${(Number(a.confidence ?? 0) * 100).toFixed(1)}%)${evidenceStr}`,
       time: formatLastSeen(tsStr),
       ts: tsStr ? new Date(tsStr).getTime() : 0,
       type: "anomaly",
@@ -770,7 +688,6 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
   protectionActivityItems.sort((a, b) => b.ts - a.ts);
   const recentProtectionFeed = protectionActivityItems.slice(0, 5);
 
-  // Hardware storage capacity and utilization
   const rawStorageSpec =
     (workstation.hardware_specs?.storage as string) ||
     (isServer ? "2.0 TB NVMe Array" : "512 GB NVMe SSD");
@@ -790,20 +707,19 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
 
   return (
     <div className="space-y-6 font-sans">
-      {/* 1. Header & Navigation Breadcrumbs */}
+      {/* 1. Header & Breadcrumbs */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <nav className="flex items-center gap-2 text-xs text-slate-400">
           <Link href="/devices" className="hover:text-white transition-colors flex items-center gap-1.5">
             <ChevronRight className="w-3.5 h-3.5 rotate-180 text-slate-500" />
-            <span>Devices Fleet</span>
+            <span>Workstations</span>
           </Link>
           <ChevronRight className="w-3.5 h-3.5 text-slate-600" />
-          <span className="text-slate-200 font-medium">Device Details</span>
+          <span className="text-slate-200 font-medium">Workstation Details</span>
           <ChevronRight className="w-3.5 h-3.5 text-slate-600" />
           <span className="font-mono text-cyan-400 font-bold">{workstation.hostname}</span>
         </nav>
 
-        {/* Live sync indicator */}
         <div className="flex items-center gap-2 self-start sm:self-auto text-xs px-3 py-1.5 rounded-full bg-slate-900/90 border border-slate-800 text-slate-300">
           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
           <span className="font-medium">Live Telemetry Active</span>
@@ -819,10 +735,9 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
         </div>
       )}
 
-      {/* 3. HERO CARD: Device Identity, Health Status, & Primary Actions */}
+      {/* 3. HERO CARD */}
       <div className="glass-card p-6 rounded-2xl border-slate-800/80 bg-[#091124]/95 shadow-xl space-y-6">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
-          {/* Left: Device Icon, Hostname, Status & Model */}
           <div className="flex items-start sm:items-center gap-4">
             <div
               className={`w-14 h-14 rounded-2xl border flex items-center justify-center shrink-0 shadow-lg ${workstation.is_isolated
@@ -849,7 +764,6 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
                   {workstation.hostname}
                 </h1>
 
-                {/* Friendly, Clear Status Pill */}
                 {workstation.is_isolated ? (
                   <span className="px-3 py-1 rounded-full text-xs font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/40 flex items-center gap-1.5 shadow-sm">
                     <Slash className="w-3.5 h-3.5 text-rose-400" />
@@ -868,15 +782,14 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
                 ) : (
                   <span className="px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                    <span>Online & Protected</span>
+                    <span>Online &amp; Protected</span>
                   </span>
                 )}
               </div>
 
-              {/* Plain-English Device Subtitle */}
               <p className="text-xs text-slate-300 mt-1.5 flex flex-wrap items-center gap-2">
                 <span className="font-medium text-slate-200">
-                  {isServer ? "Campus Server" : "Lab Workstation"}
+                  {isServer ? "Campus Server Node" : "Lab Workstation"}
                 </span>
                 <span className="text-slate-600">•</span>
                 <span className="text-slate-400">
@@ -886,7 +799,7 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
                 </span>
                 <span className="text-slate-600">•</span>
                 <span className="text-slate-400">
-                  {workstation.operating_system || workstation.os_type || "Windows Server 2019"}
+                  {workstation.operating_system || workstation.os_type || "Linux Workstation"}
                 </span>
                 {workstation.asset_tag && (
                   <>
@@ -900,20 +813,8 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
             </div>
           </div>
 
-          {/* Right: Action Buttons with Clear Explanations */}
           <div className="flex flex-wrap items-center gap-2.5">
-            {/* Restart Agent */}
-            <button
-              type="button"
-              onClick={() => setShowRestartModal(true)}
-              title="Safely restart the background monitoring software without rebooting this machine"
-              className="px-3.5 py-2 rounded-xl border border-slate-700/80 bg-[#060b18] hover:bg-slate-800 text-xs font-semibold text-slate-200 flex items-center gap-2 transition-colors cursor-pointer shadow-sm"
-            >
-              <RotateCw className="w-3.5 h-3.5 text-slate-400" />
-              <span>Restart Agent</span>
-            </button>
-
-            {/* Edit Device Profile */}
+            {/* Edit Details */}
             <button
               type="button"
               onClick={() => {
@@ -933,7 +834,7 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
               <span>Edit Details</span>
             </button>
 
-            {/* Quarantine from Network / Restore Connectivity */}
+            {/* Quarantine / Restore Network */}
             <button
               type="button"
               onClick={() => setShowIsolationModal(true)}
@@ -990,7 +891,7 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
           <div>
             <span className="text-slate-500 text-[10px] uppercase font-bold tracking-wider block">Operating System</span>
             <span className="text-slate-300 mt-0.5 block truncate">
-              {workstation.operating_system || workstation.os_type || "Windows Server 2019"}
+              {workstation.operating_system || workstation.os_type || "Linux Workstation"}
             </span>
           </div>
 
@@ -1002,19 +903,18 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
           </div>
 
           <div>
-            <span className="text-slate-500 text-[10px] uppercase font-bold tracking-wider block">Agent Protection</span>
-            <span className="text-emerald-400 mt-0.5 flex items-center gap-1 font-medium">
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span>v{workstation.agent_version || "1.0.0"} (Active)</span>
+            <span className="text-slate-500 text-[10px] uppercase font-bold tracking-wider block">Monitoring Agent</span>
+            <span className="text-emerald-400 font-medium mt-0.5 flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+              v1.0 Active
             </span>
           </div>
         </div>
       </div>
 
-      {/* 4. Tab Navigation Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800/80 pb-2">
-        <div className="flex items-center gap-1.5 p-1 bg-[#060b18] border border-slate-800/80 rounded-xl">
-          {/* Tab 1: Overview & Health */}
+      {/* 4. Tab Navigation */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-2">
+        <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => setActiveTab("overview")}
@@ -1024,10 +924,9 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
               }`}
           >
             <Activity className="w-3.5 h-3.5" />
-            <span>Overview & Health</span>
+            <span>Overview &amp; Health</span>
           </button>
 
-          {/* Tab 2: Security & AI Resilience Simulation */}
           <button
             type="button"
             onClick={() => setActiveTab("simulation")}
@@ -1037,15 +936,10 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
               }`}
           >
             <Sparkles className="w-3.5 h-3.5 text-purple-300" />
-            <span>Security & Resilience Scenarios</span>
-            {demoReceipt && (
-              <span className="px-1.5 py-0.2 rounded-full text-[9px] font-bold bg-cyan-400 text-slate-950 uppercase tracking-wider ml-1">
-                Receipt
-              </span>
-            )}
+            <span>Autonomous Defense Simulator</span>
+            <span className="w-2 h-2 rounded-full bg-purple-400 animate-ping absolute -top-1 -right-1" />
           </button>
 
-          {/* Tab 3: Detailed Specs */}
           <button
             type="button"
             onClick={() => setActiveTab("specs")}
@@ -1055,27 +949,23 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
               }`}
           >
             <Sliders className="w-3.5 h-3.5" />
-            <span>Hardware & Network Specs</span>
+            <span>Hardware Specs</span>
           </button>
         </div>
 
-        {/* Tab Subtitle / Helper */}
-        <div className="text-xs text-slate-400 hidden md:flex items-center gap-1.5">
-          <Info className="w-3.5 h-3.5 text-slate-500" />
-          <span>
-            {activeTab === "overview" && "Simplified operational health, load levels, and university user ownership."}
-            {activeTab === "simulation" && "Test how AI detection, university IdP permissions, and automated SOAR playbooks protect this device in real time."}
-            {activeTab === "specs" && "Full technical hardware components, network addresses, and agent daemon details."}
-          </span>
-        </div>
+        <span className="text-xs text-slate-400 font-mono">
+          {activeTab === "overview" && "Operational health, load levels, and IdP user ownership."}
+          {activeTab === "simulation" && "Test AI detection, IdP permissions, and automated SOAR response."}
+          {activeTab === "specs" && "Hardware specifications, network addresses, and daemon details."}
+        </span>
       </div>
 
       {/* =================================================================== */}
-      {/* TAB 1: OVERVIEW & HEALTH (Clean & Understandable for Normal Users)    */}
+      {/* TAB 1: OVERVIEW & HEALTH                                            */}
       {/* =================================================================== */}
       {activeTab === "overview" && (
         <div className="space-y-6">
-          {/* Plain-Language Status & Health Assessment Banner */}
+          {/* Status & Health Assessment Banner */}
           <div
             className={`p-4 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-lg ${workstation.is_isolated
               ? "bg-rose-950/40 border-rose-500/40 text-rose-200"
@@ -1108,26 +998,25 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
               <div>
                 <h3 className="text-sm font-bold text-white tracking-tight">
                   {workstation.is_isolated
-                    ? "Security Quarantine Active (Device is Protected)"
+                    ? "Security Quarantine Active (Workstation Protected)"
                     : workstation.status === "CRITICAL"
                       ? "Critical Condition Detected"
                       : workstation.status === "WARNING"
-                        ? "Notice: System Experiencing Elevated Demand"
-                        : "Everything Running Smoothly — No Issues Detected"}
+                        ? "Elevated Resource Demand"
+                        : "Nominal Operations — Full Protection Active"}
                 </h3>
                 <p className="text-xs text-slate-300 mt-0.5 leading-relaxed">
                   {workstation.is_isolated
-                    ? "This machine was safely isolated from the university network to block potential threats. The computer remains on, and all local research files and open applications are safe."
+                    ? "Safely isolated from campus network to sever rogue sockets. Host OS remains active; active research files and sessions are preserved."
                     : workstation.status === "CRITICAL"
                       ? "Unusual activity or severe resource saturation detected. Automated incident tracking has flagged this node for review."
                       : workstation.status === "WARNING"
-                        ? "Processor or memory usage is higher than ordinary. This is common during heavy compiles or compute tasks and is being monitored."
-                        : "Hardware performance is optimal, security status is nominal, and university role-sensitive protections are fully active."}
+                        ? "Processor or memory usage is higher than ordinary baselines. Background telemetry is monitored closely."
+                        : "Hardware performance is nominal, telemetry streams are verified, and university role-sensitive protections are fully active."}
                 </p>
               </div>
             </div>
 
-            {/* Quick Link to Simulation if nominal or to un-isolate if quarantined */}
             <div className="shrink-0 flex items-center gap-2">
               {workstation.is_isolated ? (
                 <button
@@ -1150,7 +1039,7 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
             </div>
           </div>
 
-          {/* 3 Key Vital Cards: CPU, Memory, Storage with Plain-English Indicators */}
+          {/* 3 Key Vital Cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
             {/* Vital 1: Processor (CPU) */}
             <div className="glass-card p-5 rounded-2xl border-slate-800/80 bg-[#091124]/95 shadow-xl space-y-4">
@@ -1165,25 +1054,7 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
               </div>
 
               <div className="flex items-center gap-4">
-                {/* Circular Gauge */}
-                <div className="relative w-18 h-18 shrink-0 flex items-center justify-center">
-                  <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
-                    <circle cx="50" cy="50" r="38" stroke="#1e293b" strokeWidth="9" fill="none" />
-                    <circle
-                      cx="50"
-                      cy="50"
-                      r="38"
-                      stroke="#3b82f6"
-                      strokeWidth="9"
-                      strokeDasharray="238.76"
-                      strokeDashoffset={238.76 * (1 - liveCpu / 100)}
-                      strokeLinecap="round"
-                      fill="none"
-                    />
-                  </svg>
-                  <span className="absolute text-sm font-bold text-white">{liveCpu}%</span>
-                </div>
-
+                <CircularGauge value={liveCpu} strokeColor="#3b82f6" />
                 <div className="space-y-1 text-xs">
                   <p className="text-slate-300 font-medium">
                     {liveCpu < 60 ? "Operating calmly" : liveCpu < 85 ? "Moderate calculations" : "High processing workload"}
@@ -1194,12 +1065,11 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
                       : "8 Cores Available"}
                   </p>
                   <p className="text-slate-500 text-[10px] font-mono">
-                    {(workstation.hardware_specs?.processor as string) || "Intel Xeon Silver"}
+                    {(workstation.hardware_specs?.processor as string) || "Intel Xeon / Core i7"}
                   </p>
                 </div>
               </div>
 
-              {/* Sparkline trend */}
               <div className="pt-2 border-t border-slate-800/60">
                 <div className="flex justify-between items-center text-[10px] text-slate-400 mb-1">
                   <span>Recent activity trend</span>
@@ -1232,39 +1102,20 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
               </div>
 
               <div className="flex items-center gap-4">
-                {/* Circular Gauge */}
-                <div className="relative w-18 h-18 shrink-0 flex items-center justify-center">
-                  <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
-                    <circle cx="50" cy="50" r="38" stroke="#1e293b" strokeWidth="9" fill="none" />
-                    <circle
-                      cx="50"
-                      cy="50"
-                      r="38"
-                      stroke="#06b6d4"
-                      strokeWidth="9"
-                      strokeDasharray="238.76"
-                      strokeDashoffset={238.76 * (1 - liveMemory / 100)}
-                      strokeLinecap="round"
-                      fill="none"
-                    />
-                  </svg>
-                  <span className="absolute text-sm font-bold text-white">{liveMemory}%</span>
-                </div>
-
+                <CircularGauge value={liveMemory} strokeColor="#06b6d4" />
                 <div className="space-y-1 text-xs">
                   <p className="text-slate-300 font-medium">
                     {liveMemory < 75 ? "Plentiful memory remaining" : "High application memory in use"}
                   </p>
                   <p className="text-slate-400 text-[11px]">
                     {workstation.hardware_specs?.ram_gb
-                      ? `${Math.round((workstation.hardware_specs.ram_gb * liveMemory) / 100)} GB in use / ${workstation.hardware_specs.ram_gb} GB total`
-                      : "43.5 GB in use / 64 GB total"}
+                      ? `${Math.round((workstation.hardware_specs.ram_gb * liveMemory) / 100)} GB / ${workstation.hardware_specs.ram_gb} GB total`
+                      : "43.5 GB / 64 GB total"}
                   </p>
                   <p className="text-slate-500 text-[10px] font-mono">DDR4 Registered ECC</p>
                 </div>
               </div>
 
-              {/* Sparkline trend */}
               <div className="pt-2 border-t border-slate-800/60">
                 <div className="flex justify-between items-center text-[10px] text-slate-400 mb-1">
                   <span>Recent memory usage</span>
@@ -1297,25 +1148,7 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
               </div>
 
               <div className="flex items-center gap-4">
-                {/* Circular Gauge */}
-                <div className="relative w-18 h-18 shrink-0 flex items-center justify-center">
-                  <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
-                    <circle cx="50" cy="50" r="38" stroke="#1e293b" strokeWidth="9" fill="none" />
-                    <circle
-                      cx="50"
-                      cy="50"
-                      r="38"
-                      stroke="#8b5cf6"
-                      strokeWidth="9"
-                      strokeDasharray="238.76"
-                      strokeDashoffset={238.76 * (1 - liveDisk / 100)}
-                      strokeLinecap="round"
-                      fill="none"
-                    />
-                  </svg>
-                  <span className="absolute text-sm font-bold text-white">{liveDisk}%</span>
-                </div>
-
+                <CircularGauge value={liveDisk} strokeColor="#8b5cf6" />
                 <div className="space-y-1 text-xs">
                   <p className="text-slate-300 font-medium">
                     {liveDisk < 75 ? "Plenty of free storage" : "Storage filling up"}
@@ -1325,7 +1158,6 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
                 </div>
               </div>
 
-              {/* Sparkline trend */}
               <div className="pt-2 border-t border-slate-800/60">
                 <div className="flex justify-between items-center text-[10px] text-slate-400 mb-1">
                   <span>Disk I/O Activity</span>
@@ -1346,18 +1178,17 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
             </div>
           </div>
 
-          {/* Environmental Health & University User Ownership (2-Column Grid) */}
+          {/* Environmental Health & University User Ownership */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-            {/* Left: Environmental Health & Physical Conditions (7 cols) */}
+            {/* Left: Environmental Health (7 cols) */}
             <div className="lg:col-span-7 space-y-5">
-              {/* Environmental & Hardware Status (Real Telemetry Vitals) */}
               <div className="glass-card p-5 rounded-2xl border-slate-800/80 bg-[#091124]/95 shadow-xl space-y-4">
                 <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
                   <div className="flex items-center gap-2">
                     <Activity className="w-4 h-4 text-emerald-400" />
-                    <h3 className="text-sm font-bold text-white tracking-tight">Environmental & Hardware Status</h3>
+                    <h3 className="text-sm font-bold text-white tracking-tight">Environmental &amp; Hardware Status</h3>
                   </div>
-                  <span className={`text-[11px] ${overallEnvBadge.color} flex items-center gap-1 font-medium`}>
+                  <span className={`text-[11px] font-mono ${overallEnvBadge.color} flex items-center gap-1`}>
                     <overallEnvBadge.icon className="w-3.5 h-3.5" />
                     {overallEnvBadge.text}
                   </span>
@@ -1390,27 +1221,15 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
 
                   <div className={`p-3 rounded-xl border space-y-1 ${networkLinkStatus.border}`}>
                     <span className="text-slate-500 text-[10px] uppercase font-bold flex items-center gap-1">
-                      <Cpu className={`w-3 h-3 ${networkLinkStatus.color}`} /> Link & Procs
+                      <Cpu className={`w-3 h-3 ${networkLinkStatus.color}`} /> Link &amp; Procs
                     </span>
                     <span className="text-white font-bold text-base block">{networkLinkStatus.speed}</span>
                     <span className={`text-[11px] ${networkLinkStatus.color}`}>{networkLinkStatus.sub}</span>
                   </div>
                 </div>
-
-                <p className="text-xs text-slate-400 leading-relaxed pt-1">
-                  {isQuarantined
-                    ? "SOAR automated response has isolated external network interfaces. Host CPU execution remains stable with zero operating system reboot required."
-                    : isDegraded
-                    ? "Elevated disk I/O and CPU saturation detected from agent telemetry. Predictive maintenance recommends inspecting high-load background processes."
-                    : isOffline
-                    ? "Agent telemetry heartbeat is currently suspended. Hardware and network throughput metrics will sync once the device reconnects."
-                    : hasLiveTelemetry
-                    ? "Live agent telemetry confirms network ingress/egress, disk I/O throughput, and active process counts are within normal operational bounds."
-                    : "No telemetry snapshots have been ingested for this workstation yet. Start the monitoring agent or run a scenario in the Simulation tab to populate live vitals."}
-                </p>
               </div>
 
-              {/* Recent Protection Activity (Database-Backed) */}
+              {/* Recent Protection Activity */}
               <div className="glass-card p-5 rounded-2xl border-slate-800/80 bg-[#091124]/95 shadow-xl space-y-3">
                 <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
                   <div className="flex items-center gap-2">
@@ -1429,7 +1248,7 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
                     {recentProtectionFeed.map((item) => (
                       <div
                         key={item.id}
-                        className="flex items-start gap-2.5 p-2 rounded-xl bg-[#060b18] border border-slate-800/60"
+                        className="flex items-start gap-2.5 p-2.5 rounded-xl bg-[#060b18] border border-slate-800/60"
                       >
                         {item.type === "telemetry" ? (
                           <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
@@ -1440,11 +1259,11 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
                         ) : (
                           <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                         )}
-                        <div className="space-y-0.5">
+                        <div className="space-y-0.5 min-w-0 flex-1">
                           <p className="text-slate-200 font-medium">{item.title}</p>
                           <p className="text-slate-400 text-[11px]">{item.description}</p>
                         </div>
-                        <span className="text-[10px] text-slate-500 font-mono shrink-0 ml-auto">
+                        <span className="text-[10px] text-slate-500 font-mono shrink-0 ml-2">
                           {item.time}
                         </span>
                       </div>
@@ -1456,7 +1275,7 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
                       No Protection Activity Recorded Yet
                     </p>
                     <p className="text-[11px] text-slate-400 leading-relaxed">
-                      No telemetry heartbeats, ML anomaly detections, security incidents, or alerts exist in the database for{" "}
+                      No telemetry heartbeats, anomalies, or incidents exist in the database for{" "}
                       <span className="font-mono text-slate-300">{workstation.hostname}</span>. Run the endpoint agent or trigger an interactive scenario in the Simulation tab to generate live records.
                     </p>
                   </div>
@@ -1464,14 +1283,13 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
               </div>
             </div>
 
-            {/* Right: University User Ownership & Protection Context (5 cols) */}
+            {/* Right: University User Ownership (5 cols) */}
             <div className="lg:col-span-5 space-y-5">
-              {/* User Ownership Card */}
               <div className="glass-card p-5 rounded-2xl border-slate-800/80 bg-[#091124]/95 shadow-xl space-y-4">
                 <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
                   <div className="flex items-center gap-2">
                     <UserIcon className="w-4 h-4 text-purple-400" />
-                    <h3 className="text-sm font-bold text-white tracking-tight">University Identity & Access</h3>
+                    <h3 className="text-sm font-bold text-white tracking-tight">University Identity &amp; Access</h3>
                   </div>
                   <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
                     hasSimulatedSession
@@ -1539,20 +1357,19 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
                   </div>
                 </div>
 
-                {/* Plain-Language Explanation of Surgical Policy */}
                 <div className="p-3.5 rounded-xl bg-purple-950/20 border border-purple-500/30 space-y-1.5 text-xs">
                   <div className="flex items-center gap-1.5 text-purple-300 font-semibold">
                     <ShieldCheck className="w-4 h-4 text-purple-400" />
-                    <span>How This Device Is Protected</span>
+                    <span>Role-Sensitive Surgical Response Policy</span>
                   </div>
                   <p className="text-slate-300 text-[11px] leading-relaxed">
                     {idpRole === "RESEARCHER"
-                      ? "Researcher Privilege Context: Under King Khalid University policy, AI-detected anomalous spikes trigger surgical network containment rather than destructive kills, ensuring active simulations, deep learning weights, and open sessions are preserved."
+                      ? "Researcher Privilege: Spurious or heavy compute triggers surgical network containment rather than process kills, ensuring long-running model training and deep learning states are preserved."
                       : idpRole === "STUDENT"
-                      ? "Student Lab Policy: High-severity threats (e.g., cryptojacking or rogue processes) trigger surgical process containment and session suspension to safeguard shared campus hardware."
+                      ? "Student Lab Policy: High-severity threats (e.g., cryptojacking or rogue processes) trigger surgical process containment and session suspension to safeguard shared hardware."
                       : idpRole === "ADMIN"
-                      ? "Administrative Policy: Privileged maintenance access is audited in high fidelity; unauthorized escalation attempts trigger instant SIEM alerts and operational audit log entries."
-                      : "Open SSO Integration: When students or researchers log in with university credentials, Secure-MaintAI queries the IdP to dynamically bind institutional roles and apply appropriate security containment playbooks."}
+                      ? "Administrative Policy: Maintenance operations are audited in high fidelity; unauthorized escalation attempts trigger instant SIEM alerts and cryptographic audit records."
+                      : "Open SSO Integration: Secure-MaintAI queries the IdP to dynamically bind institutional roles and enforce surgical SOAR containment playbooks."}
                   </p>
                 </div>
               </div>
@@ -1564,7 +1381,7 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
                   <h3 className="text-sm font-bold text-white tracking-tight">Test Machine Resilience</h3>
                 </div>
                 <p className="text-xs text-slate-300 leading-relaxed">
-                  Simulate how Secure-MaintAI detects and defends this device against hardware faults, student cyber threats, or heavy research compute.
+                  Simulate how Secure-MaintAI detects and defends this workstation against hardware faults, student cyber threats, or heavy research compute.
                 </p>
                 <button
                   type="button"
@@ -1585,25 +1402,23 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
       {/* =================================================================== */}
       {activeTab === "simulation" && (
         <div className="space-y-6">
-          {/* Header Explainer for Normal Users & Testers */}
           <div className="p-4 rounded-2xl border border-purple-500/40 bg-purple-950/30 text-purple-200 shadow-xl space-y-2">
             <div className="flex items-center gap-2.5">
               <Sparkles className="w-5 h-5 text-purple-400 shrink-0" />
-              <h2 className="text-sm font-bold text-white tracking-tight">
-                Autonomous Defense & Incident Simulation Suite
-              </h2>
+              <h3 className="text-sm font-bold text-white tracking-tight">
+                Academic Verification &amp; Defense Simulation Suite
+              </h3>
             </div>
-            <p className="text-xs text-slate-300 leading-relaxed">
-              Safely test how Secure-MaintAI defends <strong className="text-white font-mono">{workstation.hostname}</strong> against real-world operational incidents. Choose any scenario below to inject realistic telemetry and observe how dual-stage AI screens the fault, verifies University IdP credentials, and applies surgical SOAR containment—without rebooting the machine or interrupting legitimate research.
+            <p className="text-xs text-purple-300/90 leading-relaxed">
+              Test how Secure-MaintAI monitors, classifies, and surgically defends this workstation across all 5 verification scenarios. Live telemetry, ML diagnostics, IdP role bindings, and automated SOAR playbooks execute safely in real time.
             </p>
           </div>
 
-          {/* Interactive Pipeline Controller */}
           <DemoController
             receipt={demoReceipt}
             activeStep={demoActiveStep}
             onReceiptUpdate={handleReceiptUpdate}
-            onStepChange={(step) => setDemoActiveStep(step)}
+            onStepChange={setDemoActiveStep}
             onReset={() => {
               setDemoReceipt(null);
               setDemoActiveStep(1);
@@ -1611,151 +1426,100 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
             workstationId={workstation.id}
             targetHostname={workstation.hostname}
             isIsolated={workstation.is_isolated}
-            onRestoreNetwork={handleToggleIsolation}
+            onRestoreNetwork={() => setShowIsolationModal(true)}
           />
 
-          {/* Visual Step-by-Step Pipeline Stepper */}
-          <DemoProgress
-            receipt={demoReceipt}
-            activeStep={demoActiveStep}
-            onStepSelect={(step) => setDemoActiveStep(step)}
-            onReset={() => {
-              setDemoReceipt(null);
-              setDemoActiveStep(1);
-            }}
-          />
+          {demoReceipt && (
+            <DemoProgress
+              receipt={demoReceipt}
+              activeStep={demoActiveStep}
+              onStepSelect={setDemoActiveStep}
+              onReset={() => {
+                setDemoReceipt(null);
+                setDemoActiveStep(1);
+              }}
+            />
+          )}
         </div>
       )}
 
       {/* =================================================================== */}
-      {/* TAB 3: HARDWARE & NETWORK SPECS (Detailed Specifications)            */}
+      {/* TAB 3: HARDWARE SPECS & SYSTEM PROFILE                              */}
       {/* =================================================================== */}
       {activeTab === "specs" && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
-          {/* Hardware Specifications */}
           <div className="glass-card p-5 rounded-2xl border-slate-800/80 bg-[#091124]/95 shadow-xl space-y-4">
             <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
               <div className="flex items-center gap-2">
                 <Cpu className="w-4 h-4 text-blue-400" />
                 <h3 className="text-sm font-bold text-white tracking-tight">Hardware Specifications</h3>
               </div>
-              {workstation.asset_tag && (
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-300 border border-blue-500/30">
-                  {workstation.asset_tag}
-                </span>
-              )}
+              <span className="text-xs font-mono text-cyan-400">{workstation.hostname}</span>
             </div>
 
-            <div className="space-y-2.5 text-xs">
-              <div className="flex justify-between py-1.5 border-b border-slate-800/60">
-                <span className="text-slate-400">Processor (CPU):</span>
-                <span className="text-white font-medium text-right">
-                  {(workstation.hardware_specs?.processor as string) ||
-                    (workstation.hardware_specs?.cpu as string) ||
-                    (isServer ? "Intel(R) Xeon(R) Silver 4214 CPU @ 2.20GHz" : "Intel(R) Core(TM) i7-12700")}
+            <div className="divide-y divide-slate-800/60 text-xs">
+              <div className="py-2.5 flex justify-between">
+                <span className="text-slate-400">Processor Model:</span>
+                <span className="text-white font-mono font-medium">
+                  {(workstation.hardware_specs?.processor as string) || (workstation.hardware_specs?.cpu as string) || "Intel Xeon / Core i7"}
                 </span>
               </div>
-
-              <div className="flex justify-between py-1.5 border-b border-slate-800/60">
-                <span className="text-slate-400">Cores / Threads:</span>
-                <span className="text-slate-200 font-mono">
-                  {workstation.hardware_specs?.cores
-                    ? `${workstation.hardware_specs.cores} Cores / ${workstation.hardware_specs.logical_cpus || workstation.hardware_specs.cores} Threads`
-                    : "16 Cores / 32 Threads"}
-                </span>
-              </div>
-
-              <div className="flex justify-between py-1.5 border-b border-slate-800/60">
-                <span className="text-slate-400">System Memory:</span>
-                <span className="text-slate-200">
-                  {workstation.hardware_specs?.ram_gb
-                    ? `${workstation.hardware_specs.ram_gb} GB ${isServer ? "DDR4 ECC" : "DDR4"}`
-                    : isServer
-                    ? "64 GB DDR4 ECC"
-                    : "16 GB DDR4"}
-                </span>
-              </div>
-
-              <div className="flex justify-between py-1.5 border-b border-slate-800/60">
-                <span className="text-slate-400">Architecture:</span>
-                <span className="text-slate-200 font-mono">
+              <div className="py-2.5 flex justify-between">
+                <span className="text-slate-400">CPU Architecture:</span>
+                <span className="text-white font-mono">
                   {(workstation.hardware_specs?.architecture as string) || "x86_64 (64-bit)"}
                 </span>
               </div>
-
-              <div className="flex justify-between py-1.5 border-b border-slate-800/60">
-                <span className="text-slate-400">Operating System:</span>
-                <span className="text-slate-200">
-                  {workstation.operating_system || workstation.os_type || (isServer ? "Ubuntu 22.04 LTS Server" : "Windows 11 Enterprise")}
+              <div className="py-2.5 flex justify-between">
+                <span className="text-slate-400">Cores / Threads:</span>
+                <span className="text-white font-mono">
+                  {workstation.hardware_specs?.logical_cpus || workstation.hardware_specs?.cores || "8 Cores"}
                 </span>
               </div>
-
-              <div className="flex justify-between py-1.5 border-b border-slate-800/60">
-                <span className="text-slate-400">Agent Daemon Version:</span>
-                <span className="text-emerald-400 font-mono">
-                  v{workstation.agent_version || "1.0.0"} (Autonomous telemetry collector)
+              <div className="py-2.5 flex justify-between">
+                <span className="text-slate-400">Total Installed RAM:</span>
+                <span className="text-white font-mono">
+                  {workstation.hardware_specs?.ram_gb ? `${workstation.hardware_specs.ram_gb} GB` : "64 GB DDR4"}
                 </span>
               </div>
-
-              <div className="flex justify-between py-1.5">
-                <span className="text-slate-400">Primary Storage:</span>
-                <span className="text-slate-200">{rawStorageSpec}</span>
+              <div className="py-2.5 flex justify-between">
+                <span className="text-slate-400">Storage Controller:</span>
+                <span className="text-white font-mono">{rawStorageSpec}</span>
               </div>
             </div>
           </div>
 
-          {/* Network Configuration */}
           <div className="glass-card p-5 rounded-2xl border-slate-800/80 bg-[#091124]/95 shadow-xl space-y-4">
             <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
               <div className="flex items-center gap-2">
                 <Network className="w-4 h-4 text-cyan-400" />
-                <h3 className="text-sm font-bold text-white tracking-tight">Network & IP Configuration</h3>
+                <h3 className="text-sm font-bold text-white tracking-tight">Network &amp; Daemon Profile</h3>
               </div>
-              <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
-                isQuarantined
-                  ? "bg-rose-500/10 text-rose-300 border-rose-500/30"
-                  : isOffline
-                  ? "bg-slate-500/10 text-slate-300 border-slate-500/30"
-                  : "bg-emerald-500/10 text-emerald-300 border-emerald-500/30"
-              }`}>
-                {isQuarantined ? "ISOLATED" : isOffline ? "OFFLINE" : "CONNECTED"}
-              </span>
+              <span className="text-xs font-mono text-emerald-400">Agent v1.0</span>
             </div>
 
-            <div className="space-y-2.5 text-xs">
-              <div className="flex justify-between py-1.5 border-b border-slate-800/60">
-                <span className="text-slate-400">Private IP Address:</span>
-                <span className="text-cyan-400 font-mono font-bold">{workstation.ip_address || "10.10.1.10"}</span>
+            <div className="divide-y divide-slate-800/60 text-xs">
+              <div className="py-2.5 flex justify-between">
+                <span className="text-slate-400">Assigned IPv4 Address:</span>
+                <span className="text-cyan-400 font-mono font-medium">{workstation.ip_address || "10.10.1.10"}</span>
               </div>
-
-              <div className="flex justify-between py-1.5 border-b border-slate-800/60">
-                <span className="text-slate-400">Subnet Mask:</span>
-                <span className="text-slate-300 font-mono">255.255.255.0 (/24)</span>
+              <div className="py-2.5 flex justify-between">
+                <span className="text-slate-400">MAC Address:</span>
+                <span className="text-white font-mono">{workstation.mac_address || "00:1A:2B:3C:4D:5E"}</span>
               </div>
-
-              <div className="flex justify-between py-1.5 border-b border-slate-800/60">
-                <span className="text-slate-400">Default Gateway:</span>
-                <span className="text-slate-300 font-mono">10.10.1.1</span>
+              <div className="py-2.5 flex justify-between">
+                <span className="text-slate-400">Operating System:</span>
+                <span className="text-white">{workstation.operating_system || workstation.os_type || "Linux Workstation"}</span>
               </div>
-
-              <div className="flex justify-between py-1.5 border-b border-slate-800/60">
-                <span className="text-slate-400">Campus DNS Server:</span>
-                <span className="text-slate-300 font-mono">10.10.0.5, 8.8.8.8</span>
+              <div className="py-2.5 flex justify-between">
+                <span className="text-slate-400">Asset Inventory Tag:</span>
+                <span className="text-purple-300 font-mono">{workstation.asset_tag || "KKU-WS-001"}</span>
               </div>
-
-              <div className="flex justify-between py-1.5 border-b border-slate-800/60">
-                <span className="text-slate-400">Hardware MAC Address:</span>
-                <span className="text-slate-200 font-mono">{workstation.mac_address || "00:1A:4B:2F:8C:7D"}</span>
-              </div>
-
-              <div className="flex justify-between py-1.5 border-b border-slate-800/60">
-                <span className="text-slate-400">Interface Speed:</span>
-                <span className="text-slate-200">1 Gbps (Intel I350 Gigabit Network Connection)</span>
-              </div>
-
-              <div className="flex justify-between py-1.5">
-                <span className="text-slate-400">Telemetry Transport:</span>
-                <span className="text-emerald-400 font-mono">TLS 1.3 Encrypted Socket (Port 8000)</span>
+              <div className="py-2.5 flex justify-between">
+                <span className="text-slate-400">Surgical Isolation State:</span>
+                <span className={workstation.is_isolated ? "text-rose-400 font-bold" : "text-emerald-400 font-bold"}>
+                  {workstation.is_isolated ? "ISOLATED (Quarantine Active)" : "NOMINAL (Unrestricted)"}
+                </span>
               </div>
             </div>
           </div>
@@ -1763,93 +1527,23 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
       )}
 
       {/* =================================================================== */}
-      {/* MODAL 1: Quarantine / Isolation Confirmation Modal                  */}
-      {/* =================================================================== */}
-      {showIsolationModal && (
-        <Modal
-          isOpen={true}
-          onClose={() => setShowIsolationModal(false)}
-          title={
-            workstation.is_isolated
-              ? `Restore Network Access: ${workstation.hostname}`
-              : `Quarantine Device: ${workstation.hostname}`
-          }
-          subtitle={`IP Address: ${workstation.ip_address} • Location: ${workstation.lab || workstation.department || "Campus"}`}
-          footer={
-            <>
-              <button
-                type="button"
-                onClick={() => setShowIsolationModal(false)}
-                className="px-3.5 py-1.5 rounded-xl border border-slate-700 text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800 cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleToggleIsolation}
-                className={`px-4 py-1.5 rounded-xl text-xs font-semibold text-white shadow-lg cursor-pointer ${workstation.is_isolated
-                  ? "bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/20"
-                  : "bg-rose-600 hover:bg-rose-500 shadow-rose-600/30"
-                  }`}
-              >
-                {workstation.is_isolated ? "Restore Full Connectivity" : "Enforce Network Quarantine"}
-              </button>
-            </>
-          }
-        >
-          <div className="space-y-3.5 text-xs">
-            <p className="text-slate-300 leading-relaxed">
-              {workstation.is_isolated
-                ? "Restoring network connectivity will reconnect this device to the campus network and resume standard communications. The monitoring agent will continue safeguarding the device."
-                : "Quarantining this device severs unauthorized network traffic to prevent any malware or cyber threat from communicating or spreading across campus."}
-            </p>
-
-            <div className="p-3.5 rounded-xl border border-slate-800 bg-[#070d1e] space-y-2">
-              <div className="flex items-center gap-2 text-emerald-400 font-semibold">
-                <Check className="w-4 h-4" />
-                <span>Host operating system will remain powered on</span>
-              </div>
-              <div className="flex items-center gap-2 text-emerald-400 font-semibold">
-                <Check className="w-4 h-4" />
-                <span>Unsaved work and research files will NOT be deleted</span>
-              </div>
-              <div className="flex items-center gap-2 text-cyan-400 font-semibold">
-                <Check className="w-4 h-4" />
-                <span>Full network access can be restored at any time</span>
-              </div>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {/* =================================================================== */}
-      {/* MODAL 2: Edit Device Profile Modal                                  */}
+      {/* MODAL 1: Edit Workstation Configuration                             */}
       {/* =================================================================== */}
       {showEditModal && (
         <Modal
           isOpen={true}
           onClose={() => setShowEditModal(false)}
-          title={`Edit Device Details: ${workstation.hostname}`}
-          subtitle="Update campus location, assigned room, and asset inventory tags"
+          title={`Edit Configuration: ${workstation.hostname}`}
+          subtitle="Update location, department, asset tag, and operational status"
         >
-          <form onSubmit={handleSaveEdit} className="space-y-4 text-xs">
+          <form onSubmit={handleSaveEdit} className="space-y-4 text-xs font-sans">
             <div className="space-y-3">
               <div>
-                <label className="block text-slate-300 font-medium mb-1">Hostname</label>
+                <label className="block text-slate-300 font-medium mb-1">Hostname (Fixed)</label>
                 <input
                   type="text"
                   disabled
                   value={workstation.hostname}
-                  className="w-full px-3 py-2 rounded-xl bg-[#070d1e]/50 border border-slate-800 text-slate-400 font-mono cursor-not-allowed"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-medium mb-1">IP Address</label>
-                <input
-                  type="text"
-                  disabled
-                  value={workstation.ip_address}
                   className="w-full px-3 py-2 rounded-xl bg-[#070d1e]/50 border border-slate-800 text-slate-400 font-mono cursor-not-allowed"
                 />
               </div>
@@ -1933,42 +1627,59 @@ export const DeviceDetailClient: React.FC<DeviceDetailClientProps> = ({
       )}
 
       {/* =================================================================== */}
-      {/* MODAL 3: Restart Monitoring Agent Modal                             */}
+      {/* MODAL 2: Surgical Isolation Confirmation Modal (Rule 19 & 20)      */}
       {/* =================================================================== */}
-      {showRestartModal && (
+      {showIsolationModal && (
         <Modal
           isOpen={true}
-          onClose={() => setShowRestartModal(false)}
-          title={`Restart Monitoring Agent: ${workstation.hostname}`}
-          subtitle="Safely cycle the local telemetry agent software"
+          onClose={() => setShowIsolationModal(false)}
+          title={
+            workstation.is_isolated
+              ? `Restore Network Access: ${workstation.hostname}`
+              : `Confirm Surgical Isolation: ${workstation.hostname}`
+          }
+          subtitle={`IP Address: ${workstation.ip_address || "10.10.1.10"}`}
           footer={
             <>
               <button
                 type="button"
-                onClick={() => setShowRestartModal(false)}
+                onClick={() => setShowIsolationModal(false)}
                 className="px-3.5 py-1.5 rounded-xl border border-slate-700 text-xs font-semibold text-slate-300 hover:text-white cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="button"
-                onClick={handleRestartService}
-                className="px-4 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white shadow-lg cursor-pointer"
+                onClick={handleToggleIsolation}
+                className={`px-4 py-1.5 rounded-xl text-xs font-semibold text-white shadow-lg cursor-pointer ${workstation.is_isolated
+                  ? "bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/20"
+                  : "bg-rose-600 hover:bg-rose-500 shadow-rose-600/20"
+                  }`}
               >
-                Restart Monitoring Agent
+                {workstation.is_isolated ? "Restore Network Connectivity" : "Execute Surgical Containment"}
               </button>
             </>
           }
         >
-          <div className="space-y-3 text-xs text-slate-300 leading-relaxed">
+          <div className="space-y-3 text-xs text-slate-300 leading-relaxed font-sans">
             <p>
-              Restarting the monitoring agent refreshes background telemetry collection daemons and flushes temporary network socket buffers.
+              {workstation.is_isolated
+                ? "Restoring network access lifts firewall containment rules and reconnects this workstation to the campus network. Continuous telemetry screening will resume immediately."
+                : "Surgical isolation blocks external socket communication, dropping unauthorized lateral movement and command-and-control packets. The host operating system will NOT reboot, and active research workloads remain safe."}
             </p>
-            <div className="p-3 rounded-xl bg-blue-950/30 border border-blue-500/30 text-blue-200">
-              <p className="font-semibold text-white">Will this turn off the computer?</p>
-              <p className="text-[11px] text-slate-300 mt-0.5">
-                No. This will <span className="font-semibold text-white">NOT</span> reboot the computer or interrupt any active student or researcher session.
-              </p>
+            <div className="p-3 rounded-xl bg-[#060b18] border border-slate-800 space-y-1 font-mono text-[11px]">
+              <div className="flex justify-between text-slate-400">
+                <span>Target Workstation:</span>
+                <span className="text-white font-bold">{workstation.hostname}</span>
+              </div>
+              <div className="flex justify-between text-slate-400">
+                <span>Target IP Address:</span>
+                <span className="text-cyan-400">{workstation.ip_address}</span>
+              </div>
+              <div className="flex justify-between text-slate-400">
+                <span>Automated SOAR Action:</span>
+                <span className="text-purple-300 font-bold">Playbook 3: Surgical Network Isolation</span>
+              </div>
             </div>
           </div>
         </Modal>

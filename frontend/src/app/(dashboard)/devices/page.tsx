@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import Link from "next/link";
 import {
   Server,
@@ -9,17 +9,15 @@ import {
   HardDrive,
   Download,
   Search,
-  SlidersHorizontal,
   RotateCw,
   Eye,
   Edit,
   Shield,
   RotateCcw,
-  CheckCircle2,
   AlertTriangle,
   AlertCircle,
   Power,
-  ChevronDown,
+  CheckCircle2,
 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import {
@@ -66,14 +64,14 @@ interface EditFormState {
 export default function DevicesPage() {
   const [devices, setDevices] = useState<DeviceItem[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
-  const [isLoadingFleet, setIsLoadingFleet] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [refreshIndex, setRefreshIndex] = useState(0);
   const [totalDevicesCount, setTotalDevicesCount] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
-  // Search & Filter State (initialized from ?status= URL query parameter when navigated from Dashboard)
+  // Search & Filter State
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedStatus, setSelectedStatus] = useState(() => {
     if (typeof window !== "undefined") {
@@ -116,105 +114,94 @@ export default function DevicesPage() {
   const [isSubmittingEdit, setIsSubmittingEdit] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
 
+  const loadLiveWorkstations = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const res = await getWorkstations({
+        page: currentPage,
+        pageSize,
+        search: searchQuery.trim() || undefined,
+        status: selectedStatus !== "ALL" ? selectedStatus : undefined,
+      });
 
-  // Live fleet synchronization from FastAPI backend
-  useEffect(() => {
-    let active = true;
+      if (res && res.items) {
+        const mapped: DeviceItem[] = res.items.map((w) => {
+          const isServer =
+            (w.operating_system || "").toLowerCase().includes("server") ||
+            (w.hostname || "").toLowerCase().includes("srv") ||
+            (w.hostname || "").toLowerCase().includes("hpc");
 
-    async function loadLiveWorkstations() {
-      setIsLoadingFleet(true);
-      try {
-        const res = await getWorkstations({
-          page: currentPage,
-          pageSize,
-          search: searchQuery.trim() || undefined,
-          status: selectedStatus !== "ALL" ? selectedStatus : undefined,
+          const statusMap: Record<
+            string,
+            "Online" | "Warning" | "Critical" | "Isolated" | "Offline" | "Maintenance" | "Decommissioned"
+          > = {
+            ONLINE: "Online",
+            OFFLINE: "Offline",
+            WARNING: "Warning",
+            CRITICAL: "Critical",
+            ISOLATED: "Isolated",
+            MAINTENANCE: "Maintenance",
+            DECOMMISSIONED: "Decommissioned",
+          };
+          const mappedStatus = statusMap[w.status] || "Online";
+
+          let lastSeenStr = "Active";
+          if (w.last_seen_at) {
+            const diffMs = Date.now() - new Date(w.last_seen_at).getTime();
+            const diffSec = Math.floor(diffMs / 1000);
+            if (diffSec < 60) lastSeenStr = `${diffSec}s ago`;
+            else if (diffSec < 3600) lastSeenStr = `${Math.floor(diffSec / 60)}m ago`;
+            else if (diffSec < 86400) lastSeenStr = `${Math.floor(diffSec / 3600)}h ago`;
+            else lastSeenStr = `${Math.floor(diffSec / 86400)}d ago`;
+          }
+
+          const dept = w.department || "Academic Infrastructure";
+          const lab = w.lab || "Main Bay";
+          const loc = `${dept} • ${lab}`;
+
+          return {
+            id: w.id,
+            name: w.hostname,
+            model:
+              (w.hardware_specs?.processor as string) ||
+              (isServer ? "HPC / Compute Node" : "Standard Workstation"),
+            category: isServer ? "server" : "desktop",
+            ip: w.ip_address,
+            type: w.operating_system || "Linux Workstation",
+            department: w.department || "",
+            lab: w.lab || "",
+            location: loc,
+            rack: w.asset_tag || "Standard Asset",
+            status: mappedStatus,
+            rawStatus: w.status,
+            cpu: w.cpu_usage ?? 0,
+            memory: w.memory_usage ?? 0,
+            disk: w.disk_usage ?? 0,
+            lastSeen: lastSeenStr,
+            is_isolated: w.status === "ISOLATED",
+            mac_address: w.mac_address,
+            asset_tag: w.asset_tag,
+            hardware_specs: w.hardware_specs as Record<string, unknown> | null,
+          };
         });
 
-        if (!active) return;
-
-        if (res && res.items) {
-          const mapped: DeviceItem[] = res.items.map((w) => {
-            const isServer =
-              (w.operating_system || "").toLowerCase().includes("server") ||
-              (w.hostname || "").toLowerCase().includes("srv") ||
-              (w.hostname || "").toLowerCase().includes("hpc");
-
-            const statusMap: Record<
-              string,
-              "Online" | "Warning" | "Critical" | "Isolated" | "Offline" | "Maintenance" | "Decommissioned"
-            > = {
-              ONLINE: "Online",
-              OFFLINE: "Offline",
-              WARNING: "Warning",
-              CRITICAL: "Critical",
-              ISOLATED: "Isolated",
-              MAINTENANCE: "Maintenance",
-              DECOMMISSIONED: "Decommissioned",
-            };
-            const mappedStatus = statusMap[w.status] || "Online";
-
-            let lastSeenStr = "Active";
-            if (w.last_seen_at) {
-              const diffMs = Date.now() - new Date(w.last_seen_at).getTime();
-              const diffSec = Math.floor(diffMs / 1000);
-              if (diffSec < 60) lastSeenStr = `${diffSec}s ago`;
-              else if (diffSec < 3600) lastSeenStr = `${Math.floor(diffSec / 60)}m ago`;
-              else if (diffSec < 86400) lastSeenStr = `${Math.floor(diffSec / 3600)}h ago`;
-              else lastSeenStr = `${Math.floor(diffSec / 86400)}d ago`;
-            }
-
-            const dept = w.department || "Academic Infrastructure";
-            const lab = w.lab || "Main Bay";
-            const loc = `${dept} • ${lab}`;
-
-            return {
-              id: w.id,
-              name: w.hostname,
-              model:
-                (w.hardware_specs?.processor as string) ||
-                (isServer ? "HPC / Compute Node" : "Standard Workstation"),
-              category: isServer ? "server" : "desktop",
-              ip: w.ip_address,
-              type: w.operating_system || "Linux Workstation",
-              department: w.department || "",
-              lab: w.lab || "",
-              location: loc,
-              rack: w.asset_tag || "Fleet Asset",
-              status: mappedStatus,
-              rawStatus: w.status,
-              cpu: w.cpu_usage ?? 0,
-              memory: w.memory_usage ?? 0,
-              disk: w.disk_usage ?? 0,
-              lastSeen: lastSeenStr,
-              is_isolated: w.status === "ISOLATED",
-              mac_address: w.mac_address,
-              asset_tag: w.asset_tag,
-              hardware_specs: w.hardware_specs as Record<string, unknown> | null,
-            };
-          });
-
-          setDevices(mapped);
-          setTotalDevicesCount(res.total);
-          setTotalPages(res.total_pages || 1);
-        }
-      } catch (err) {
-        console.error("Failed to load workstations from backend:", err);
-      } finally {
-        if (active) {
-          setIsLoadingFleet(false);
-          setInitialLoading(false);
-        }
+        setDevices(mapped);
+        setTotalDevicesCount(res.total);
+        setTotalPages(res.total_pages || 1);
       }
+    } catch (err) {
+      console.error("Failed to load workstations:", err);
+    } finally {
+      setIsLoading(false);
+      setInitialLoading(false);
     }
+  }, [currentPage, pageSize, searchQuery, selectedStatus]);
 
+  useEffect(() => {
     loadLiveWorkstations();
-    return () => {
-      active = false;
-    };
-  }, [refreshIndex, currentPage, pageSize, selectedStatus, searchQuery]);
+  }, [loadLiveWorkstations, refreshIndex]);
 
-  // Dynamic KPI Metrics derived directly from live fleet data
+  // Derived KPI metrics
   const total = totalDevicesCount || devices.length;
   const onlineCount = devices.filter((d) => d.rawStatus === "ONLINE").length;
   const warningCount = devices.filter((d) => d.rawStatus === "WARNING").length;
@@ -225,24 +212,19 @@ export default function DevicesPage() {
     (d) => d.rawStatus === "OFFLINE" || d.rawStatus === "MAINTENANCE" || d.rawStatus === "DECOMMISSIONED"
   ).length;
 
-  const onlinePct = devices.length > 0 ? ((onlineCount / devices.length) * 100).toFixed(1) : "0.0";
-  const warningPct = devices.length > 0 ? ((warningCount / devices.length) * 100).toFixed(1) : "0.0";
-  const criticalPct = devices.length > 0 ? ((criticalCount / devices.length) * 100).toFixed(1) : "0.0";
-  const offlinePct = devices.length > 0 ? ((offlineCount / devices.length) * 100).toFixed(1) : "0.0";
-
   const kpiCards = [
     {
-      title: "Total Devices",
+      title: "Total Workstations",
       value: total,
-      delta: `${devices.length} visible in page`,
+      delta: `${total} enrolled workstations`,
       deltaColor: "text-blue-400",
       icon: <Monitor className="w-5 h-5 text-blue-400" />,
       iconBg: "bg-blue-600/20 border-blue-500/30",
     },
     {
-      title: "Online",
+      title: "Online & Healthy",
       value: onlineCount,
-      delta: `${onlinePct}% of active batch`,
+      delta: "Normal operational telemetry",
       deltaColor: "text-emerald-400",
       icon: (
         <div className="relative flex items-center justify-center">
@@ -254,7 +236,7 @@ export default function DevicesPage() {
     {
       title: "Warning",
       value: warningCount,
-      delta: `${warningPct}% of active batch`,
+      delta: "Elevated compute or disk load",
       deltaColor: "text-amber-400",
       icon: <AlertTriangle className="w-5 h-5 text-amber-400" />,
       iconBg: "bg-amber-600/20 border-amber-500/30",
@@ -262,7 +244,7 @@ export default function DevicesPage() {
     {
       title: "Critical / Isolated",
       value: criticalCount,
-      delta: `${criticalPct}% of active batch`,
+      delta: "Automated SOAR quarantine active",
       deltaColor: "text-rose-400",
       icon: <AlertCircle className="w-5 h-5 text-rose-400" />,
       iconBg: "bg-rose-600/20 border-rose-500/30",
@@ -270,14 +252,13 @@ export default function DevicesPage() {
     {
       title: "Offline / Maint",
       value: offlineCount,
-      delta: `${offlinePct}% of active batch`,
+      delta: "Unreachable / servicing",
       deltaColor: "text-slate-400",
       icon: <Power className="w-5 h-5 text-slate-400" />,
       iconBg: "bg-slate-700/30 border-slate-600/40",
     },
   ];
 
-  // Dynamic filter options based on available devices
   const availableLocations = useMemo(() => {
     const locs = new Set<string>();
     devices.forEach((d) => {
@@ -287,7 +268,6 @@ export default function DevicesPage() {
     return Array.from(locs);
   }, [devices]);
 
-  // Client-side refined filtering (for location and type)
   const filteredDevices = useMemo(() => {
     return devices.filter((d) => {
       if (selectedType !== "ALL" && !d.type.toLowerCase().includes(selectedType.toLowerCase())) {
@@ -319,7 +299,6 @@ export default function DevicesPage() {
     );
   };
 
-  // Open Edit Workstation Modal
   const handleOpenEditModal = (device: DeviceItem) => {
     setEditingDevice({
       id: device.id,
@@ -335,7 +314,6 @@ export default function DevicesPage() {
     setIsEditModalOpen(true);
   };
 
-  // Submit Edit Workstation
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingDevice) return;
@@ -358,9 +336,7 @@ export default function DevicesPage() {
       setEditingDevice(null);
       setRefreshIndex((p) => p + 1);
 
-      setTimeout(() => {
-        setActionSuccessMessage(null);
-      }, 6000);
+      setTimeout(() => setActionSuccessMessage(null), 5000);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to update workstation configuration";
       setEditError(msg);
@@ -369,7 +345,6 @@ export default function DevicesPage() {
     }
   };
 
-  // Live Surgical Network Isolation & Rollback
   const confirmIsolation = async () => {
     if (!isolationTarget) return;
 
@@ -405,21 +380,15 @@ export default function DevicesPage() {
 
       setActionSuccessMessage(actionText);
       setIsolationTarget(null);
-
-      setTimeout(() => {
-        setActionSuccessMessage(null);
-      }, 6000);
+      setTimeout(() => setActionSuccessMessage(null), 5000);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Network error";
       setActionSuccessMessage(`Isolation action failed: ${msg}`);
-      setTimeout(() => {
-        setActionSuccessMessage(null);
-      }, 6000);
+      setTimeout(() => setActionSuccessMessage(null), 5000);
     } finally {
       setIsIsolating(false);
     }
   };
-
 
   const handleExportCsv = () => {
     const headers = [
@@ -457,7 +426,7 @@ export default function DevicesPage() {
     link.setAttribute("href", encodedUri);
     link.setAttribute(
       "download",
-      `secure_maint_devices_${new Date().toISOString().slice(0, 10)}.csv`
+      `workstations_${new Date().toISOString().slice(0, 10)}.csv`
     );
     document.body.appendChild(link);
     link.click();
@@ -496,202 +465,150 @@ export default function DevicesPage() {
     );
   };
 
-  // Initial Shimmer Loading Skeleton Screen
   if (initialLoading) {
     return (
-      <div className="space-y-6 font-sans">
-        {/* Skeleton Top Action Bar */}
-        <div className="flex items-center justify-end gap-2.5">
-          <div className="w-24 h-9 rounded-xl bg-slate-800/40 animate-pulse border border-slate-700/50" />
-          <div className="w-32 h-9 rounded-xl bg-slate-800/40 animate-pulse border border-slate-700/50" />
-        </div>
-
-        {/* Skeleton KPI Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-          {[1, 2, 3, 4, 5].map((i) => (
-            <div
-              key={i}
-              className="p-4 rounded-2xl border border-slate-800/80 bg-[#091124]/90 flex items-center justify-between shadow-lg"
-            >
-              <div className="space-y-2">
-                <div className="w-20 h-3 bg-slate-800/80 rounded animate-pulse" />
-                <div className="w-12 h-7 bg-slate-800/80 rounded animate-pulse" />
-                <div className="w-24 h-2.5 bg-slate-800/60 rounded animate-pulse" />
-              </div>
-              <div className="w-11 h-11 rounded-xl bg-slate-800/60 border border-slate-700/40 animate-pulse" />
-            </div>
+      <div className="space-y-6 animate-pulse">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="glass-card p-4 h-24 border-slate-800 bg-[#091124]/90 rounded-2xl" />
           ))}
         </div>
-
-        {/* Skeleton Toolbar */}
-        <div className="p-3.5 rounded-2xl border border-slate-800/80 bg-[#091124]/90 flex flex-col lg:flex-row items-center justify-between gap-3 shadow-lg">
-          <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto">
-            <div className="w-64 h-8 bg-slate-800/70 rounded-xl animate-pulse" />
-            <div className="w-28 h-8 bg-slate-800/70 rounded-xl animate-pulse" />
-            <div className="w-28 h-8 bg-slate-800/70 rounded-xl animate-pulse" />
-            <div className="w-32 h-8 bg-slate-800/70 rounded-xl animate-pulse" />
-          </div>
-          <div className="w-36 h-8 bg-slate-800/70 rounded-xl animate-pulse" />
-        </div>
-
-        {/* Skeleton Table */}
-        <div className="rounded-2xl border border-slate-800/80 bg-[#091124]/90 overflow-hidden p-4 space-y-4 shadow-lg">
-          {[...Array(10)].map((_, i) => (
-            <div
-              key={i}
-              className="flex items-center justify-between gap-4 py-3 border-b border-slate-800/50"
-            >
-              <div className="flex items-center gap-3 w-1/4">
-                <div className="w-8 h-8 rounded-lg bg-slate-800/80 animate-pulse flex-shrink-0" />
-                <div className="space-y-1.5 flex-1">
-                  <div className="w-28 h-3.5 bg-slate-800/80 rounded animate-pulse" />
-                  <div className="w-20 h-2.5 bg-slate-800/60 rounded animate-pulse" />
-                </div>
-              </div>
-              <div className="w-24 h-3 bg-slate-800/70 rounded animate-pulse" />
-              <div className="w-24 h-3 bg-slate-800/70 rounded animate-pulse" />
-              <div className="w-24 h-3 bg-slate-800/70 rounded animate-pulse" />
-              <div className="w-16 h-5 bg-slate-800/70 rounded-full animate-pulse" />
-              <div className="w-16 h-2 bg-slate-800/70 rounded animate-pulse" />
-              <div className="w-16 h-2 bg-slate-800/70 rounded animate-pulse" />
-              <div className="w-16 h-2 bg-slate-800/70 rounded animate-pulse" />
-              <div className="w-16 h-3 bg-slate-800/70 rounded animate-pulse" />
-              <div className="w-20 h-7 bg-slate-800/70 rounded-lg animate-pulse" />
-            </div>
-          ))}
-        </div>
+        <div className="glass-card p-6 h-96 border-slate-800 bg-[#091124]/90 rounded-2xl" />
       </div>
     );
   }
 
   return (
     <div className="space-y-6 font-sans">
-      {/* Action Notification Banner */}
+      {/* Toast Feedback */}
       {actionSuccessMessage && (
-        <div className="p-3.5 rounded-xl bg-emerald-950/70 border border-emerald-500/40 text-emerald-300 text-xs flex items-center gap-2.5 shadow-lg shadow-emerald-950/40 animate-in fade-in slide-in-from-top-2">
-          <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-          <span>{actionSuccessMessage}</span>
+        <div className="p-3.5 rounded-xl bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 text-xs flex items-center justify-between shadow-lg shadow-emerald-950/50 animate-fade-in">
+          <div className="flex items-center gap-2.5">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span className="font-medium">{actionSuccessMessage}</span>
+          </div>
+          <button
+            onClick={() => setActionSuccessMessage(null)}
+            className="text-emerald-400 hover:text-emerald-200 cursor-pointer"
+          >
+            ×
+          </button>
         </div>
       )}
 
-      {/* In-Page Action Bar */}
-      <div className="flex items-center justify-end gap-2.5">
-        <button
-          type="button"
-          onClick={handleExportCsv}
-          className="px-3.5 py-2 rounded-xl border border-slate-700/80 bg-[#091124] hover:bg-slate-800 text-xs font-medium text-slate-200 flex items-center gap-2 transition-colors cursor-pointer shadow-sm"
-          title="Export devices list to CSV"
-        >
-          <Download className="w-3.5 h-3.5 text-slate-400" />
-          <span>Export CSV</span>
-        </button>
-      </div>
-
-      {/* Row 1: 5 Status KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+      {/* Row 1: Top 5 Health KPI Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
         {kpiCards.map((card, i) => (
           <div
             key={i}
-            className="glass-card p-4 flex items-center justify-between border-slate-800/80 bg-[#091124]/90 hover:border-slate-700 transition-colors shadow-lg"
+            className="glass-card p-4 flex items-center justify-between border-slate-800/80 bg-[#091124]/90 shadow-lg"
           >
             <div>
-              <p className="text-xs font-medium text-slate-400 tracking-wide">{card.title}</p>
-              <h3 className="text-2xl font-bold text-white mt-1 font-sans tracking-tight">
+              <p className="text-xs font-medium text-slate-400 tracking-wide">
+                {card.title}
+              </p>
+              <h3 className="text-2xl font-bold text-white mt-1 tracking-tight font-sans">
                 {card.value}
               </h3>
               <p className={`text-[11px] font-medium mt-1 ${card.deltaColor}`}>{card.delta}</p>
             </div>
-            <div
-              className={`w-11 h-11 rounded-xl border flex items-center justify-center flex-shrink-0 ${card.iconBg}`}
-            >
+            <div className={`w-11 h-11 rounded-xl border flex items-center justify-center flex-shrink-0 ${card.iconBg}`}>
               {card.icon}
             </div>
           </div>
         ))}
       </div>
 
-      {/* Row 2: Unified Filter & Search Toolbar */}
-      <div className="glass-card p-3.5 border-slate-800/80 bg-[#091124]/90 shadow-lg flex flex-col lg:flex-row items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto">
-          {/* Search Input */}
-          <div className="relative w-full sm:w-64">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+      {/* Row 2: Unified Filter Toolbar */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-2 border-b border-slate-800/80">
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* Search bar */}
+          <div className="relative w-64 sm:w-72">
+            <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2.5" />
             <input
               type="text"
+              placeholder="Search hostname, IP, model..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search hostname or IP..."
-              className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-900/90 border border-slate-700/80 rounded-xl text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors font-sans"
+              className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-slate-950/70 border border-slate-800 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-brand-blue"
             />
           </div>
 
-          {/* Status Filter */}
+          {/* Status selector */}
           <select
             value={selectedStatus}
             onChange={(e) => setSelectedStatus(e.target.value)}
-            className="text-xs bg-slate-900/90 border border-slate-700/80 rounded-xl px-3 py-1.5 text-slate-300 focus:outline-none focus:border-blue-500 cursor-pointer"
+            className="text-xs bg-slate-900 border border-slate-700/80 rounded-xl px-3 py-1.5 text-slate-300 focus:outline-none focus:border-blue-500 cursor-pointer"
           >
-            <option value="ALL">All Status</option>
+            <option value="ALL">All Statuses</option>
             <option value="ONLINE">Online</option>
             <option value="WARNING">Warning</option>
             <option value="CRITICAL">Critical</option>
             <option value="ISOLATED">Isolated</option>
             <option value="OFFLINE">Offline</option>
-            <option value="MAINTENANCE">Maintenance</option>
-            <option value="DECOMMISSIONED">Decommissioned</option>
           </select>
 
-          {/* Types Filter */}
+          {/* OS/Type filter */}
           <select
             value={selectedType}
             onChange={(e) => setSelectedType(e.target.value)}
-            className="text-xs bg-slate-900/90 border border-slate-700/80 rounded-xl px-3 py-1.5 text-slate-300 focus:outline-none focus:border-blue-500 cursor-pointer"
+            className="text-xs bg-slate-900 border border-slate-700/80 rounded-xl px-3 py-1.5 text-slate-300 focus:outline-none focus:border-blue-500 cursor-pointer"
           >
-            <option value="ALL">All OS / Types</option>
+            <option value="ALL">All Operating Systems</option>
             <option value="Linux">Linux</option>
             <option value="Windows">Windows</option>
             <option value="Ubuntu">Ubuntu</option>
             <option value="Server">Server</option>
           </select>
 
-          {/* Locations Filter */}
-          <select
-            value={selectedLocation}
-            onChange={(e) => setSelectedLocation(e.target.value)}
-            className="text-xs bg-slate-900/90 border border-slate-700/80 rounded-xl px-3 py-1.5 text-slate-300 focus:outline-none focus:border-blue-500 cursor-pointer"
+          {/* Location filter */}
+          {availableLocations.length > 0 && (
+            <select
+              value={selectedLocation}
+              onChange={(e) => setSelectedLocation(e.target.value)}
+              className="text-xs bg-slate-900 border border-slate-700/80 rounded-xl px-3 py-1.5 text-slate-300 focus:outline-none focus:border-blue-500 cursor-pointer"
+            >
+              <option value="ALL">All Locations</option>
+              {availableLocations.map((loc) => (
+                <option key={loc} value={loc}>
+                  {loc}
+                </option>
+              ))}
+            </select>
+          )}
+
+          {/* CSV Export */}
+          <button
+            type="button"
+            onClick={handleExportCsv}
+            className="px-3 py-1.5 rounded-xl border border-slate-700/80 bg-slate-900/60 hover:bg-slate-800 text-xs font-medium text-slate-300 flex items-center gap-1.5 transition-colors cursor-pointer"
+            title="Export filtered records to CSV"
           >
-            <option value="ALL">All Locations</option>
-            {availableLocations.map((loc) => (
-              <option key={loc} value={loc}>
-                {loc}
-              </option>
-            ))}
-          </select>
+            <Download className="w-3.5 h-3.5 text-purple-400" />
+            <span>CSV</span>
+          </button>
         </div>
 
-        {/* Right side: Live indicator and Refresh */}
+        {/* Live sync pill & Refresh */}
         <div className="flex items-center gap-2.5 self-end lg:self-auto">
           <span className="text-[11px] font-mono text-emerald-400 bg-emerald-950/50 border border-emerald-500/30 px-2.5 py-1 rounded-xl flex items-center gap-1.5 shadow-sm">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            Live Fleet ({total} Enrolled)
+            Live Workstations ({total} Enrolled)
           </span>
 
-          {/* Refresh button */}
           <button
             type="button"
             onClick={() => setRefreshIndex((p) => p + 1)}
-            disabled={isLoadingFleet}
+            disabled={isLoading}
             className="px-3 py-1.5 rounded-xl border border-slate-700/80 bg-slate-900/60 hover:bg-slate-800 text-xs font-medium text-slate-300 flex items-center gap-1.5 transition-colors cursor-pointer"
           >
-            <RotateCw
-              className={`w-3.5 h-3.5 text-slate-400 ${isLoadingFleet ? "animate-spin text-blue-400" : ""}`}
-            />
-            <span>{isLoadingFleet ? "Syncing..." : "Refresh"}</span>
+            <RotateCw className={`w-3.5 h-3.5 text-slate-400 ${isLoading ? "animate-spin text-blue-400" : ""}`} />
+            <span>{isLoading ? "Syncing..." : "Refresh"}</span>
           </button>
         </div>
       </div>
 
-      {/* Row 3: Main Device Inventory Table */}
+      {/* Row 3: Workstation Inventory Table */}
       <div className="glass-card border-slate-800/80 bg-[#091124]/90 shadow-lg overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
@@ -708,7 +625,7 @@ export default function DevicesPage() {
                     className="w-3.5 h-3.5 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-0 cursor-pointer"
                   />
                 </th>
-                <th className="py-3 px-3 font-semibold text-slate-300">Device Hostname</th>
+                <th className="py-3 px-3 font-semibold text-slate-300">Hostname</th>
                 <th className="py-3 px-3 font-semibold text-slate-300">IP Address</th>
                 <th className="py-3 px-3 font-semibold text-slate-300">OS / Specs</th>
                 <th className="py-3 px-3 font-semibold text-slate-300">Department &amp; Lab</th>
@@ -730,7 +647,6 @@ export default function DevicesPage() {
                       isSelected ? "bg-blue-600/5" : ""
                     }`}
                   >
-                    {/* Checkbox */}
                     <td className="py-3 px-3">
                       <input
                         type="checkbox"
@@ -740,7 +656,6 @@ export default function DevicesPage() {
                       />
                     </td>
 
-                    {/* Device Name */}
                     <td className="py-3 px-3">
                       <div className="flex items-center gap-2.5">
                         <div className="w-8 h-8 rounded-lg bg-slate-800/80 border border-slate-700/60 flex items-center justify-center flex-shrink-0">
@@ -767,23 +682,19 @@ export default function DevicesPage() {
                       </div>
                     </td>
 
-                    {/* IP Address */}
                     <td className="py-3 px-3 font-mono text-[11px] text-slate-300 whitespace-nowrap">
                       {device.ip}
                     </td>
 
-                    {/* Type */}
                     <td className="py-3 px-3 text-slate-300 whitespace-nowrap text-xs font-medium">
                       {device.type}
                     </td>
 
-                    {/* Location */}
                     <td className="py-3 px-3 whitespace-nowrap">
                       <div className="text-xs text-slate-200 font-medium">{device.location}</div>
                       <div className="text-[11px] text-slate-400 font-mono">{device.rack}</div>
                     </td>
 
-                    {/* Status */}
                     <td className="py-3 px-3 whitespace-nowrap">
                       <span className="inline-flex items-center gap-1.5 text-xs font-medium">
                         <span
@@ -817,7 +728,6 @@ export default function DevicesPage() {
                       </span>
                     </td>
 
-                    {/* CPU Usage */}
                     <td className="py-3 px-3 whitespace-nowrap">
                       {renderProgressBar(
                         device.cpu,
@@ -829,7 +739,6 @@ export default function DevicesPage() {
                       )}
                     </td>
 
-                    {/* Memory Usage */}
                     <td className="py-3 px-3 whitespace-nowrap">
                       {renderProgressBar(
                         device.memory,
@@ -841,7 +750,6 @@ export default function DevicesPage() {
                       )}
                     </td>
 
-                    {/* Disk Usage */}
                     <td className="py-3 px-3 whitespace-nowrap">
                       {renderProgressBar(
                         device.disk,
@@ -853,34 +761,29 @@ export default function DevicesPage() {
                       )}
                     </td>
 
-                    {/* Last Seen */}
                     <td className="py-3 px-3 text-[11px] text-slate-400 whitespace-nowrap font-mono">
                       {device.lastSeen}
                     </td>
 
-                    {/* Actions */}
                     <td className="py-3 px-3 whitespace-nowrap">
                       <div className="flex items-center justify-center gap-1.5">
-                        {/* Eye details icon */}
                         <Link
                           href={`/devices/${device.id}`}
-                          title="View Device Telemetry & Specs"
+                          title="Inspect Workstation Telemetry & Specs"
                           className="p-1.5 rounded-lg border border-slate-700/80 bg-slate-900/60 hover:bg-slate-800 text-slate-400 hover:text-blue-400 transition-colors"
                         >
                           <Eye className="w-3.5 h-3.5" />
                         </Link>
 
-                        {/* Edit Workstation Configuration */}
                         <button
                           type="button"
                           onClick={() => handleOpenEditModal(device)}
-                          title="Edit Workstation Configuration"
+                          title="Edit Configuration"
                           className="p-1.5 rounded-lg border border-slate-700/80 bg-slate-900/60 hover:bg-slate-800 text-slate-400 hover:text-cyan-400 transition-colors cursor-pointer"
                         >
                           <Edit className="w-3.5 h-3.5" />
                         </button>
 
-                        {/* Surgical Isolation SOAR Trigger */}
                         <button
                           type="button"
                           onClick={() => setIsolationTarget(device)}
@@ -919,7 +822,7 @@ export default function DevicesPage() {
             <h3 className="text-sm font-semibold text-white">No workstations found</h3>
             <p className="text-xs text-slate-400 max-w-sm mx-auto mt-1">
               {searchQuery || selectedStatus !== "ALL" || selectedLocation !== "ALL"
-                ? "No devices match the selected filters or search criteria. Try resetting filters."
+                ? "No workstations match the selected filters or search criteria. Try resetting filters."
                 : "No workstations are enrolled in the platform yet. Deploy monitoring agents to begin streaming telemetry."}
             </p>
             {(searchQuery || selectedStatus !== "ALL" || selectedLocation !== "ALL") && (
@@ -939,12 +842,12 @@ export default function DevicesPage() {
           </div>
         )}
 
-        {/* Table Footer / Pagination */}
+        {/* Pagination Bar */}
         <div className="p-3.5 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400 select-none">
           <div className="flex items-center gap-3">
             <span>
               Showing {filteredDevices.length > 0 ? (currentPage - 1) * pageSize + 1 : 0} to{" "}
-              {Math.min(currentPage * pageSize, totalDevicesCount)} of {totalDevicesCount} devices
+              {Math.min(currentPage * pageSize, totalDevicesCount)} of {totalDevicesCount} workstations
             </span>
 
             <div className="flex items-center gap-1.5 ml-2">
@@ -1010,10 +913,10 @@ export default function DevicesPage() {
             setEditingDevice(null);
           }}
           title={`Edit Configuration: ${editingDevice.name}`}
-          subtitle={`Update department routing, lab placement, asset identification, and operational state`}
+          subtitle="Update department routing, lab placement, asset identification, and operational state"
           maxWidth="lg"
         >
-          <form onSubmit={handleSaveEdit} className="space-y-4 text-xs">
+          <form onSubmit={handleSaveEdit} className="space-y-4 text-xs font-sans">
             {editError && (
               <div className="p-3 rounded-xl bg-rose-950/60 border border-rose-500/40 text-rose-300 text-xs flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0" />
@@ -1021,7 +924,6 @@ export default function DevicesPage() {
               </div>
             )}
 
-            {/* Read-only Hardware Specs Banner */}
             <div className="p-3 rounded-xl border border-slate-800 bg-slate-900/60 flex items-center justify-between text-slate-400 font-mono text-[11px]">
               <div>
                 <span className="text-slate-500">IP: </span>
@@ -1174,16 +1076,16 @@ export default function DevicesPage() {
             </>
           }
         >
-          <div className="space-y-3">
+          <div className="space-y-3 font-sans">
             <p className="text-xs text-slate-300">
               {isolationTarget.is_isolated
                 ? "Rolling back surgical isolation will restore normal inbound and outbound network connectivity to this workstation. The telemetry monitoring agent will remain active."
-                : "Enforcing surgical network isolation severs all unauthorized socket connections and drops inbound/outbound packets to prevent lateral movement and C2 beaconing. The host operating system will NOT reboot, and active legitimate researcher state."}
+                : "Enforcing surgical network isolation severs all unauthorized socket connections and drops inbound/outbound packets to prevent lateral movement and C2 beaconing. The host operating system will NOT reboot, and active research workload states are preserved."}
             </p>
 
             <div className="p-3 rounded-xl border border-slate-800 bg-slate-900/80 text-xs font-mono space-y-1">
               <div className="flex justify-between text-slate-400">
-                <span>Device Classification:</span>
+                <span>Workstation Classification:</span>
                 <span className="text-white font-bold">{isolationTarget.type}</span>
               </div>
               <div className="flex justify-between text-slate-400">
@@ -1200,7 +1102,6 @@ export default function DevicesPage() {
           </div>
         </Modal>
       )}
-
     </div>
   );
 }
